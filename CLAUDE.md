@@ -17,6 +17,20 @@ All research and design documents are in `docs/research/`:
 - `rust-ecosystem.md` - Rust crates for BAM/FASTQ/VCF handling
 - `input-specification.md` - Proposed YAML configuration format
 
+## Feature Requirements
+
+Initial requirements documentation is in `docs/features/initial-requirements/`:
+
+- `core-simulation.md` - Read generation, fragment models, coverage, quality scores
+- `variant-spike-in.md` - SNV, indel, MNV, SV, CNV injection with stochastic VAF
+- `tumour-model.md` - Purity, clonal architecture, ploidy, copy number
+- `umi-duplex.md` - UMI barcodes, simplex/duplex modes, PCR families
+- `liquid-biopsy.md` - cfDNA fragmentation, ctDNA enrichment, low TF support
+- `artifacts.md` - FFPE damage, oxoG, GC bias, PCR duplicates/errors
+- `io-formats.md` - YAML config, VCF/BED input, FASTQ/BAM/truth VCF output
+- `cli-interface.md` - Subcommands, threading, progress, logging
+- `performance.md` - Parallelization, streaming, memory, throughput targets
+
 ## Key Design Decisions
 
 - **Rust** for performance (high-coverage WGS simulation is compute-intensive) and single-binary distribution

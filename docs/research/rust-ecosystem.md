@@ -93,6 +93,26 @@ All support `.fai` indexed random access, essential for extracting reference seq
 
 ---
 
+## Compression
+
+| Crate | Purpose | Notes |
+|-------|---------|-------|
+| **flate2** | DEFLATE/gzip/zlib | Standard Rust compression. Supports miniz_oxide (pure Rust) and zlib-ng backends. Single-threaded. |
+| **gzp** | Multi-threaded gzip/BGZF | Drop-in replacement for `Write` that compresses blocks in parallel (pigz-style). Supports BGZF block format (64 KB blocks) used in BAM. Uses libdeflater backend by default for best performance. **Recommended for FASTQ gzip and BGZF.** |
+| **libdeflater** | High-performance DEFLATE | Faster than flate2 for known-size inputs. Used as gzp backend. |
+| **bgzip** | BGZF format | Pure Rust BGZF reader/writer. Alternative to gzp for BAM-style block gzip. |
+
+---
+
+## BED File Parsing
+
+| Crate | Purpose | Notes |
+|-------|---------|-------|
+| **noodles-bed** | BED reader/writer | Part of noodles ecosystem. Pure Rust, spec-compliant. **Recommended.** |
+| **rust-bio** | BED I/O | Basic BED reader in `bio::io::bed`. Simpler API but less feature-complete. |
+
+---
+
 ## CLI and Configuration
 
 | Crate | Purpose |
@@ -101,6 +121,17 @@ All support `.fai` indexed random access, essential for extracting reference seq
 | **serde** | Serialization/deserialization framework |
 | **serde_yaml** | YAML config parsing |
 | **toml** | TOML config parsing (alternative) |
+
+---
+
+## Progress Reporting and Logging
+
+| Crate | Purpose | Notes |
+|-------|---------|-------|
+| **indicatif** | Progress bars and spinners | Configurable styles, multi-bar support, ETA estimation. Widely used. **Recommended.** |
+| **tracing** | Structured logging/diagnostics | Span-based instrumentation, multiple subscribers, async-aware. Superior to log+env_logger for complex apps. **Recommended over log.** |
+| **tracing-subscriber** | tracing output formatters | JSON output, filtering, layered subscribers. |
+| **env_logger** | Simple env-based log filtering | Simpler alternative if tracing is overkill. |
 
 ---
 
@@ -114,12 +145,33 @@ All support `.fai` indexed random access, essential for extracting reference seq
 - Demonstrates that complex cancer bioinformatics tools can be built successfully in Rust
 
 ### biotest
-- Generates random test data for bioinformatics
+- **URL**: https://github.com/natir/biotest
+- Generates random test data for bioinformatics (FASTA, FASTQ, VCF, sequences, quality strings)
 - Very basic; not cancer-specific
 - Part of the rust-bio ecosystem
 
+### rustybam
+- **URL**: https://github.com/vollgerlab/rustybam
+- Bioinformatics toolkit for manipulation of BAM, BED, FASTA, FASTQ files
+- Useful reference for Rust BAM/BED manipulation patterns
+
 ### Notable absence
 **No Rust-based cancer sequencing simulator exists.** The ecosystem has strong infrastructure (I/O, calling) but no simulation tools. VarForge would be the first.
+
+---
+
+## What VarForge Must Build (No Existing Crate)
+
+These capabilities have no existing Rust crate and must be implemented:
+
+- **GC bias coverage modeling** — no Rust crate models GC-dependent coverage curves; must implement from literature (e.g., ReSeq/NEAT approach)
+- **Illumina error profiles** — no Rust crate provides position-dependent quality/error models; must learn from BAM or use parametric model
+- **cfDNA fragment size distribution** — nucleosomal periodicity model must be built from scratch
+- **Mixture distributions** — rand_distr provides individual distributions (Normal, LogNormal, Binomial, NegativeBinomial) but no mixture/composite; must implement weighted mixture sampling
+- **Variant spike-in engine** — core novel contribution; no existing crate
+- **Tumour clonal architecture** — no existing Rust crate
+- **UMI/duplex simulation** — no existing crate for UMI family generation with PCR amplification modeling
+- **FFPE/oxoG artifact injection** — no existing crate
 
 ---
 
@@ -127,18 +179,24 @@ All support `.fai` indexed random access, essential for extracting reference seq
 
 ```toml
 [dependencies]
-rust-htslib = "0.47"        # BAM/VCF I/O
-noodles-fasta = "0.42"      # Reference genome access
+rust-htslib = "0.47"        # BAM/VCF I/O, CIGAR manipulation, aux tags
+noodles-fasta = "0.42"      # Reference genome indexed access (pure Rust)
+noodles-bed = "0.15"        # BED file parsing (pure Rust)
 seq_io = "0.3"              # Fast FASTQ writing
-rust-bio = "1.6"            # Pairwise alignment
-rand = "0.8"                # RNG
-rand_distr = "0.4"          # Statistical distributions
-rayon = "1.10"              # Parallelism
+rust-bio = "1.6"            # Pairwise alignment, BED I/O
+rand = "0.8"                # RNG with seedable generators
+rand_distr = "0.4"          # Normal, LogNormal, Binomial, NegBinomial, etc.
+statrs = "0.17"             # PDF/CDF/quantile functions
+rayon = "1.10"              # Data parallelism (per-region work stealing)
+gzp = "0.11"                # Multi-threaded gzip/BGZF compression
+flate2 = "1.0"              # Single-threaded gzip (fallback)
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
-log = "0.4"
-env_logger = "0.11"
+serde_json = "1"            # Simulation manifest output
+tracing = "0.1"             # Structured logging
+tracing-subscriber = "0.3"  # Log output formatting
+indicatif = "0.17"          # Progress bars
 ```
 
 Note: Version numbers are approximate; check crates.io for latest versions at implementation time.
