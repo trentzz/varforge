@@ -170,7 +170,7 @@ mod tests {
             alt_seq: vec![b'T', b'A'],
         };
         assert!(spike_mnv(&mut read, 100, &mutation));
-        assert_eq!(&read.seq, b"ATAACGT"); // wait, pos 101 offset 1, so CG -> TA
+        assert_eq!(&read.seq, b"ATATACGT"); // pos 101 offset 1, CG -> TA
     }
 
     #[test]
