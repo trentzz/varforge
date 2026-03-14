@@ -30,7 +30,7 @@ Testing and benchmarking tools such as:
 
 ## Project Status
 
-**Research phase.** See [docs/research/](docs/research/) for detailed analysis of existing tools, identified gaps, and technical requirements.
+**Requirements phase.** See [docs/research/](docs/research/) for background research and [docs/features/initial-requirements/](docs/features/initial-requirements/) for structured feature requirements.
 
 ## Research Documentation
 

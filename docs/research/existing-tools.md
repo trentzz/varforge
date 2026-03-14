@@ -176,6 +176,84 @@
 
 ---
 
+## Rust Ecosystem Crates (Libraries, Not Standalone Tools)
+
+These are Rust crates VarForge will leverage rather than reimplement.
+
+### rust-htslib
+- **URL**: https://github.com/rust-bio/rust-htslib
+- **Language**: Rust (FFI to C htslib)
+- **What it does**: BAM/SAM/CRAM and VCF/BCF read/write. Multi-threaded BAM compression. CIGAR manipulation. Auxiliary tag read/write (RX, MI, SA, etc.).
+- **Relevance**: Primary BAM and truth VCF I/O for VarForge.
+
+### noodles
+- **URL**: https://github.com/zaeleus/noodles
+- **Language**: Rust (pure, no C deps)
+- **What it does**: Spec-compliant readers/writers for BAM, SAM, CRAM, VCF, BCF, FASTA, FASTQ, BED, GFF3, BGZF, CSI, tabix. Async support.
+- **Relevance**: `noodles-fasta` for indexed reference genome access, `noodles-bed` for BED file parsing. API still experimental.
+
+### seq_io
+- **URL**: https://crates.io/crates/seq_io
+- **Language**: Rust
+- **What it does**: Zero-allocation FASTA/FASTQ parser and writer. Fastest Rust FASTQ I/O.
+- **Relevance**: FASTQ output writing.
+
+### rust-bio
+- **URL**: https://rust-bio.github.io/
+- **Language**: Rust
+- **What it does**: Pairwise alignment (Smith-Waterman, Needleman-Wunsch), sequence utilities, pattern matching, BED/FASTA/FASTQ I/O.
+- **Relevance**: Local realignment after mutation spiking for CIGAR recalculation.
+
+### biotest
+- **URL**: https://github.com/natir/biotest
+- **Language**: Rust
+- **What it does**: Generates random FASTA, FASTQ, VCF, and quality data for testing.
+- **Relevance**: Reference for random bioinformatics data generation patterns. Not cancer-specific.
+
+### gzp
+- **URL**: https://github.com/sstadick/gzp
+- **Language**: Rust
+- **What it does**: Multi-threaded gzip and BGZF compression. Drop-in Write replacement. Uses libdeflater backend for best performance.
+- **Relevance**: Multi-threaded FASTQ gzip output and BGZF block compression.
+
+### rand + rand_distr
+- **URL**: https://crates.io/crates/rand_distr
+- **Language**: Rust
+- **What it does**: Sampling from Normal, LogNormal, Binomial, NegativeBinomial, Poisson, Gamma, Beta, and many other distributions.
+- **Relevance**: Fragment size sampling, stochastic VAF, UMI generation, PCR family sizes. No mixture distribution support (must implement).
+
+### statrs
+- **URL**: https://crates.io/crates/statrs
+- **Language**: Rust
+- **What it does**: Statistical distributions with PDF, CDF, and quantile functions. Complements rand_distr.
+- **Relevance**: Distribution parameter fitting, probability calculations.
+
+### rayon
+- **URL**: https://crates.io/crates/rayon
+- **Language**: Rust
+- **What it does**: Data parallelism via parallel iterators with work-stealing scheduler.
+- **Relevance**: Per-region parallel read generation.
+
+### indicatif
+- **URL**: https://crates.io/crates/indicatif
+- **Language**: Rust
+- **What it does**: Progress bars, spinners, multi-bar support, ETA estimation.
+- **Relevance**: Terminal progress reporting during simulation.
+
+### tracing
+- **URL**: https://crates.io/crates/tracing
+- **Language**: Rust
+- **What it does**: Structured, span-based diagnostics and logging. Supports JSON output, filtering, async.
+- **Relevance**: Structured logging throughout VarForge.
+
+### Varlociraptor
+- **URL**: https://github.com/varlociraptor/varlociraptor
+- **Language**: Rust
+- **What it does**: Unified variant caller for SNVs, MNVs, indels, SVs. Grammar-based scenario config.
+- **Relevance**: Reference implementation demonstrating complex cancer bioinformatics in Rust. Not a simulator but proves the approach.
+
+---
+
 ## Benchmarking Frameworks and Truth Sets
 
 ### ICGC-TCGA DREAM Challenge
