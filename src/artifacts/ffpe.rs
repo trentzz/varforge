@@ -10,9 +10,10 @@ pub fn inject_ffpe_damage<R: Rng>(
     is_reverse_strand: bool,
     rng: &mut R,
 ) {
+    let seq_len = seq.len();
     for (pos, base) in seq.iter_mut().enumerate() {
         // Damage is slightly higher near fragment ends
-        let position_factor = end_enrichment(pos, seq.len());
+        let position_factor = end_enrichment(pos, seq_len);
         let effective_rate = damage_rate * position_factor;
 
         if is_reverse_strand {

@@ -5,12 +5,18 @@ edition = "2021"
 description = "Synthetic cancer sequencing test data generator"
 
 [dependencies]
-# BAM/VCF I/O
-rust-htslib = "0.47"
-
-# Reference genome access (pure Rust)
+# Pure Rust bioinformatics I/O (no C dependencies)
+noodles-bam = "0.68"
+noodles-sam = "0.64"
+noodles-vcf = "0.63"
+noodles-bcf = "0.59"
 noodles-fasta = "0.42"
+noodles-fastq = "0.14"
 noodles-bed = "0.15"
+noodles-bgzf = "0.33"
+noodles-csi = "0.38"
+noodles-core = "0.15"
+noodles-tabix = "0.43"
 
 # Fast FASTQ writing
 seq_io = "0.3"
