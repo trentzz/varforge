@@ -1,0 +1,179 @@
+use rand::Rng;
+use rand_distr::{Distribution, LogNormal, Normal};
+
+/// Samples fragment sizes according to a configured model.
+pub trait FragmentSampler: Send + Sync {
+    fn sample<R: Rng>(&self, rng: &mut R) -> usize;
+}
+
+/// Standard WGS fragment size: Gaussian distribution.
+pub struct NormalFragmentSampler {
+    dist: Normal<f64>,
+    min_size: usize,
+}
+
+impl NormalFragmentSampler {
+    pub fn new(mean: f64, sd: f64) -> Self {
+        Self {
+            dist: Normal::new(mean, sd).expect("invalid normal parameters"),
+            min_size: 50,
+        }
+    }
+}
+
+impl FragmentSampler for NormalFragmentSampler {
+    fn sample<R: Rng>(&self, rng: &mut R) -> usize {
+        let size = self.dist.sample(rng).round() as i64;
+        size.max(self.min_size as i64) as usize
+    }
+}
+
+/// cfDNA fragment size: mixture of nucleosomal peaks with 10bp periodicity.
+pub struct CfdnaFragmentSampler {
+    mono_dist: Normal<f64>,
+    di_dist: Normal<f64>,
+    mono_weight: f64,
+    ctdna_dist: Normal<f64>,
+    ctdna_fraction: f64,
+    min_size: usize,
+}
+
+impl CfdnaFragmentSampler {
+    /// Create a cfDNA sampler.
+    ///
+    /// - `mono_peak`: mononucleosomal peak (default ~167)
+    /// - `di_peak`: dinucleosomal peak (default ~334)
+    /// - `mono_weight`: weight of mono vs di peak (default 0.85)
+    /// - `ctdna_fraction`: fraction of fragments that are tumour-derived (shorter, ~143bp)
+    pub fn new(mono_peak: f64, di_peak: f64, mono_weight: f64, ctdna_fraction: f64) -> Self {
+        Self {
+            mono_dist: Normal::new(mono_peak, 20.0).unwrap(),
+            di_dist: Normal::new(di_peak, 30.0).unwrap(),
+            mono_weight,
+            ctdna_dist: Normal::new(143.0, 15.0).unwrap(),
+            ctdna_fraction,
+            min_size: 50,
+        }
+    }
+
+    /// Add 10bp periodicity sub-peaks to a sampled size.
+    fn apply_periodicity<R: Rng>(&self, size: f64, rng: &mut R) -> f64 {
+        // DNA wraps around nucleosomes with ~10bp pitch
+        // Add a small sinusoidal modulation
+        let period_phase = (size / 10.0).fract();
+        let adjustment = (period_phase * 2.0 * std::f64::consts::PI).sin() * 2.0;
+        let noise: f64 = rng.gen_range(-1.0..1.0);
+        size + adjustment + noise
+    }
+}
+
+impl FragmentSampler for CfdnaFragmentSampler {
+    fn sample<R: Rng>(&self, rng: &mut R) -> usize {
+        let is_ctdna = rng.gen::<f64>() < self.ctdna_fraction;
+
+        let raw_size = if is_ctdna {
+            self.ctdna_dist.sample(rng)
+        } else if rng.gen::<f64>() < self.mono_weight {
+            self.mono_dist.sample(rng)
+        } else {
+            self.di_dist.sample(rng)
+        };
+
+        let size = self.apply_periodicity(raw_size, rng);
+        (size.round() as i64).max(self.min_size as i64) as usize
+    }
+}
+
+/// PCR family size sampler using a log-normal distribution.
+pub struct PcrFamilySizeSampler {
+    dist: LogNormal<f64>,
+}
+
+impl PcrFamilySizeSampler {
+    pub fn new(mean: f64, sd: f64) -> Self {
+        // Convert mean/sd of the actual family size to log-space parameters
+        let variance = sd * sd;
+        let mu = (mean * mean / (mean * mean + variance).sqrt()).ln();
+        let sigma = (1.0 + variance / (mean * mean)).ln().sqrt();
+        Self {
+            dist: LogNormal::new(mu, sigma).expect("invalid lognormal parameters"),
+        }
+    }
+
+    pub fn sample<R: Rng>(&self, rng: &mut R) -> usize {
+        let size = self.dist.sample(rng).round() as usize;
+        size.max(1) // at least 1 copy
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    #[test]
+    fn test_normal_fragment_sampler() {
+        let sampler = NormalFragmentSampler::new(300.0, 50.0);
+        let mut rng = StdRng::seed_from_u64(42);
+        let sizes: Vec<usize> = (0..1000).map(|_| sampler.sample(&mut rng)).collect();
+
+        let mean = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
+        assert!((mean - 300.0).abs() < 10.0, "mean {} too far from 300", mean);
+        assert!(sizes.iter().all(|&s| s >= 50), "no fragment below minimum");
+    }
+
+    #[test]
+    fn test_cfdna_fragment_sampler() {
+        let sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.0);
+        let mut rng = StdRng::seed_from_u64(42);
+        let sizes: Vec<usize> = (0..10000).map(|_| sampler.sample(&mut rng)).collect();
+
+        let mean = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
+        // With 85% mono (167) and 15% di (334), expected mean ~192
+        assert!(mean > 150.0 && mean < 230.0, "cfDNA mean {} unexpected", mean);
+    }
+
+    #[test]
+    fn test_cfdna_ctdna_shorter() {
+        let sampler_normal = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.0);
+        let sampler_ctdna = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 1.0);
+        let mut rng = StdRng::seed_from_u64(42);
+
+        let normal_mean: f64 = (0..5000)
+            .map(|_| sampler_normal.sample(&mut rng) as f64)
+            .sum::<f64>() / 5000.0;
+        let ctdna_mean: f64 = (0..5000)
+            .map(|_| sampler_ctdna.sample(&mut rng) as f64)
+            .sum::<f64>() / 5000.0;
+
+        assert!(
+            ctdna_mean < normal_mean,
+            "ctDNA mean ({}) should be shorter than normal cfDNA ({})",
+            ctdna_mean,
+            normal_mean
+        );
+    }
+
+    #[test]
+    fn test_pcr_family_size_sampler() {
+        let sampler = PcrFamilySizeSampler::new(3.0, 1.5);
+        let mut rng = StdRng::seed_from_u64(42);
+        let sizes: Vec<usize> = (0..10000).map(|_| sampler.sample(&mut rng)).collect();
+
+        assert!(sizes.iter().all(|&s| s >= 1), "min family size is 1");
+        let mean = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
+        assert!((mean - 3.0).abs() < 1.0, "mean {} too far from 3.0", mean);
+    }
+
+    #[test]
+    fn test_deterministic_with_seed() {
+        let sampler = NormalFragmentSampler::new(300.0, 50.0);
+        let mut rng1 = StdRng::seed_from_u64(123);
+        let mut rng2 = StdRng::seed_from_u64(123);
+
+        let sizes1: Vec<usize> = (0..100).map(|_| sampler.sample(&mut rng1)).collect();
+        let sizes2: Vec<usize> = (0..100).map(|_| sampler.sample(&mut rng2)).collect();
+        assert_eq!(sizes1, sizes2, "same seed must produce same results");
+    }
+}
