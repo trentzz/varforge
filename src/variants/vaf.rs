@@ -4,6 +4,8 @@ use rand_distr::{Binomial, Distribution};
 /// Compute expected VAF from tumour model parameters.
 ///
 /// VAF = CCF * multiplicity * purity / (purity * CN_tumour + (1 - purity) * CN_normal)
+#[must_use]
+#[allow(dead_code)]
 pub fn expected_vaf(
     ccf: f64,
     multiplicity: u32,

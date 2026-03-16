@@ -1,10 +1,19 @@
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
 
-/// Generates base quality scores for a read.
+/// Generates base quality scores and injects sequencing errors into reads.
 pub trait QualityModel: Send + Sync {
     /// Generate quality scores for a read of the given length.
     fn generate_qualities<R: Rng>(&self, read_length: usize, rng: &mut R) -> Vec<u8>;
+
+    /// Inject base-call errors into `sequence` consistent with `qualities`.
+    ///
+    /// Implementations should mutate bases according to their model's error
+    /// distribution. The default implementation performs a uniform random
+    /// substitution weighted only by the Phred error probability.
+    fn inject_errors<R: Rng>(&self, sequence: &mut [u8], qualities: &[u8], rng: &mut R) {
+        inject_errors(sequence, qualities, rng);
+    }
 
     /// Given a quality score, return the probability of an error.
     fn error_probability(quality: u8) -> f64 {
@@ -111,7 +120,7 @@ mod tests {
         for _ in 0..100 {
             let quals = model.generate_qualities(150, &mut rng);
             for &q in &quals {
-                assert!(q >= 2 && q <= 41, "quality {} out of bounds", q);
+                assert!((2..=41).contains(&q), "quality {} out of bounds", q);
             }
         }
     }

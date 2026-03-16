@@ -85,10 +85,12 @@ impl FragmentSampler for CfdnaFragmentSampler {
 }
 
 /// PCR family size sampler using a log-normal distribution.
+#[allow(dead_code)]
 pub struct PcrFamilySizeSampler {
     dist: LogNormal<f64>,
 }
 
+#[allow(dead_code)]
 impl PcrFamilySizeSampler {
     pub fn new(mean: f64, sd: f64) -> Self {
         // Convert mean/sd of the actual family size to log-space parameters

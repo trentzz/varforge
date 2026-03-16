@@ -2,12 +2,30 @@
 name = "varforge"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.74"
 description = "Synthetic cancer sequencing test data generator"
+repository = "https://github.com/varforge/varforge"
+homepage = "https://github.com/varforge/varforge"
+documentation = "https://docs.rs/varforge"
+license = "MIT"
+readme = "README.md"
+keywords = ["bioinformatics", "sequencing", "cancer", "simulation", "genomics"]
+categories = ["science", "command-line-utilities", "simulation"]
+exclude = [
+    "docs/paper/**",
+    "docs/benchmarking/**",
+    "docs/reviewcycle/**",
+    "docs/research/**",
+    "docs/plan/**",
+    "benchmark_output/**",
+    "scripts/**",
+    ".github/**",
+]
 
 [dependencies]
 # Pure Rust bioinformatics I/O (no C dependencies)
 noodles-bam = "0.68"
-noodles-sam = "0.64"
+noodles-sam = "0.65"
 noodles-vcf = "0.63"
 noodles-bcf = "0.59"
 noodles-fasta = "0.42"
@@ -31,10 +49,10 @@ statrs = "0.17"
 
 # Parallelism
 rayon = "1.10"
+crossbeam-channel = "0.5"
 
-# Compression
-gzp = "0.11"
-flate2 = "1.0"
+# Compression — pure-Rust backend (miniz_oxide) avoids the libz-sys/cmake dependency
+flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -58,3 +76,12 @@ thiserror = "2"
 [dev-dependencies]
 tempfile = "3"
 approx = "0.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "varforge_benchmarks"
+harness = false
+
+[profile.release]
+lto = "thin"
+strip = "symbols"

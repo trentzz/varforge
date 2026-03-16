@@ -15,10 +15,12 @@ impl Region {
         }
     }
 
+    #[must_use]
     pub fn len(&self) -> u64 {
-        self.end - self.start
+        self.end.saturating_sub(self.start)
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.start >= self.end
     }
@@ -48,10 +50,13 @@ impl Read {
         Self { seq, qual }
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.seq.len()
     }
 
+    #[must_use]
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.seq.is_empty()
     }
@@ -63,6 +68,20 @@ pub enum MutationType {
     Snv { pos: u64, ref_base: u8, alt_base: u8 },
     Indel { pos: u64, ref_seq: Vec<u8>, alt_seq: Vec<u8> },
     Mnv { pos: u64, ref_seq: Vec<u8>, alt_seq: Vec<u8> },
+    /// Structural variant (>50 bp) with breakend notation for truth VCF.
+    #[allow(dead_code)]
+    Sv { sv_type: SvType, chrom: String, start: u64, end: u64 },
+}
+
+/// Structural variant type classifications.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SvType {
+    Deletion,
+    Insertion,
+    Inversion,
+    Duplication,
+    Translocation,
 }
 
 /// A variant with its genomic location and target VAF.

@@ -65,7 +65,7 @@ pub fn spike_indel(
 
             if alt_seq.len() > ref_seq.len() {
                 // Insertion
-                let insert_len = alt_seq.len() - ref_seq.len();
+                let _insert_len = alt_seq.len() - ref_seq.len();
                 let mut new_seq = Vec::with_capacity(original_len);
                 new_seq.extend_from_slice(&read.seq[..offset]);
                 new_seq.extend_from_slice(alt_seq);
@@ -93,7 +93,7 @@ pub fn spike_indel(
                 read.qual = new_qual;
             } else {
                 // Deletion
-                let del_len = ref_seq.len() - alt_seq.len();
+                let _del_len = ref_seq.len() - alt_seq.len();
                 let mut new_seq = Vec::with_capacity(original_len);
                 new_seq.extend_from_slice(&read.seq[..offset]);
                 new_seq.extend_from_slice(alt_seq);

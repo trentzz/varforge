@@ -6,6 +6,7 @@ use crate::core::types::ReadPair;
 /// A UMI family: one original molecule and its PCR duplicates.
 #[derive(Debug, Clone)]
 pub struct UmiFamily {
+    #[allow(dead_code)]
     pub umi: Vec<u8>,
     pub original: ReadPair,
     pub family_size: usize,

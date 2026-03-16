@@ -1,1 +1,24 @@
 /target
+
+# Large genomic output files
+*.bam
+*.bai
+*.fastq.gz
+*.fq.gz
+*.vcf.gz
+*.tbi
+*.fa
+*.fasta
+*.fai
+*.csi
+
+benchmark_output/
+
+# LaTeX auxiliary files
+docs/paper/*.aux
+docs/paper/*.bbl
+docs/paper/*.blg
+docs/paper/*.log
+docs/paper/*.out
+docs/paper/*.toc
+docs/paper/*.pdf

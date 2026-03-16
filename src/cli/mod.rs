@@ -1,3 +1,7 @@
+pub mod cancer_presets;
+pub mod edit;
+pub mod learn_profile;
+pub mod presets;
 pub mod simulate;
 pub mod validate;
 
@@ -31,6 +35,10 @@ pub enum Command {
     Simulate(SimulateOpts),
     /// Validate a YAML config without running
     Validate(ValidateOpts),
+    /// Spike variants into an existing BAM file
+    Edit(edit::EditOpts),
+    /// Learn an error/quality profile from a real BAM file
+    LearnProfile(learn_profile::LearnProfileOpts),
 }
 
 #[derive(Parser)]
@@ -51,6 +59,22 @@ pub struct SimulateOpts {
     #[arg(long)]
     pub coverage: Option<f64>,
 
+    /// Override read length (bp)
+    #[arg(long)]
+    pub read_length: Option<usize>,
+
+    /// Override tumour purity (0.0–1.0)
+    #[arg(long)]
+    pub purity: Option<f64>,
+
+    /// Override fragment mean length (bp)
+    #[arg(long)]
+    pub fragment_mean: Option<f64>,
+
+    /// Override fragment length standard deviation (bp)
+    #[arg(long)]
+    pub fragment_sd: Option<f64>,
+
     /// Generate N random mutations (no VCF needed)
     #[arg(long)]
     pub random_mutations: Option<usize>,
@@ -59,7 +83,7 @@ pub struct SimulateOpts {
     #[arg(long)]
     pub vaf_range: Option<String>,
 
-    /// Simulation preset: small, panel, wgs
+    /// Simulation preset: small, panel, wgs, cfdna, ffpe, umi
     #[arg(long)]
     pub preset: Option<String>,
 

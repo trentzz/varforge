@@ -6,6 +6,7 @@ use super::types::Region;
 ///
 /// The factor of 2 accounts for paired-end reads (each pair covers ~2*read_length bases,
 /// minus overlap for short fragments, but we use the simple model).
+#[must_use]
 pub fn read_pairs_for_coverage(region_length: u64, coverage: f64, read_length: usize) -> u64 {
     let n = (coverage * region_length as f64) / (2.0 * read_length as f64);
     n.ceil() as u64
@@ -32,6 +33,7 @@ pub fn partition_regions(
 }
 
 /// Filter regions to only those overlapping a set of target intervals.
+#[allow(dead_code)]
 pub fn intersect_with_targets(regions: &[Region], targets: &[Region]) -> Vec<Region> {
     let mut result = Vec::new();
     for region in regions {
