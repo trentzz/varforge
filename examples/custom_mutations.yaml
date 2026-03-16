@@ -1,0 +1,72 @@
+# custom_mutations.yaml — Spike-in specific mutations from a VCF file
+#
+# Instead of random mutation generation, this configuration reads a
+# user-supplied VCF file containing the exact variants to inject.
+# The VCF may include SNVs, indels, and MNVs with per-record VAF
+# annotations in the INFO field (VAF=0.25) or a fixed VAF is derived
+# from the tumour purity and clone CCF.
+#
+# Typical use cases:
+#   - Benchmarking a variant caller against a known positive set
+#   - Reproducing a specific patient's mutation landscape for tool testing
+#   - Injecting COSMIC hotspot mutations (KRAS G12C, BRAF V600E, etc.)
+#   - Controlled spike-in for sensitivity/PPV calculations
+#
+# Run:
+#   varforge simulate --config examples/custom_mutations.yaml
+#
+# To generate a suitable VCF, see the COSMIC cancer gene census or
+# download ClinVar pathogenic somatic variants.
+
+reference: /data/ref/hg38.fa
+
+output:
+  directory: out/custom_mutations
+  fastq: true
+  bam: true
+  truth_vcf: true
+  manifest: true
+
+sample:
+  name: CUSTOM_MUT
+  read_length: 150
+  coverage: 200.0
+  platform: illumina
+
+fragment:
+  model: normal
+  mean: 300.0
+  sd: 50.0
+
+quality:
+  mean_quality: 36
+  tail_decay: 0.003
+
+tumour:
+  purity: 0.60
+  ploidy: 2
+  clones:
+    - id: main
+      ccf: 1.0
+
+# VCF-based mutation injection.
+# The file must be bgzip-compressed and tabix-indexed for large inputs.
+mutations:
+  vcf: /data/mutations/hotspot_panel.vcf.gz
+  # Optional: also add random background mutations on top of the VCF variants.
+  # Remove or comment out the block below to use VCF only.
+  random:
+    count: 100
+    vaf_min: 0.05
+    vaf_max: 0.60
+    snv_fraction: 0.80
+    indel_fraction: 0.15
+    mnv_fraction: 0.05
+
+gc_bias:
+  enabled: true
+  model: default
+  severity: 1.0
+
+seed: 5678
+threads: 4

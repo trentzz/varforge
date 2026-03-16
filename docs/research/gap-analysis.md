@@ -1,86 +1,143 @@
 # Gap Analysis: What's Missing from Current Tools
 
+*Updated March 2025 with comprehensive tool landscape research*
+
 ## Critical Gaps
 
 ### 1. No tool combines cfDNA fragmentation + variant spike-in
 
-No existing tool generates liquid biopsy data with both realistic cfDNA fragment size distributions (nucleosomal peaks at ~167bp, ~334bp) AND controlled somatic variant spike-in at tumour fractions typical of clinical cfDNA (0.1-5%). The closest is shendurelab/cfDNA for fragment simulation, but it has no variant spike-in capability.
+**No dedicated cfDNA read simulator exists** that models the characteristic ~167bp nucleosomal fragmentation pattern, jagged ends, tumor fraction mixing, or fragment-end motifs. Existing benchmarking relies on wet-lab reference materials (Seraseq ctDNA controls, synthetic spike-ins into DNA-free plasma) rather than in silico simulation.
 
-**Impact**: Developers of ctDNA variant callers and liquid biopsy analysis pipelines cannot generate realistic end-to-end test data.
+- Fragmentstein converts tabulated fragment coordinates into BAM but does not generate fragments de novo
+- FinaleToolkit analyzes real cfDNA patterns but does not simulate them
+- shendurelab/cfDNA extracts distributions from real data, no variant spike-in
+- Sonicated DNA has "end properties different from naturally occurring cfDNA" -- naive fragmentation is insufficient
+- ichorCNA needs low-coverage WGS with realistic coverage variation and tumor fraction
+- DELFI needs whole-genome fragmentation profiles with realistic nucleosome positioning
+
+**Impact**: ctDNA variant callers, liquid biopsy tools (ichorCNA, DELFI), and cfDNA fragmentomics tools have no in silico simulation capability for comprehensive benchmarking.
 
 ### 2. No dedicated UMI/duplex sequencing read simulator
 
-There is no tool that generates realistic FASTQ data with:
+**Zero tools** provide genome-wide UMI/duplex sequencing simulation:
 - Inline UMI barcodes of configurable length
 - Duplex strand pairing (alpha/beta UMI swapping)
-- Realistic PCR family size distributions
+- Realistic PCR family size distributions (log-normal)
 - UMI sequencing errors at configurable rates
-- Variant spike-in that correctly appears on both strands (true mutations) or one strand (artifacts)
+- Variant spike-in that correctly appears on both strands (true mutations) vs one strand (artifacts)
 
-UMI-tools has a single-locus simulation component. The Kennedy Lab pipeline has basic test data generation. Neither is a general-purpose simulator.
+- UMI-tools has single-locus simulation only
+- Kennedy Lab pipeline has basic test data, not a general simulator
+- scReadSim handles UMI for scRNA-seq only, not targeted DNA
+- BMC Genomics 2024 UMI benchmarking paper used manual ad hoc construction
 
-**Impact**: Tools like HUMID, fgbio, UMI-tools, and duplex consensus callers lack comprehensive test data.
+**Impact**: fgbio, UMI-tools, HUMID, UMIErrorCorrect, UMI-VarCal, and duplex consensus callers use circular benchmarking or ad hoc data.
 
-### 3. Spike-in bias in existing tools
+### 3. Spike-in bias (deterministic VAF) in most tools
 
-BAMSurgeon and SomatoSim use deterministic spike-in: a variant at 10% VAF with 30x depth always produces exactly 3 alt reads. Real sequencing involves stochastic sampling -- the actual number follows a binomial distribution. Only stochasticSim (2023) addresses this, but it has a small user base.
+BAMSurgeon and SomatoSim use deterministic spike-in: 10% VAF at 30x = exactly 3 alt reads. Real sequencing is stochastic (binomial distribution). Only stochasticSim (2023) addresses this but is limited to SNVs only and exome-scale.
 
-**Impact**: Benchmarks may overestimate variant caller performance because the test data is "too clean."
+MOV&RSim (2025) analyzed 9 somatic simulators and found **none provided complete control over both biological and technical parameters**.
 
-### 4. No Rust-based simulator
+**Impact**: Benchmarks overestimate variant caller performance with unrealistically clean data.
 
-The entire simulation tool landscape is Python/R/C++. There is no Rust-based tool despite:
-- Rust's performance advantages (critical for high-coverage WGS simulation -- e.g., 200x WGS generates billions of reads)
-- Single-binary distribution (no Python environment management)
-- Memory safety guarantees
-- Excellent parallelism via rayon
+### 4. No Rust-based simulator exists
 
-**Impact**: Simulation remains a bottleneck in CI/CD pipelines for bioinformatics tools.
+The entire landscape is Python/R/C++/Java:
+- Python tools (BAMSurgeon, NEAT, SomatoSim): slow for WGS-scale
+- C++ tools (ART, ReSeq): fast but unmaintained or limited scope
+- Java tools (VarSim): complex dependencies, JVM overhead
+- No single-binary distribution tool exists
+
+rusty-neat exists but is incomplete (no BAM output, no model learning, 20 open issues).
+
+**Impact**: Simulation remains a bottleneck in CI/CD. Users must manage Python environments or C build dependencies.
 
 ### 5. No single tool handles the full pipeline
 
-Current workflow requires chaining multiple tools:
-1. Generate mutated reference genome (SigProfilerSimulator, SomaticSiMu)
+Current workflow chains 3-5 separate tools:
+1. Generate/mutate reference genome (SigProfilerSimulator, SomaticSiMu)
 2. Simulate reads (ART, NEAT, ReSeq)
 3. Spike mutations into BAM (BAMSurgeon, SomatoSim)
 4. Add UMIs (manual scripting)
 5. Simulate cfDNA fragmentation (manual scripting)
 
-Each tool has its own input format, dependencies, and quirks. Integration is fragile.
+Each tool has different formats, dependencies, and documentation quality. Integration is fragile.
+
+**Impact**: Hours of manual pipeline setup for each benchmarking experiment.
 
 ---
 
 ## Secondary Gaps
 
-### 6. Library prep artifact simulation is ad hoc
+### 6. Library prep artifact simulation is fragmented
 
-FFPE damage (C>T deamination), oxidative damage (G>T at 8-oxoG sites), and other library prep artifacts are important for testing error correction tools, but no simulator provides configurable, biologically-motivated artifact injection.
+- FFPE damage (C>T deamination): only stochasticSim models this
+- Oxidative damage (8-oxoG, G>T): only stochasticSim
+- GC bias: only ReSeq models this realistically
+- PCR duplicates: only ReSeq uses negative binomial model
+- PCR errors during amplification: only GENOMICON-Seq models the full amplification pipeline
+- No tool combines all artifact types in one configurable system
 
-### 7. No integrated clonal architecture + read generation
+### 7. No integrated clonal architecture + from-scratch read generation
 
-Tools like PSiTE and HeteroGenesis model clonal evolution, but their read generation is delegated to external simulators (ART, wgsim). The handoff between evolution modeling and read generation is manual and error-prone.
+PSiTE and HeteroGenesis model clonal evolution but delegate read generation to external simulators (ART, wgsim). The handoff is manual and error-prone. VarSim integrates somewhat but is Java-based and unmaintained.
 
-### 8. Poor support for targeted panels
+### 8. Poor support for targeted panels and capture simulation
 
-Most simulators assume WGS. Targeted panel simulation (with capture efficiency variation, off-target reads, target boundary effects) requires additional manual setup.
+Most simulators assume WGS. Targeted panel simulation needs:
+- BED-defined target regions with capture efficiency variation
+- Off-target read fractions
+- Target boundary coverage dropoff
+- Probe-specific biases (only GENOMICON-Seq models this for amplicon/WES)
 
-### 9. No support for multi-sample / longitudinal simulation
+### 9. No multi-sample / longitudinal simulation
 
-Liquid biopsy monitoring involves serial samples from the same patient. Simulating a time series with consistent clonal architecture but varying tumour fractions is not supported by any single tool.
+Liquid biopsy monitoring involves serial samples. Simulating a time series with consistent clonal architecture but varying tumour fractions is not supported by any single tool.
+
+### 10. Most tools are unmaintained
+
+| Tool | Last Release | Status |
+|------|-------------|--------|
+| ART | 2016 | Abandoned |
+| pIRS | 2016 | Abandoned |
+| Mason | 2014 | Dormant |
+| VarSim | 2020 | Stale |
+| BAMSurgeon | 2022 | Low activity |
+| SomatoSim | 2022 | Inactive |
+
+The field needs actively maintained tools with modern interfaces.
 
 ---
 
-## What VarForge Should Address
+## What VarForge Addresses
 
-| Gap | Priority | Approach |
-|-----|----------|----------|
-| cfDNA + variant spike-in | **P0** | Nucleosomal fragment model + VAF-aware read generation |
-| UMI/duplex simulation | **P0** | Inline UMI generation, family size modeling, strand pairing |
-| Stochastic VAF sampling | **P0** | Binomial sampling for alt read count given target VAF and depth |
-| Single Rust binary | **P0** | Rust implementation with rust-htslib, noodles, seq_io |
-| Full pipeline in one tool | **P1** | Reference -> mutated genome -> reads -> BAM + truth VCF |
-| Library artifacts | **P1** | Configurable FFPE, oxoG, deamination rates |
-| Clonal architecture | **P1** | Tree-based clone definition with per-clone mutations and CCFs |
-| Targeted panels | **P2** | BED-file-driven region selection with capture efficiency model |
-| Multi-sample series | **P2** | Shared clonal tree, per-sample tumour fraction |
-| Error profile learning | **P2** | Learn quality/error profiles from user-provided real BAM |
+| Gap | Priority | VarForge Approach | Status |
+|-----|----------|-------------------|--------|
+| cfDNA + variant spike-in | **P0** | Nucleosomal mixture fragment model + VAF-aware generation | Core model implemented |
+| UMI/duplex simulation | **P0** | Inline UMI, family size modeling, strand pairing | Core model implemented |
+| Stochastic VAF sampling | **P0** | Binomial sampling for alt read count | Implemented |
+| Single Rust binary | **P0** | Pure Rust with noodles, rayon, gzp | Scaffolded |
+| Full pipeline in one tool | **P0** | Config → reads → FASTQ/BAM + truth VCF | Pipeline not yet wired |
+| Library artifacts | **P1** | Configurable FFPE, oxoG, PCR errors/duplicates | Models implemented |
+| Clonal architecture | **P1** | Tree-based clone definitions with CCF validation | Implemented |
+| Targeted panels | **P1** | BED-file region selection with intersection | Implemented |
+| Multi-sample series | **P2** | Shared clonal tree, per-sample tumour fraction | Not yet implemented |
+| Error profile learning | **P2** | Learn quality/error profiles from real BAM | Not yet implemented |
+| GC bias modeling | **P2** | Fragment-level GC content bias | Not yet implemented |
+| SV/CNV support | **P2** | Structural variants, copy number variants | Not yet implemented |
+| Cancer-type presets | **P2** | Predefined configs for common cancer types | Not yet implemented |
+
+## Competitive Positioning
+
+VarForge's unique value proposition vs every existing tool:
+
+1. **vs BAMSurgeon**: From-scratch generation (no input BAM needed), stochastic VAF, 100x faster (Rust), UMI + cfDNA support
+2. **vs ART/DWGSIM**: Variant injection, cancer modeling, UMI, cfDNA, artifacts -- not just raw read simulation
+3. **vs NEAT**: Compiled Rust (10-100x faster), cancer modeling, UMI, cfDNA, artifacts
+4. **vs ReSeq**: Variant injection, cancer modeling, UMI, cfDNA -- ReSeq only learns and replays profiles
+5. **vs stochasticSim**: Indels + SVs + CNVs (not just SNVs), UMI, cfDNA, from-scratch generation, much faster
+6. **vs VarSim**: Single binary (no Java/Python), UMI, cfDNA, artifacts, actively maintained
+7. **vs MOV&RSim**: UMI/duplex support, cfDNA fragmentation, Rust performance, comprehensive artifact modeling
+8. **vs GENOMICON-Seq**: UMI/duplex, cfDNA, clonal architecture, broader variant types, Rust performance
+9. **vs PSiTE**: Integrated read generation (no external simulator needed), UMI, cfDNA, single binary

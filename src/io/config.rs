@@ -28,6 +28,32 @@ pub struct Config {
     pub chromosomes: Option<Vec<String>>,
     #[serde(default)]
     pub regions_bed: Option<PathBuf>,
+    #[serde(default)]
+    pub copy_number: Option<Vec<CopyNumberConfig>>,
+    #[serde(default)]
+    pub gc_bias: Option<GcBiasConfig>,
+    /// Optional multi-sample configuration for longitudinal simulation.
+    ///
+    /// When present, VarForge will simulate each entry independently from a
+    /// shared clonal architecture, writing per-sample output sub-directories
+    /// plus a combined manifest.
+    #[serde(default)]
+    pub samples: Option<Vec<SampleEntry>>,
+    #[serde(default)]
+    pub capture: Option<CaptureConfig>,
+    #[serde(default)]
+    pub performance: PerformanceConfig,
+}
+
+/// Performance tuning parameters for the streaming output pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceConfig {
+    /// Maximum number of region batches buffered in the streaming channel.
+    ///
+    /// Higher values use more memory but provide more overlap between compute
+    /// and I/O. Lower values reduce peak memory. Default: 64.
+    #[serde(default = "default_output_buffer_regions")]
+    pub output_buffer_regions: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,13 +213,127 @@ pub struct ArtifactConfig {
     pub pcr_error_rate: Option<f64>,
 }
 
+/// A single copy number alteration entry from the YAML config.
+///
+/// The `region` field uses the compact `chr:start-end` notation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CopyNumberConfig {
+    /// Genomic region in `chrom:start-end` format, e.g. `"chr7:55000000-55200000"`.
+    pub region: String,
+    #[serde(default = "default_normal_cn")]
+    pub tumor_cn: u32,
+    #[serde(default = "default_normal_cn")]
+    pub normal_cn: u32,
+    /// Major allele copy number (optional; for allele-specific / LOH modeling).
+    #[serde(default)]
+    pub major_cn: Option<u32>,
+    /// Minor allele copy number (optional; for allele-specific / LOH modeling).
+    #[serde(default)]
+    pub minor_cn: Option<u32>,
+}
+
+/// Configuration for GC-content coverage bias (mirrors `gc_bias:` YAML section).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GcBiasConfig {
+    /// Whether GC bias is applied.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Bias curve: `"default"`, `"flat"`, or `"custom"`.
+    #[serde(default = "default_gc_bias_model")]
+    pub model: String,
+    /// Severity multiplier (0 = no bias, 1 = realistic, 2 = extreme).
+    #[serde(default = "default_gc_bias_severity")]
+    pub severity: f64,
+}
+
+impl Default for GcBiasConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model: default_gc_bias_model(),
+            severity: default_gc_bias_severity(),
+        }
+    }
+}
+
+/// A single sample entry in the `samples:` list for multi-sample / longitudinal
+/// simulation.
+///
+/// Each entry overrides the per-sample coverage, tumour fraction, and fragment
+/// model while sharing the same reference, mutation list, and clonal tree
+/// defined at the top level.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SampleEntry {
+    /// Output sub-directory name and prefix for FASTQ / VCF files.
+    pub name: String,
+    /// Target sequencing coverage for this sample.
+    #[serde(default = "default_coverage")]
+    pub coverage: f64,
+    /// Tumour fraction (ctDNA fraction) for this time point.
+    #[serde(default = "default_tumour_fraction")]
+    pub tumour_fraction: f64,
+    /// Fragment model override (`normal` or `cfDNA`).  Falls back to the
+    /// top-level `fragment.model` when absent.
+    #[serde(default)]
+    pub fragment_model: Option<FragmentModel>,
+    /// Optional per-clone CCF adjustments for this time point.
+    ///
+    /// Keys are clone IDs; values are the new CCF (0.0–1.0).
+    #[serde(default)]
+    pub clonal_shift: std::collections::HashMap<String, f64>,
+}
+
+fn default_tumour_fraction() -> f64 { 1.0 }
+
+/// Configuration for target-capture efficiency (mirrors `capture:` YAML section).
+///
+/// ```yaml
+/// capture:
+///   enabled: true
+///   targets_bed: "panel.bed"
+///   off_target_fraction: 0.2
+///   coverage_uniformity: 0.3
+///   edge_dropoff_bases: 50
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaptureConfig {
+    /// Whether the capture model is active.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Path to BED file listing capture target regions.
+    #[serde(default)]
+    pub targets_bed: Option<PathBuf>,
+    /// Fraction of reads that map off-target (0.0–1.0; default 0.2).
+    #[serde(default = "default_off_target_fraction")]
+    pub off_target_fraction: f64,
+    /// Per-target coverage variation via LogNormal σ (0 = uniform; default 0.3).
+    #[serde(default = "default_coverage_uniformity")]
+    pub coverage_uniformity: f64,
+    /// Bases of exponential coverage drop-off at target edges (default 50).
+    #[serde(default = "default_edge_dropoff_bases")]
+    pub edge_dropoff_bases: u32,
+}
+
+impl Default for CaptureConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            targets_bed: None,
+            off_target_fraction: default_off_target_fraction(),
+            coverage_uniformity: default_coverage_uniformity(),
+            edge_dropoff_bases: default_edge_dropoff_bases(),
+        }
+    }
+}
+
 // Default value functions
 fn default_true() -> bool { true }
+fn default_normal_cn() -> u32 { 2 }
 fn default_sample_name() -> String { "SAMPLE".to_string() }
 fn default_read_length() -> usize { 150 }
-fn default_coverage() -> f64 { 30.0 }
-fn default_fragment_mean() -> f64 { 300.0 }
-fn default_fragment_sd() -> f64 { 50.0 }
+pub fn default_coverage() -> f64 { 30.0 }
+pub fn default_fragment_mean() -> f64 { 300.0 }
+pub fn default_fragment_sd() -> f64 { 50.0 }
 fn default_mean_quality() -> u8 { 36 }
 fn default_quality_decay() -> f64 { 0.003 }
 fn default_purity() -> f64 { 1.0 }
@@ -207,6 +347,20 @@ fn default_umi_length() -> usize { 8 }
 fn default_pcr_cycles() -> u32 { 10 }
 fn default_family_size_mean() -> f64 { 3.0 }
 fn default_family_size_sd() -> f64 { 1.5 }
+fn default_gc_bias_model() -> String { "default".to_string() }
+fn default_gc_bias_severity() -> f64 { 1.0 }
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            output_buffer_regions: default_output_buffer_regions(),
+        }
+    }
+}
+
+fn default_output_buffer_regions() -> usize { 64 }
+fn default_off_target_fraction() -> f64 { 0.2 }
+fn default_coverage_uniformity() -> f64 { 0.3 }
+fn default_edge_dropoff_bases() -> u32 { 50 }
 
 pub fn load(path: &Path) -> Result<Config> {
     let contents = std::fs::read_to_string(path)
@@ -221,6 +375,27 @@ pub fn validate(config: &Config) -> Result<()> {
         config.reference.exists(),
         "reference file not found: {}",
         config.reference.display()
+    );
+
+    anyhow::ensure!(
+        config.sample.coverage > 0.0,
+        "coverage must be positive, got {}",
+        config.sample.coverage
+    );
+    anyhow::ensure!(
+        config.sample.read_length > 0,
+        "read_length must be positive, got {}",
+        config.sample.read_length
+    );
+    anyhow::ensure!(
+        config.fragment.mean > 0.0,
+        "fragment mean must be positive, got {}",
+        config.fragment.mean
+    );
+    anyhow::ensure!(
+        config.fragment.sd >= 0.0,
+        "fragment sd must be non-negative, got {}",
+        config.fragment.sd
     );
 
     if let Some(tumour) = &config.tumour {

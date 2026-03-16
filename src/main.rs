@@ -1,5 +1,6 @@
 mod cli;
 mod core;
+mod editor;
 mod variants;
 mod tumour;
 mod umi;
@@ -22,8 +23,11 @@ fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .init();
 
+    let threads = args.threads;
     match args.command {
-        cli::Command::Simulate(opts) => cli::simulate::run(opts),
+        cli::Command::Simulate(opts) => cli::simulate::run(opts, threads),
         cli::Command::Validate(opts) => cli::validate::run(opts),
+        cli::Command::Edit(opts) => cli::edit::run(opts, threads),
+        cli::Command::LearnProfile(opts) => cli::learn_profile::run(opts, threads),
     }
 }

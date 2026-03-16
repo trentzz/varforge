@@ -1,0 +1,18 @@
+# minimal.yaml — Simplest possible VarForge simulation
+#
+# Only the two required fields: a reference genome path and an output
+# directory.  Everything else uses built-in defaults:
+#
+#   coverage:      30x
+#   read_length:   150 bp
+#   fragment mean: 300 bp  (sd: 50 bp)
+#   mean quality:  Q36
+#   output:        FASTQ + truth VCF + manifest
+#
+# Run:
+#   varforge simulate --config examples/minimal.yaml
+
+reference: /data/ref/hg38.fa
+
+output:
+  directory: out/minimal

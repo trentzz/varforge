@@ -1,0 +1,92 @@
+# cfdna_monitoring.yaml — cfDNA longitudinal monitoring series
+#
+# Simulates a four-timepoint liquid biopsy monitoring study.  Each sample
+# shares the same clonal architecture and mutation list but has a different
+# tumour fraction (ctDNA%) reflecting disease progression, response, and
+# relapse kinetics.
+#
+# Fragment model: cfda — short, nucleosome-phased fragments (mean 167 bp)
+# typical of cell-free DNA in plasma.
+#
+# Duplex UMI sequencing is enabled to allow low-VAF variant calling at
+# sub-1% ctDNA fractions (time points baseline and monitoring_2).
+#
+# Run:
+#   varforge simulate --config examples/cfdna_monitoring.yaml
+
+reference: /data/ref/hg38.fa
+
+output:
+  directory: out/cfdna_monitoring
+  fastq: true
+  bam: false
+  truth_vcf: true
+  manifest: true
+
+# Top-level fragment and quality settings are inherited by all samples.
+fragment:
+  model: cfda
+  mean: 167.0
+  sd: 20.0
+
+quality:
+  mean_quality: 36
+  tail_decay: 0.003
+
+# Clonal architecture shared across all time points.
+tumour:
+  purity: 1.0   # per-sample tumour_fraction overrides the effective ctDNA level
+  ploidy: 2
+  clones:
+    - id: founding
+      ccf: 1.0
+    - id: resistant
+      ccf: 0.0   # subclone emerges at relapse via clonal_shift
+      parent: founding
+
+mutations:
+  random:
+    count: 200
+    vaf_min: 0.001
+    vaf_max: 0.05
+    snv_fraction: 0.80
+    indel_fraction: 0.15
+    mnv_fraction: 0.05
+
+umi:
+  length: 8
+  duplex: true
+  pcr_cycles: 10
+  family_size_mean: 3.0
+  family_size_sd: 1.5
+  inline: false
+
+# Multi-sample longitudinal series.
+# Each entry overrides coverage and tumour_fraction for that time point.
+samples:
+  - name: baseline
+    coverage: 1000.0
+    tumour_fraction: 0.05   # 5% ctDNA at diagnosis
+    fragment_model: cfda
+
+  - name: on_treatment
+    coverage: 1000.0
+    tumour_fraction: 0.002  # 0.2% after therapy response
+    fragment_model: cfda
+
+  - name: monitoring_2
+    coverage: 1000.0
+    tumour_fraction: 0.0005 # 0.05% molecular remission
+    fragment_model: cfda
+    clonal_shift:
+      resistant: 0.0        # resistant clone not yet detectable
+
+  - name: relapse
+    coverage: 1000.0
+    tumour_fraction: 0.08   # 8% ctDNA at clinical relapse
+    fragment_model: cfda
+    clonal_shift:
+      resistant: 0.35       # resistant subclone has expanded
+
+seed: 7777
+threads: 8

@@ -1,4 +1,10 @@
-pub mod fragment;
-pub mod quality;
+pub mod capture;
 pub mod coverage;
+pub mod engine;
+pub mod error_profile;
+pub mod fragment;
+pub mod gc_bias;
+pub mod multi_sample;
+pub mod profile_learner;
+pub mod quality;
 pub mod types;

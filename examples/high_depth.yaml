@@ -1,0 +1,80 @@
+# high_depth.yaml — 1000x ultra-deep sequencing for low-VAF detection
+#
+# Simulates an ultra-deep targeted sequencing run designed to detect
+# variants at allele frequencies down to 0.1% (1 in 1000 molecules).
+# This regime requires duplex UMI consensus to suppress sequencer noise
+# and PCR errors.
+#
+# Typical use cases:
+#   - Minimal residual disease (MRD) monitoring
+#   - Early relapse detection (ctDNA < 0.1%)
+#   - Ultra-sensitive liquid biopsy panel benchmarking
+#   - fgbio GroupReadsByUmi + CallMolecularConsensusReads pipelines
+#
+# The combination of 1000x raw coverage, duplex UMI, and 9-mer barcodes
+# yields approximately 50–100x duplex consensus coverage, which is the
+# effective sensitivity floor for 0.1% VAF detection.
+#
+# Run:
+#   varforge simulate --config examples/high_depth.yaml
+
+reference: /data/ref/hg38.fa
+
+output:
+  directory: out/high_depth
+  fastq: true
+  bam: true
+  truth_vcf: true
+  manifest: true
+
+sample:
+  name: ULTRA_DEEP
+  read_length: 150
+  coverage: 1000.0
+  platform: illumina
+
+fragment:
+  model: normal
+  mean: 200.0
+  sd: 25.0
+
+quality:
+  mean_quality: 38
+  tail_decay: 0.002
+
+tumour:
+  purity: 0.30
+  ploidy: 2
+
+mutations:
+  random:
+    count: 50
+    vaf_min: 0.001   # 0.1% — below the noise floor without error correction
+    vaf_max: 0.05    # 5%  — upper range still considered "low VAF"
+    snv_fraction: 0.80
+    indel_fraction: 0.15
+    mnv_fraction: 0.05
+
+umi:
+  length: 9
+  duplex: true
+  pcr_cycles: 12
+  family_size_mean: 4.0
+  family_size_sd: 1.5
+  inline: false
+
+# Restrict to a few hotspot chromosomes for speed.
+chromosomes:
+  - chr7
+  - chr12
+  - chr17
+
+capture:
+  enabled: true
+  targets_bed: /data/panels/hotspot_panel.bed
+  off_target_fraction: 0.05
+  coverage_uniformity: 0.25
+  edge_dropoff_bases: 30
+
+seed: 1000
+threads: 8

@@ -12,6 +12,7 @@ pub fn generate_umi<R: Rng>(length: usize, rng: &mut R) -> Vec<u8> {
 /// In duplex sequencing, each molecule gets two UMIs: A and B.
 /// - Alpha strand read 1 carries A+B
 /// - Beta strand read 1 carries B+A
+#[allow(dead_code)]
 pub fn generate_duplex_umi_pair<R: Rng>(
     length: usize,
     rng: &mut R,
@@ -31,6 +32,7 @@ pub fn generate_duplex_umi_pair<R: Rng>(
 }
 
 /// Inject sequencing errors into a UMI sequence.
+#[allow(dead_code)]
 pub fn inject_umi_errors<R: Rng>(umi: &mut [u8], error_rate: f64, rng: &mut R) {
     for base in umi.iter_mut() {
         if rng.gen::<f64>() < error_rate {
@@ -48,6 +50,7 @@ pub fn inject_umi_errors<R: Rng>(umi: &mut [u8], error_rate: f64, rng: &mut R) {
 
 /// Format a UMI for the RX BAM tag (SAM spec).
 /// For duplex: "AAAA-BBBB" format.
+#[allow(dead_code)]
 pub fn format_rx_tag(umi: &[u8], umi_length: usize) -> String {
     if umi.len() == umi_length {
         String::from_utf8_lossy(umi).to_string()
