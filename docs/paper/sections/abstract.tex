@@ -1,0 +1,4 @@
+Benchmarking cancer genomics pipelines requires synthetic datasets with known ground truth.
+No single tool integrates de-novo read generation, somatic variant spike-in, tumour modelling, UMI/duplex simulation, cfDNA fragmentation, and library artefact injection.
+\varforge{} is a pure-Rust framework that unifies these capabilities under a composable YAML configuration, achieving 28,000 read pairs/s on compute-bound workloads with memory bounded by channel depth rather than dataset size.
+It is the first simulator to provide genome-wide UMI and duplex sequencing simulation, the first to combine cfDNA fragmentation with variant spike-in, and the first to replace deterministic VAF assignment with per-read Bernoulli sampling.

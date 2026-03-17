@@ -1,0 +1,39 @@
+\section{Related Work}
+\label{sec:related}
+
+Table~\ref{tab:tool-comparison} summarises the feature landscape.
+Tools fall into three categories: BAM editors (BAMSurgeon, SomatoSim\autocite{kuhnemund2017somatomsim}, stochasticSim\autocite{osullivan2023stochasticsim}), de-novo read generators (ART, NEAT, ReSeq, DWGSIM, NGSNGS\autocite{ngsngs2023}), and cancer-evolution simulators (VarSim\autocite{mu2015varsim}, PSiTE\autocite{psyte2020psite}, MOV\&RSim\autocite{movsim2025}, GENOMICON-Seq\autocite{genomiconseq2025}).
+
+Two gaps stand out.
+First, UMI and duplex sequencing tools (fgbio\autocite{fgbio}, UMI-tools\autocite{smith2017umitools}, HUMID) lack genome-wide simulation infrastructure and rely on circular benchmarking.
+Second, cfDNA analysis tools (DELFI\autocite{cristiano2019delfi}, ichorCNA\autocite{adalsteinsson2017ichorcna}) have no configurable in-silico cfDNA simulator with variant support.
+
+A further limitation pervades BAM editors: deterministic spike-in.
+When BAMSurgeon injects a variant at 10\% VAF into 30x data, it modifies exactly 3 reads.
+Real sequencing follows a binomial sampling process.
+Deterministic data overestimates caller sensitivity\autocite{osullivan2023stochasticsim}.
+
+\begin{table}[t]
+\centering
+\caption{Feature comparison of sequencing simulators.
+  \checkmark~= supported; $\circ$~= partial; $\times$~= unsupported.}
+\label{tab:tool-comparison}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+Tool & \makecell{De-novo\\reads} & \makecell{Stoch.\\VAF} &
+  \makecell{UMI/\\Duplex} & cfDNA & \makecell{FFPE/\\OxoG} &
+  CNV & \makecell{Single\\binary} \\
+\midrule
+\textbf{VarForge}  & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
+BAMSurgeon   & $\times$   & $\times$   & $\times$   & $\times$   & $\times$   & $\circ$    & $\times$ \\
+ART          & \checkmark & $\times$   & $\times$   & $\times$   & $\times$   & $\times$   & \checkmark \\
+NEAT         & \checkmark & $\times$   & $\times$   & $\times$   & $\times$   & $\times$   & $\times$ \\
+stochasticSim & $\times$  & \checkmark & $\times$   & $\times$   & \checkmark & $\times$   & $\times$ \\
+ReSeq        & \checkmark & $\times$   & $\times$   & $\times$   & $\times$   & $\times$   & $\times$ \\
+VarSim       & $\circ$    & $\times$   & $\times$   & $\times$   & $\times$   & \checkmark & $\times$ \\
+MOV\&RSim    & \checkmark & $\times$   & $\times$   & $\times$   & $\circ$    & \checkmark & $\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}

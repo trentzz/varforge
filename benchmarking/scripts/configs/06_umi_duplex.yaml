@@ -1,0 +1,33 @@
+# Benchmark 06: UMI duplex - 10MB ref, 100x, duplex UMI enabled
+reference: /home/trent/tfiles/code/varforge/benchmark_output/ref_10mb.fa
+
+output:
+  directory: /home/trent/tfiles/code/varforge/benchmark_output/runs/06_umi_duplex
+  fastq: true
+  bam: false
+  truth_vcf: true
+  manifest: true
+
+sample:
+  name: UMI_DUPLEX
+  read_length: 150
+  coverage: 100.0
+
+fragment:
+  model: normal
+  mean: 300.0
+  sd: 50.0
+
+quality:
+  mean_quality: 36
+  tail_decay: 0.003
+
+umi:
+  length: 8
+  duplex: true
+  pcr_cycles: 10
+  family_size_mean: 3.0
+  family_size_sd: 1.5
+  inline: false
+
+seed: 1
