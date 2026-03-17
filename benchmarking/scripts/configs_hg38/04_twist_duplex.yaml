@@ -1,6 +1,6 @@
 # Twist Biosciences UMI duplex-style protocol
 # 5bp UMI (random), duplex mode, high depth for MRD/ctDNA
-reference: /home/trent/tfiles/code/varforge/benchmarking/chr22.fa
+reference: chr22.fa
 output:
   directory: /tmp/hg38_bench_placeholder
   fastq: true
