@@ -12,8 +12,9 @@ Mean values are reported.
 
 Figure~\ref{fig:cov-scaling} shows wall time and peak memory as a function of coverage depth on the 1\,MB reference with 100 mutations.
 Both scale linearly ($R^2 > 0.999$).
-Throughput stabilises at ${\sim}13{,}000$ read pairs/s above 10x.
+Throughput stabilises at ${\sim}6{,}700$ read pairs/s above 10x on the 1\,MB reference.
 The lower rate at 1x reflects startup overhead.
+On the 10\,MB reference (Table~\ref{tab:scenarios}), throughput rises to ${\sim}14{,}300$ pairs/s because more parallel chunks are available to fill the Rayon thread pool.
 
 \begin{figure}[t]
   \centering
@@ -33,7 +34,7 @@ The combined overhead of +198\% is super-additive: UMI families must carry varia
 \begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{../../benchmarking/results/graphs/feature_overhead.pdf}
-  \caption{Feature overhead relative to baseline (1\,MB, 30x). Variant injection and GC bias are free. FFPE adds 16\%. UMI dominates at +64\%.}
+  \caption{Feature overhead relative to baseline (1\,MB, 30x). Variant injection and GC bias are negligible. FFPE adds 15\%. UMI dominates at +143\%.}
   \label{fig:features}
 \end{figure}
 
@@ -97,7 +98,7 @@ UMI configs (3--4) produce more output read pairs than the baseline because PCR 
 
 \begin{table}[t]
 \centering
-\caption{hg38 chr22 benchmarks (5x, 1 run each, 12 threads). UMI/duplex configs show higher read counts due to PCR family expansion and higher RAM from family tracking.}
+\caption{hg38 chr22 benchmarks (5x, 1 run each with fixed seed, 12 threads). A fixed seed produces deterministic output; repeated runs return the same result. UMI/duplex configs show higher read counts due to PCR family expansion and higher RAM from family tracking.}
 \label{tab:hg38}
 \small
 \setlength{\tabcolsep}{3.5pt}
@@ -124,6 +125,6 @@ A full human genome 30x WGS run produces ${\sim}600$M pairs, but only the in-fli
 \begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{../../benchmarking/results/graphs/memory_per_pair.pdf}
-  \caption{Memory per read pair across coverage depths. The constant ${\sim}1.7$\,KB/pair confirms the streaming architecture bounds memory by batch size, not dataset size.}
+  \caption{Memory per read pair across coverage depths. The constant ${\sim}0.45$\,KB/pair confirms the streaming architecture bounds memory by batch size, not dataset size.}
   \label{fig:mem}
 \end{figure}

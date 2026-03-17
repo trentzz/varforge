@@ -5,7 +5,12 @@ Variant callers, UMI deduplication tools, copy number estimators, and liquid-bio
 Real patient data cannot provide this.
 Synthetic simulation fills the gap.
 
-Cancer sequencing introduces challenges that generic read simulators do not address: tumour-normal cell mixtures parametrised by purity and clonal architecture, allele-frequency heterogeneity from sub-clonal evolution, copy number alterations affecting both coverage and effective VAF, a spectrum of variant types (SNV, indel, MNV, SV, CNV), library artefacts such as FFPE deamination and oxidative damage, and cfDNA fragmentation profiles for liquid biopsy.
+Cancer sequencing introduces challenges that generic read simulators do not address.
+Tumour samples are mixtures of cancer and normal cells, parametrised by purity and clonal architecture.
+Allele frequencies are heterogeneous due to sub-clonal evolution.
+Copy number alterations affect both local coverage and effective VAF.
+Library preparation introduces artefacts specific to FFPE tissue and oxidative damage.
+Cell-free DNA from liquid biopsy has a distinct fragment length distribution that read simulators do not model.
 
 No single existing tool covers this space.
 BAMSurgeon\autocite{ewing2015bamsurgeon} spikes variants into existing BAMs but uses deterministic VAF assignment.
