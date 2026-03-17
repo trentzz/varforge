@@ -1,6 +1,6 @@
 # VarForge
 
-[![CI](https://github.com/your-org/varforge/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/varforge/actions)
+[![CI](https://github.com/trentzz/varforge/actions/workflows/ci.yml/badge.svg)](https://github.com/trentzz/varforge/actions)
 [![Crates.io](https://img.shields.io/crates/v/varforge.svg)](https://crates.io/crates/varforge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -37,15 +37,11 @@ cargo install varforge
 ### From source
 
 ```
-git clone https://github.com/your-org/varforge
+git clone https://github.com/trentzz/varforge
 cd varforge
 cargo build --release
 ./target/release/varforge --help
 ```
-
-### Pre-built binaries
-
-Pre-built binaries for Linux (x86_64, aarch64) and macOS (Apple Silicon) are available on the [Releases](https://github.com/your-org/varforge/releases) page.
 
 ---
 

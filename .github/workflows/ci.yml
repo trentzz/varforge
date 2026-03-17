@@ -19,6 +19,9 @@ jobs:
       - name: Ensure Rust toolchain
         run: rustup default stable && rustup update stable
 
+      - name: Clean build artifacts
+        run: cargo clean
+
       - name: cargo check
         run: cargo check --all-targets
 
@@ -31,6 +34,9 @@ jobs:
       - name: Ensure Rust toolchain
         run: rustup default stable && rustup update stable
 
+      - name: Clean build artifacts
+        run: cargo clean
+
       - name: cargo test
         run: cargo test --all-targets
 
@@ -42,6 +48,9 @@ jobs:
 
       - name: Ensure Rust toolchain with clippy
         run: rustup default stable && rustup update stable && rustup component add clippy
+
+      - name: Clean build artifacts
+        run: cargo clean
 
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
