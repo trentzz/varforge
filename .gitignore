@@ -12,6 +12,7 @@
 *.fai
 *.csi
 
+# Old benchmark output (superseded by benchmarking/)
 benchmark_output/
 
 # LaTeX auxiliary files
@@ -21,3 +22,9 @@ docs/paper/*.blg
 docs/paper/*.log
 docs/paper/*.out
 docs/paper/*.toc
+docs/paper/*.bcf
+docs/paper/*.run.xml
+docs/paper/main.bbl-SAVE-ERROR
+
+# Benchmark timing files (raw data, not needed in repo)
+benchmarking/results/tables/*.txt
