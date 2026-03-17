@@ -50,8 +50,8 @@ pub fn run(opts: LearnProfileOpts, _threads: Option<usize>) -> Result<()> {
         .learn_from_bam(&opts.bam)
         .with_context(|| format!("failed to learn profile from {}", opts.bam.display()))?;
 
-    let json = serde_json::to_string_pretty(&profile)
-        .context("failed to serialize profile to JSON")?;
+    let json =
+        serde_json::to_string_pretty(&profile).context("failed to serialize profile to JSON")?;
 
     std::fs::write(&opts.output, json.as_bytes())
         .with_context(|| format!("failed to write profile to {}", opts.output.display()))?;

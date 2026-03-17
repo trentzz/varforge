@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
 
 use crate::artifacts::duplicates::{duplicate_read_pair, select_duplicates};
 use crate::artifacts::ffpe::{inject_ffpe_damage, inject_oxog_damage};
@@ -12,15 +12,18 @@ use crate::core::coverage::read_pairs_for_coverage;
 use crate::core::error_profile::EmpiricalQualityModel;
 use crate::core::fragment::{CfdnaFragmentSampler, NormalFragmentSampler};
 use crate::core::gc_bias::GcBiasModel;
-use crate::core::quality::{ParametricQualityModel, QualityModel, inject_errors};
+use crate::core::quality::{inject_errors, ParametricQualityModel, QualityModel};
 use crate::core::types::{MutationType, Read, ReadPair, Region, SvType, Variant};
 use crate::io::config::{Config, FragmentModel};
 use crate::io::reference::ReferenceGenome;
 use crate::umi::barcode::generate_umi;
-use crate::umi::families::{UmiFamily, generate_pcr_copies, sample_family_size};
-use crate::variants::cnv::{CopyNumberRegion, adjusted_coverage, find_cn_region};
+use crate::umi::families::{generate_pcr_copies, sample_family_size, UmiFamily};
+use crate::variants::cnv::{adjusted_coverage, find_cn_region, CopyNumberRegion};
 use crate::variants::spike_in::spike_indel;
-use crate::variants::structural::{StructuralVariant, apply_deletion, apply_insertion, apply_inversion, apply_duplication, apply_translocation, SvReadEffect};
+use crate::variants::structural::{
+    apply_deletion, apply_duplication, apply_insertion, apply_inversion, apply_translocation,
+    StructuralVariant, SvReadEffect,
+};
 use crate::variants::vaf::sample_alt_count;
 
 /// The output produced for a single genomic region.
@@ -177,20 +180,17 @@ impl SimulationEngine {
         // Compute effective coverage for the region centre.
         let region_centre = (region.start + region.end) / 2;
         let effective_coverage = if !self.cnv_regions.is_empty() {
-            let purity = self
-                .config
-                .tumour
-                .as_ref()
-                .map(|t| t.purity)
-                .unwrap_or(1.0);
-            let ploidy = self
-                .config
-                .tumour
-                .as_ref()
-                .map(|t| t.ploidy)
-                .unwrap_or(2);
-            if let Some(cn_region) = find_cn_region(&self.cnv_regions, &region.chrom, region_centre) {
-                adjusted_coverage(coverage, purity, cn_region.tumor_cn, cn_region.normal_cn, ploidy)
+            let purity = self.config.tumour.as_ref().map(|t| t.purity).unwrap_or(1.0);
+            let ploidy = self.config.tumour.as_ref().map(|t| t.ploidy).unwrap_or(2);
+            if let Some(cn_region) = find_cn_region(&self.cnv_regions, &region.chrom, region_centre)
+            {
+                adjusted_coverage(
+                    coverage,
+                    purity,
+                    cn_region.tumor_cn,
+                    cn_region.normal_cn,
+                    ploidy,
+                )
             } else {
                 coverage
             }
@@ -232,12 +232,17 @@ impl SimulationEngine {
             FragmentModel::Cfda => {
                 let mono_peak = self.config.fragment.mean;
                 let di_peak = mono_peak * 2.0;
-                let ctdna_fraction = self.config.tumour
+                let ctdna_fraction = self
+                    .config
+                    .tumour
                     .as_ref()
-                    .map(|t| 1.0 - t.purity)  // ctDNA fraction is related to tumour content
+                    .map(|t| 1.0 - t.purity) // ctDNA fraction is related to tumour content
                     .unwrap_or(0.0);
                 Sampler::Cfdna(CfdnaFragmentSampler::new(
-                    mono_peak, di_peak, 0.85, ctdna_fraction,
+                    mono_peak,
+                    di_peak,
+                    0.85,
+                    ctdna_fraction,
                 ))
             }
             _ => Sampler::Normal(NormalFragmentSampler::new(
@@ -410,7 +415,12 @@ impl SimulationEngine {
             // Build read name by reusing the pre-allocated buffer (Fix H-5).
             use std::fmt::Write as FmtWrite;
             name_buf.clear();
-            write!(&mut name_buf, "{}_{}:{}", chrom_prefix, frag_start, pair_idx).unwrap();
+            write!(
+                &mut name_buf,
+                "{}_{}:{}",
+                chrom_prefix, frag_start, pair_idx
+            )
+            .unwrap();
 
             let pair = ReadPair {
                 name: name_buf.clone(),
@@ -431,7 +441,9 @@ impl SimulationEngine {
         let sv_variants: Vec<(usize, &Variant)> = variants
             .iter()
             .enumerate()
-            .filter(|(_, v)| matches!(v.mutation, MutationType::Sv { .. }) && variant_overlaps_region(v, region))
+            .filter(|(_, v)| {
+                matches!(v.mutation, MutationType::Sv { .. }) && variant_overlaps_region(v, region)
+            })
             .collect();
 
         if !sv_variants.is_empty() {
@@ -465,8 +477,20 @@ impl SimulationEngine {
 
                         if should_spike {
                             let read_start = pair.fragment_start;
-                            let effect1 = apply_sv_to_read(&mut pair.read1, read_start, &pair.chrom, &sv, &self.reference);
-                            let _effect2 = apply_sv_to_read(&mut pair.read2, read_start, &pair.chrom, &sv, &self.reference);
+                            let effect1 = apply_sv_to_read(
+                                &mut pair.read1,
+                                read_start,
+                                &pair.chrom,
+                                &sv,
+                                &self.reference,
+                            );
+                            let _effect2 = apply_sv_to_read(
+                                &mut pair.read2,
+                                read_start,
+                                &pair.chrom,
+                                &sv,
+                                &self.reference,
+                            );
                             if effect1 == SvReadEffect::Deleted {
                                 deleted = true;
                                 break;
@@ -506,7 +530,8 @@ impl SimulationEngine {
                     original: pair,
                     family_size,
                 };
-                let mut copies = generate_pcr_copies(&family, pcr_error_rate, pcr_cycles, &mut self.rng);
+                let mut copies =
+                    generate_pcr_copies(&family, pcr_error_rate, pcr_cycles, &mut self.rng);
                 families.append(&mut copies);
             }
             read_pairs = families;
@@ -604,15 +629,26 @@ fn build_cnv_regions(config: &Config) -> Vec<CopyNumberRegion> {
     let Some(ref cn_configs) = config.copy_number else {
         return Vec::new();
     };
-    cn_configs.iter().filter_map(|cn| {
-        parse_region_string(&cn.region).map(|(chrom, start, end)| {
-            if let (Some(major), Some(minor)) = (cn.major_cn, cn.minor_cn) {
-                CopyNumberRegion::with_allele_specific(chrom, start, end, cn.tumor_cn, cn.normal_cn, major, minor)
-            } else {
-                CopyNumberRegion::new(chrom, start, end, cn.tumor_cn, cn.normal_cn)
-            }
+    cn_configs
+        .iter()
+        .filter_map(|cn| {
+            parse_region_string(&cn.region).map(|(chrom, start, end)| {
+                if let (Some(major), Some(minor)) = (cn.major_cn, cn.minor_cn) {
+                    CopyNumberRegion::with_allele_specific(
+                        chrom,
+                        start,
+                        end,
+                        cn.tumor_cn,
+                        cn.normal_cn,
+                        major,
+                        minor,
+                    )
+                } else {
+                    CopyNumberRegion::new(chrom, start, end, cn.tumor_cn, cn.normal_cn)
+                }
+            })
         })
-    }).collect()
+        .collect()
 }
 
 /// Parse a region string like "chr7:55000000-55200000" into (chrom, start, end).
@@ -632,7 +668,11 @@ fn build_empirical_quality(config: &Config) -> Option<EmpiricalQualityModel> {
     match EmpiricalQualityModel::from_file(path) {
         Ok(model) => Some(model),
         Err(e) => {
-            tracing::warn!("failed to load error profile from {}: {}; falling back to parametric model", path.display(), e);
+            tracing::warn!(
+                "failed to load error profile from {}: {}; falling back to parametric model",
+                path.display(),
+                e
+            );
             None
         }
     }
@@ -671,7 +711,11 @@ fn variant_position(variant: &Variant) -> u64 {
 fn apply_variant_to_seq(seq: &mut Vec<u8>, frag_start: u64, variant: &Variant) {
     let frag_end = frag_start + seq.len() as u64;
     match &variant.mutation {
-        MutationType::Snv { pos, ref_base, alt_base } => {
+        MutationType::Snv {
+            pos,
+            ref_base,
+            alt_base,
+        } => {
             if *pos >= frag_start && *pos < frag_end {
                 let offset = (*pos - frag_start) as usize;
                 if seq[offset] == *ref_base {
@@ -679,7 +723,11 @@ fn apply_variant_to_seq(seq: &mut Vec<u8>, frag_start: u64, variant: &Variant) {
                 }
             }
         }
-        MutationType::Mnv { pos, ref_seq, alt_seq } => {
+        MutationType::Mnv {
+            pos,
+            ref_seq,
+            alt_seq,
+        } => {
             let mnv_end = *pos + ref_seq.len() as u64;
             if *pos >= frag_start && mnv_end <= frag_end {
                 let offset = (*pos - frag_start) as usize;
@@ -705,7 +753,13 @@ fn apply_variant_to_seq(seq: &mut Vec<u8>, frag_start: u64, variant: &Variant) {
 ///
 /// Returns None for non-SV variants or unrecognised SV types.
 fn variant_to_structural(variant: &Variant) -> Option<StructuralVariant> {
-    let MutationType::Sv { sv_type, chrom: sv_chrom, start, end } = &variant.mutation else {
+    let MutationType::Sv {
+        sv_type,
+        chrom: sv_chrom,
+        start,
+        end,
+    } = &variant.mutation
+    else {
         return None;
     };
     let chrom = sv_chrom.clone();
@@ -867,7 +921,11 @@ mod tests {
     fn snv_variant(pos: u64, ref_base: u8, alt_base: u8, vaf: f64) -> Variant {
         Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos, ref_base, alt_base },
+            mutation: MutationType::Snv {
+                pos,
+                ref_base,
+                alt_base,
+            },
             expected_vaf: vaf,
             clone_id: None,
         }
@@ -929,8 +987,10 @@ mod tests {
 
         let applied = &output.applied_variants;
         assert!(!applied.is_empty(), "variant should have been applied");
-        assert_eq!(applied[0].actual_alt_count, applied[0].actual_total_count,
-            "at VAF=1.0, all overlapping reads should carry the alt");
+        assert_eq!(
+            applied[0].actual_alt_count, applied[0].actual_total_count,
+            "at VAF=1.0, all overlapping reads should carry the alt"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1036,7 +1096,8 @@ mod tests {
         let output = engine.generate_region(&region, &[]).unwrap();
 
         // Expected number of pairs without UMI.
-        let n_base = read_pairs_for_coverage(500, config.sample.coverage, config.sample.read_length);
+        let n_base =
+            read_pairs_for_coverage(500, config.sample.coverage, config.sample.read_length);
         // With PCR families of mean size 3, total should be > base count.
         assert!(
             output.read_pairs.len() > n_base as usize,
@@ -1102,10 +1163,16 @@ mod tests {
         // With cfDNA model, fragments should be short (mononucleosomal ~167 bp).
         // All fragment_lengths should be >= min_size (50) and <= region length.
         for pair in &output.read_pairs {
-            assert!(pair.fragment_length >= 50 || pair.fragment_length == 0,
-                "fragment length {} below minimum", pair.fragment_length);
-            assert!(pair.fragment_length <= 1000,
-                "fragment length {} exceeds region", pair.fragment_length);
+            assert!(
+                pair.fragment_length >= 50 || pair.fragment_length == 0,
+                "fragment length {} below minimum",
+                pair.fragment_length
+            );
+            assert!(
+                pair.fragment_length <= 1000,
+                "fragment length {} exceeds region",
+                pair.fragment_length
+            );
         }
         assert!(!output.read_pairs.is_empty());
     }
@@ -1168,10 +1235,7 @@ mod tests {
 
         // Variant at pos 100 with 50x coverage and VAF=0.3 should be applied.
         if let Some(av) = in_region_applied {
-            assert!(
-                av.actual_total_count > 0,
-                "total count should be > 0"
-            );
+            assert!(av.actual_total_count > 0, "total count should be > 0");
             assert!(
                 av.actual_alt_count <= av.actual_total_count,
                 "alt count must not exceed total"

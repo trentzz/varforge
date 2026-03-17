@@ -43,8 +43,20 @@ impl FastqWriter {
     /// {quality_as_phred33_ascii}
     /// ```
     pub fn write_pair(&mut self, pair: &ReadPair, read_name: &str) -> Result<()> {
-        write_fastq_record(&mut self.r1, read_name, 1, &pair.read1.seq, &pair.read1.qual)?;
-        write_fastq_record(&mut self.r2, read_name, 2, &pair.read2.seq, &pair.read2.qual)?;
+        write_fastq_record(
+            &mut self.r1,
+            read_name,
+            1,
+            &pair.read1.seq,
+            &pair.read1.qual,
+        )?;
+        write_fastq_record(
+            &mut self.r2,
+            read_name,
+            2,
+            &pair.read2.seq,
+            &pair.read2.qual,
+        )?;
         Ok(())
     }
 
@@ -127,7 +139,8 @@ mod tests {
         let file = std::fs::File::open(path).expect("failed to open file");
         let mut gz = GzDecoder::new(file);
         let mut contents = String::new();
-        gz.read_to_string(&mut contents).expect("failed to decompress");
+        gz.read_to_string(&mut contents)
+            .expect("failed to decompress");
         contents
     }
 

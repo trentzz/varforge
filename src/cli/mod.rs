@@ -9,7 +9,11 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "varforge", version, about = "Synthetic cancer sequencing data generator")]
+#[command(
+    name = "varforge",
+    version,
+    about = "Synthetic cancer sequencing data generator"
+)]
 pub struct Args {
     #[command(subcommand)]
     pub command: Command,

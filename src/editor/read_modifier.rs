@@ -34,13 +34,17 @@ pub enum ModifyResult {
 /// Returns [`ModifyResult::Modified`] if the read was changed.
 pub fn apply_snv(record: &mut RecordBuf, mutation: &MutationType) -> ModifyResult {
     let (pos, ref_base, alt_base) = match mutation {
-        MutationType::Snv { pos, ref_base, alt_base } => (*pos, *ref_base, *alt_base),
+        MutationType::Snv {
+            pos,
+            ref_base,
+            alt_base,
+        } => (*pos, *ref_base, *alt_base),
         _ => return ModifyResult::Unchanged,
     };
 
     // Get the 0-based alignment start position.
     let align_start = match record.alignment_start() {
-        Some(p) => usize::from(p) as u64 - 1, // noodles is 1-based
+        Some(p) => usize::from(p) as u64 - 1,   // noodles is 1-based
         None => return ModifyResult::Unchanged, // unmapped
     };
 
@@ -86,9 +90,7 @@ pub fn apply_snv(record: &mut RecordBuf, mutation: &MutationType) -> ModifyResul
         .collect();
     new_seq[offset] = alt_base;
 
-    let new_quals: Vec<u8> = record
-        .quality_scores()
-        .as_ref().to_vec();
+    let new_quals: Vec<u8> = record.quality_scores().as_ref().to_vec();
 
     *record.sequence_mut() = Sequence::from(new_seq.as_slice());
     *record.quality_scores_mut() = QualityScores::from(new_quals);
@@ -108,9 +110,11 @@ pub fn apply_snv(record: &mut RecordBuf, mutation: &MutationType) -> ModifyResul
 /// The read is soft-clipped at the end to maintain a similar reference span.
 pub fn apply_insertion(record: &mut RecordBuf, mutation: &MutationType) -> ModifyResult {
     let (pos, ref_seq, alt_seq) = match mutation {
-        MutationType::Indel { pos, ref_seq, alt_seq } if alt_seq.len() > ref_seq.len() => {
-            (*pos, ref_seq.clone(), alt_seq.clone())
-        }
+        MutationType::Indel {
+            pos,
+            ref_seq,
+            alt_seq,
+        } if alt_seq.len() > ref_seq.len() => (*pos, ref_seq.clone(), alt_seq.clone()),
         _ => return ModifyResult::Unchanged,
     };
 
@@ -149,9 +153,7 @@ pub fn apply_insertion(record: &mut RecordBuf, mutation: &MutationType) -> Modif
         .iter()
         .map(noodles_base_to_u8)
         .collect();
-    let orig_qual: Vec<u8> = record
-        .quality_scores()
-        .as_ref().to_vec();
+    let orig_qual: Vec<u8> = record.quality_scores().as_ref().to_vec();
 
     // Build new sequence with insertion.
     let mut new_seq = Vec::with_capacity(seq_len + insert_len);
@@ -201,9 +203,11 @@ pub fn apply_insertion(record: &mut RecordBuf, mutation: &MutationType) -> Modif
 /// Removes bases from the sequence at the variant position, updates CIGAR, MD, NM.
 pub fn apply_deletion(record: &mut RecordBuf, mutation: &MutationType) -> ModifyResult {
     let (pos, ref_seq, alt_seq) = match mutation {
-        MutationType::Indel { pos, ref_seq, alt_seq } if ref_seq.len() > alt_seq.len() => {
-            (*pos, ref_seq.clone(), alt_seq.clone())
-        }
+        MutationType::Indel {
+            pos,
+            ref_seq,
+            alt_seq,
+        } if ref_seq.len() > alt_seq.len() => (*pos, ref_seq.clone(), alt_seq.clone()),
         _ => return ModifyResult::Unchanged,
     };
 
@@ -234,9 +238,7 @@ pub fn apply_deletion(record: &mut RecordBuf, mutation: &MutationType) -> Modify
         .iter()
         .map(noodles_base_to_u8)
         .collect();
-    let orig_qual: Vec<u8> = record
-        .quality_scores()
-        .as_ref().to_vec();
+    let orig_qual: Vec<u8> = record.quality_scores().as_ref().to_vec();
 
     // Build new sequence with deletion (remove del_len bases after the anchor).
     let anchor_end = offset + alt_seq.len();
@@ -284,11 +286,7 @@ pub fn apply_deletion(record: &mut RecordBuf, mutation: &MutationType) -> Modify
 
 /// Given a CIGAR and alignment start, compute the read offset for a given
 /// reference position. Returns `None` if the position is not covered.
-pub fn cigar_ref_to_read_offset(
-    cigar: &[Op],
-    align_start: u64,
-    ref_pos: u64,
-) -> Option<usize> {
+pub fn cigar_ref_to_read_offset(cigar: &[Op], align_start: u64, ref_pos: u64) -> Option<usize> {
     if ref_pos < align_start {
         return None;
     }
@@ -391,7 +389,11 @@ fn update_cigar_for_insertion(
             continue;
         }
 
-        let op_read_len = if op.kind().consumes_read() { op.len() } else { 0 };
+        let op_read_len = if op.kind().consumes_read() {
+            op.len()
+        } else {
+            0
+        };
 
         if read_cursor + op_read_len > read_offset && !inserted {
             // Split this op at the insertion point.
@@ -453,7 +455,11 @@ fn update_cigar_for_deletion(
             continue;
         }
 
-        let op_read_len = if op.kind().consumes_read() { op.len() } else { 0 };
+        let op_read_len = if op.kind().consumes_read() {
+            op.len()
+        } else {
+            0
+        };
 
         if op.kind().consumes_read() && read_cursor + op_read_len > read_offset && !deleted {
             let before = read_offset - read_cursor;
@@ -639,9 +645,7 @@ mod tests {
     }
 
     fn get_seq(record: &RecordBuf) -> Vec<u8> {
-        record
-            .sequence()
-            .as_ref().to_vec()
+        record.sequence().as_ref().to_vec()
     }
 
     fn get_cigar_str(record: &RecordBuf) -> String {
@@ -657,7 +661,11 @@ mod tests {
     fn test_apply_snv_basic() {
         // Read: ACGTACGT at position 100
         let mut record = make_record(b"ACGTACGT", 100, "8M");
-        let mutation = MutationType::Snv { pos: 102, ref_base: b'G', alt_base: b'T' };
+        let mutation = MutationType::Snv {
+            pos: 102,
+            ref_base: b'G',
+            alt_base: b'T',
+        };
         let result = apply_snv(&mut record, &mutation);
         assert_eq!(result, ModifyResult::Modified);
         let seq = get_seq(&record);
@@ -667,21 +675,28 @@ mod tests {
     #[test]
     fn test_apply_snv_preserves_quality() {
         let mut record = make_record(b"ACGTACGT", 100, "8M");
-        let orig_quals: Vec<u8> = record
-            .quality_scores()
-            .as_ref().to_vec();
-        let mutation = MutationType::Snv { pos: 102, ref_base: b'G', alt_base: b'T' };
+        let orig_quals: Vec<u8> = record.quality_scores().as_ref().to_vec();
+        let mutation = MutationType::Snv {
+            pos: 102,
+            ref_base: b'G',
+            alt_base: b'T',
+        };
         apply_snv(&mut record, &mutation);
-        let new_quals: Vec<u8> = record
-            .quality_scores()
-            .as_ref().to_vec();
-        assert_eq!(orig_quals, new_quals, "quality scores must be preserved for SNV");
+        let new_quals: Vec<u8> = record.quality_scores().as_ref().to_vec();
+        assert_eq!(
+            orig_quals, new_quals,
+            "quality scores must be preserved for SNV"
+        );
     }
 
     #[test]
     fn test_apply_snv_wrong_ref_base_unchanged() {
         let mut record = make_record(b"ACGTACGT", 100, "8M");
-        let mutation = MutationType::Snv { pos: 102, ref_base: b'T', alt_base: b'A' };
+        let mutation = MutationType::Snv {
+            pos: 102,
+            ref_base: b'T',
+            alt_base: b'A',
+        };
         let result = apply_snv(&mut record, &mutation);
         assert_eq!(result, ModifyResult::Unchanged);
         let seq = get_seq(&record);
@@ -691,7 +706,11 @@ mod tests {
     #[test]
     fn test_apply_snv_out_of_range() {
         let mut record = make_record(b"ACGTACGT", 100, "8M");
-        let mutation = MutationType::Snv { pos: 200, ref_base: b'A', alt_base: b'T' };
+        let mutation = MutationType::Snv {
+            pos: 200,
+            ref_base: b'A',
+            alt_base: b'T',
+        };
         let result = apply_snv(&mut record, &mutation);
         assert_eq!(result, ModifyResult::Unchanged);
     }
@@ -699,7 +718,11 @@ mod tests {
     #[test]
     fn test_apply_snv_updates_nm_tag() {
         let mut record = make_record_with_nm(b"ACGTACGT", 100, "8M", 0);
-        let mutation = MutationType::Snv { pos: 100, ref_base: b'A', alt_base: b'C' };
+        let mutation = MutationType::Snv {
+            pos: 100,
+            ref_base: b'A',
+            alt_base: b'C',
+        };
         apply_snv(&mut record, &mutation);
         let nm = record
             .data()
@@ -712,7 +735,11 @@ mod tests {
     #[test]
     fn test_apply_snv_nm_increments_from_existing() {
         let mut record = make_record_with_nm(b"ACGTACGT", 100, "8M", 2);
-        let mutation = MutationType::Snv { pos: 100, ref_base: b'A', alt_base: b'C' };
+        let mutation = MutationType::Snv {
+            pos: 100,
+            ref_base: b'A',
+            alt_base: b'C',
+        };
         apply_snv(&mut record, &mutation);
         let nm = record
             .data()
@@ -755,7 +782,10 @@ mod tests {
         };
         apply_insertion(&mut record, &mutation);
         let cigar = get_cigar_str(&record);
-        assert!(cigar.contains('I'), "CIGAR should contain an insertion op: {cigar}");
+        assert!(
+            cigar.contains('I'),
+            "CIGAR should contain an insertion op: {cigar}"
+        );
     }
 
     #[test]
@@ -785,7 +815,10 @@ mod tests {
         };
         apply_deletion(&mut record, &mutation);
         let cigar = get_cigar_str(&record);
-        assert!(cigar.contains('D'), "CIGAR should contain a deletion op: {cigar}");
+        assert!(
+            cigar.contains('D'),
+            "CIGAR should contain a deletion op: {cigar}"
+        );
     }
 
     // ------------------------------------------------------------------

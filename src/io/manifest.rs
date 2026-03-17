@@ -65,7 +65,8 @@ impl Manifest {
 
     /// Record an output file path under the given key (e.g. `"fastq_r1"`).
     pub fn add_output_file(&mut self, key: &str, path: &Path) {
-        self.output_files.insert(key.to_string(), path.to_path_buf());
+        self.output_files
+            .insert(key.to_string(), path.to_path_buf());
     }
 
     /// Replace the statistics section with the provided values.
@@ -76,8 +77,8 @@ impl Manifest {
     /// Serialise the manifest to pretty-printed JSON and write it to `path`.
     #[allow(dead_code)]
     pub fn write(&self, path: &Path) -> Result<()> {
-        let json = serde_json::to_string_pretty(self)
-            .context("failed to serialise manifest to JSON")?;
+        let json =
+            serde_json::to_string_pretty(self).context("failed to serialise manifest to JSON")?;
         std::fs::write(path, json)
             .with_context(|| format!("failed to write manifest to {}", path.display()))?;
         Ok(())
@@ -112,7 +113,20 @@ fn current_timestamp_utc() -> String {
         days -= days_in_year;
         year += 1;
     }
-    let months = [31u64, if is_leap(year) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let months = [
+        31u64,
+        if is_leap(year) { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1u32;
     for &m in &months {
         if days < m {
@@ -130,7 +144,7 @@ fn current_timestamp_utc() -> String {
 }
 
 fn is_leap(year: u32) -> bool {
-    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 #[cfg(test)]
@@ -217,10 +231,12 @@ mod tests {
         assert!(manifest.output_files.contains_key("fastq_r1"));
 
         // set statistics
-        let mut stats = SimulationStatistics::default();
-        stats.total_read_pairs = 450_000_000;
-        stats.variants_spiked = 5_000;
-        stats.wall_time_seconds = 2_400.0;
+        let stats = SimulationStatistics {
+            total_read_pairs: 450_000_000,
+            variants_spiked: 5_000,
+            wall_time_seconds: 2_400.0,
+            ..Default::default()
+        };
         manifest.set_statistics(stats);
 
         assert_eq!(manifest.statistics.total_read_pairs, 450_000_000);
@@ -314,17 +330,12 @@ mod tests {
         let config_section = parsed.get("config").expect("config key must exist");
 
         // Verify a few representative fields round-tripped correctly.
-        assert_eq!(
-            config_section["sample"]["name"].as_str().unwrap(),
-            "SAMPLE"
-        );
+        assert_eq!(config_section["sample"]["name"].as_str().unwrap(), "SAMPLE");
         assert_eq!(
             config_section["sample"]["read_length"].as_u64().unwrap(),
             150
         );
-        assert!(
-            (config_section["sample"]["coverage"].as_f64().unwrap() - 30.0).abs() < 1e-9
-        );
+        assert!((config_section["sample"]["coverage"].as_f64().unwrap() - 30.0).abs() < 1e-9);
         assert_eq!(config_section["seed"].as_u64().unwrap(), 42);
     }
 
@@ -358,6 +369,9 @@ mod tests {
         // Round-trip through JSON to confirm paths survive serialisation.
         let json = serde_json::to_string(&manifest).unwrap();
         let back: Manifest = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.output_files["fastq_r1"], PathBuf::from("output/sample_R1.fastq.gz"));
+        assert_eq!(
+            back.output_files["fastq_r1"],
+            PathBuf::from("output/sample_R1.fastq.gz")
+        );
     }
 }

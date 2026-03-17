@@ -79,8 +79,8 @@ pub fn inject_errors<R: Rng>(seq: &mut [u8], qual: &[u8], rng: &mut R) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn test_parametric_quality_length() {
@@ -149,7 +149,11 @@ mod tests {
             let original = vec![b'A'; 100];
             let mut seq = original.clone();
             inject_errors(&mut seq, &qual, &mut rng);
-            total_errors += seq.iter().zip(original.iter()).filter(|(a, b)| a != b).count();
+            total_errors += seq
+                .iter()
+                .zip(original.iter())
+                .filter(|(a, b)| a != b)
+                .count();
         }
 
         let observed_rate = total_errors as f64 / (n * 100) as f64;

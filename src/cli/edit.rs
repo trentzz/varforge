@@ -95,10 +95,7 @@ pub fn run(opts: EditOpts, _threads: Option<usize>) -> Result<()> {
     let spiked = editor.run().context("BAM editing failed")?;
 
     // Report summary.
-    eprintln!(
-        "Edit complete: {} variants spiked in",
-        spiked.len()
-    );
+    eprintln!("Edit complete: {} variants spiked in", spiked.len());
     for sv in &spiked {
         eprintln!(
             "  {}:{} ({}) depth={} alt={} VAF={:.4}",
@@ -242,7 +239,10 @@ fn load_variants_from_vcf(vcf_path: &PathBuf) -> Result<Vec<Variant>> {
         }
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.len() < 5 {
-            tracing::warn!("VCF line {} has fewer than 5 fields, skipping", line_num + 1);
+            tracing::warn!(
+                "VCF line {} has fewer than 5 fields, skipping",
+                line_num + 1
+            );
             continue;
         }
 
@@ -277,7 +277,11 @@ fn load_variants_from_vcf(vcf_path: &PathBuf) -> Result<Vec<Variant>> {
                 alt_base: alt_allele[0],
             }
         } else {
-            MutationType::Indel { pos, ref_seq: ref_allele, alt_seq: alt_allele }
+            MutationType::Indel {
+                pos,
+                ref_seq: ref_allele,
+                alt_seq: alt_allele,
+            }
         };
 
         variants.push(Variant {
@@ -288,14 +292,21 @@ fn load_variants_from_vcf(vcf_path: &PathBuf) -> Result<Vec<Variant>> {
         });
     }
 
-    tracing::info!("loaded {} variants from {}", variants.len(), vcf_path.display());
+    tracing::info!(
+        "loaded {} variants from {}",
+        variants.len(),
+        vcf_path.display()
+    );
     Ok(variants)
 }
 
 /// Extract AF or EXPECTED_VAF from a VCF INFO field string.
 fn parse_vaf_from_info(info: &str) -> Option<f64> {
     for field in info.split(';') {
-        if let Some(val) = field.strip_prefix("AF=").or_else(|| field.strip_prefix("EXPECTED_VAF=")) {
+        if let Some(val) = field
+            .strip_prefix("AF=")
+            .or_else(|| field.strip_prefix("EXPECTED_VAF="))
+        {
             if let Ok(f) = val.parse::<f64>() {
                 return Some(f);
             }
@@ -332,8 +343,8 @@ mod tests {
 
     #[test]
     fn test_load_variants_from_vcf_snv() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let mut tmp = NamedTempFile::new().unwrap();
         writeln!(tmp, "##fileformat=VCFv4.3").unwrap();
@@ -349,7 +360,10 @@ mod tests {
         assert_eq!(variants[0].pos(), 100); // 0-based
         assert!((variants[0].expected_vaf - 0.3).abs() < 1e-9);
 
-        if let MutationType::Snv { ref_base, alt_base, .. } = variants[0].mutation {
+        if let MutationType::Snv {
+            ref_base, alt_base, ..
+        } = variants[0].mutation
+        {
             assert_eq!(ref_base, b'A');
             assert_eq!(alt_base, b'T');
         } else {
@@ -359,8 +373,8 @@ mod tests {
 
     #[test]
     fn test_load_variants_from_vcf_indel() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let mut tmp = NamedTempFile::new().unwrap();
         writeln!(tmp, "##fileformat=VCFv4.3").unwrap();
@@ -373,7 +387,9 @@ mod tests {
         assert_eq!(variants.len(), 2);
 
         match &variants[0].mutation {
-            MutationType::Indel { ref_seq, alt_seq, .. } => {
+            MutationType::Indel {
+                ref_seq, alt_seq, ..
+            } => {
                 assert_eq!(ref_seq, b"ACG");
                 assert_eq!(alt_seq, b"A");
             }
@@ -381,7 +397,9 @@ mod tests {
         }
 
         match &variants[1].mutation {
-            MutationType::Indel { ref_seq, alt_seq, .. } => {
+            MutationType::Indel {
+                ref_seq, alt_seq, ..
+            } => {
                 assert_eq!(ref_seq, b"A");
                 assert_eq!(alt_seq, b"ATGT");
             }
@@ -391,8 +409,8 @@ mod tests {
 
     #[test]
     fn test_load_variants_from_vcf_symbolic_skipped() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let mut tmp = NamedTempFile::new().unwrap();
         writeln!(tmp, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO").unwrap();

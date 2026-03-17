@@ -283,7 +283,9 @@ pub struct SampleEntry {
     pub clonal_shift: std::collections::HashMap<String, f64>,
 }
 
-fn default_tumour_fraction() -> f64 { 1.0 }
+fn default_tumour_fraction() -> f64 {
+    1.0
+}
 
 /// Configuration for target-capture efficiency (mirrors `capture:` YAML section).
 ///
@@ -327,28 +329,72 @@ impl Default for CaptureConfig {
 }
 
 // Default value functions
-fn default_true() -> bool { true }
-fn default_normal_cn() -> u32 { 2 }
-fn default_sample_name() -> String { "SAMPLE".to_string() }
-fn default_read_length() -> usize { 150 }
-pub fn default_coverage() -> f64 { 30.0 }
-pub fn default_fragment_mean() -> f64 { 300.0 }
-pub fn default_fragment_sd() -> f64 { 50.0 }
-fn default_mean_quality() -> u8 { 36 }
-fn default_quality_decay() -> f64 { 0.003 }
-fn default_purity() -> f64 { 1.0 }
-fn default_ploidy() -> u32 { 2 }
-fn default_vaf_min() -> f64 { 0.001 }
-fn default_vaf_max() -> f64 { 0.5 }
-fn default_snv_fraction() -> f64 { 0.80 }
-fn default_indel_fraction() -> f64 { 0.15 }
-fn default_mnv_fraction() -> f64 { 0.05 }
-fn default_umi_length() -> usize { 8 }
-fn default_pcr_cycles() -> u32 { 10 }
-fn default_family_size_mean() -> f64 { 3.0 }
-fn default_family_size_sd() -> f64 { 1.5 }
-fn default_gc_bias_model() -> String { "default".to_string() }
-fn default_gc_bias_severity() -> f64 { 1.0 }
+fn default_true() -> bool {
+    true
+}
+fn default_normal_cn() -> u32 {
+    2
+}
+fn default_sample_name() -> String {
+    "SAMPLE".to_string()
+}
+fn default_read_length() -> usize {
+    150
+}
+pub fn default_coverage() -> f64 {
+    30.0
+}
+pub fn default_fragment_mean() -> f64 {
+    300.0
+}
+pub fn default_fragment_sd() -> f64 {
+    50.0
+}
+fn default_mean_quality() -> u8 {
+    36
+}
+fn default_quality_decay() -> f64 {
+    0.003
+}
+fn default_purity() -> f64 {
+    1.0
+}
+fn default_ploidy() -> u32 {
+    2
+}
+fn default_vaf_min() -> f64 {
+    0.001
+}
+fn default_vaf_max() -> f64 {
+    0.5
+}
+fn default_snv_fraction() -> f64 {
+    0.80
+}
+fn default_indel_fraction() -> f64 {
+    0.15
+}
+fn default_mnv_fraction() -> f64 {
+    0.05
+}
+fn default_umi_length() -> usize {
+    8
+}
+fn default_pcr_cycles() -> u32 {
+    10
+}
+fn default_family_size_mean() -> f64 {
+    3.0
+}
+fn default_family_size_sd() -> f64 {
+    1.5
+}
+fn default_gc_bias_model() -> String {
+    "default".to_string()
+}
+fn default_gc_bias_severity() -> f64 {
+    1.0
+}
 impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
@@ -357,10 +403,18 @@ impl Default for PerformanceConfig {
     }
 }
 
-fn default_output_buffer_regions() -> usize { 64 }
-fn default_off_target_fraction() -> f64 { 0.2 }
-fn default_coverage_uniformity() -> f64 { 0.3 }
-fn default_edge_dropoff_bases() -> u32 { 50 }
+fn default_output_buffer_regions() -> usize {
+    64
+}
+fn default_off_target_fraction() -> f64 {
+    0.2
+}
+fn default_coverage_uniformity() -> f64 {
+    0.3
+}
+fn default_edge_dropoff_bases() -> u32 {
+    50
+}
 
 pub fn load(path: &Path) -> Result<Config> {
     let contents = std::fs::read_to_string(path)
@@ -442,8 +496,8 @@ pub fn validate(config: &Config) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     fn write_yaml(content: &str) -> NamedTempFile {
         let mut f = NamedTempFile::new().unwrap();
@@ -513,7 +567,16 @@ chromosomes:
         assert_eq!(cfg.sample.read_length, 100);
         assert_eq!(cfg.tumour.as_ref().unwrap().purity, 0.7);
         assert_eq!(cfg.tumour.as_ref().unwrap().clones.len(), 2);
-        assert_eq!(cfg.mutations.as_ref().unwrap().random.as_ref().unwrap().count, 50);
+        assert_eq!(
+            cfg.mutations
+                .as_ref()
+                .unwrap()
+                .random
+                .as_ref()
+                .unwrap()
+                .count,
+            50
+        );
         assert!(cfg.umi.as_ref().unwrap().duplex);
         assert_eq!(cfg.seed, Some(42));
     }

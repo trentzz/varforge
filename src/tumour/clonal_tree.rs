@@ -34,7 +34,11 @@ impl ClonalTree {
         // Validate CCFs are in [0, 1]
         for clone in &clones {
             if !(0.0..=1.0).contains(&clone.ccf) {
-                bail!("clone {} CCF {} must be between 0.0 and 1.0", clone.id, clone.ccf);
+                bail!(
+                    "clone {} CCF {} must be between 0.0 and 1.0",
+                    clone.id,
+                    clone.ccf
+                );
             }
         }
 
@@ -42,12 +46,9 @@ impl ClonalTree {
         let mut children: HashMap<String, Vec<String>> = HashMap::new();
         for clone in &clones {
             if let Some(parent_id) = &clone.parent {
-                let parent_ccf = ccf_map.get(parent_id.as_str())
-                    .ok_or_else(|| anyhow::anyhow!(
-                        "clone {} references unknown parent {}",
-                        clone.id,
-                        parent_id
-                    ))?;
+                let parent_ccf = ccf_map.get(parent_id.as_str()).ok_or_else(|| {
+                    anyhow::anyhow!("clone {} references unknown parent {}", clone.id, parent_id)
+                })?;
                 if clone.ccf > *parent_ccf {
                     bail!(
                         "clone {} CCF ({}) exceeds parent {} CCF ({})",
@@ -57,14 +58,20 @@ impl ClonalTree {
                         parent_ccf
                     );
                 }
-                children.entry(parent_id.clone()).or_default().push(clone.id.clone());
+                children
+                    .entry(parent_id.clone())
+                    .or_default()
+                    .push(clone.id.clone());
             }
         }
 
         // Validate exactly one root (no parent)
         let roots: Vec<_> = clones.iter().filter(|c| c.parent.is_none()).collect();
         if roots.len() != 1 {
-            bail!("clonal tree must have exactly one root clone, found {}", roots.len());
+            bail!(
+                "clonal tree must have exactly one root clone, found {}",
+                roots.len()
+            );
         }
 
         Ok(Self { clones, children })
@@ -82,7 +89,10 @@ impl ClonalTree {
 
     /// Get children of a clone.
     pub fn children_of(&self, clone_id: &str) -> &[String] {
-        self.children.get(clone_id).map(|v| v.as_slice()).unwrap_or(&[])
+        self.children
+            .get(clone_id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Get a clone by ID.
@@ -110,11 +120,28 @@ mod tests {
 
     fn simple_tree() -> ClonalTree {
         ClonalTree::new(vec![
-            Clone { id: "root".into(), ccf: 1.0, parent: None },
-            Clone { id: "sub_a".into(), ccf: 0.4, parent: Some("root".into()) },
-            Clone { id: "sub_b".into(), ccf: 0.2, parent: Some("root".into()) },
-            Clone { id: "sub_a1".into(), ccf: 0.1, parent: Some("sub_a".into()) },
-        ]).unwrap()
+            Clone {
+                id: "root".into(),
+                ccf: 1.0,
+                parent: None,
+            },
+            Clone {
+                id: "sub_a".into(),
+                ccf: 0.4,
+                parent: Some("root".into()),
+            },
+            Clone {
+                id: "sub_b".into(),
+                ccf: 0.2,
+                parent: Some("root".into()),
+            },
+            Clone {
+                id: "sub_a1".into(),
+                ccf: 0.1,
+                parent: Some("sub_a".into()),
+            },
+        ])
+        .unwrap()
     }
 
     #[test]
@@ -150,8 +177,16 @@ mod tests {
     #[test]
     fn test_reject_child_ccf_exceeds_parent() {
         let result = ClonalTree::new(vec![
-            Clone { id: "root".into(), ccf: 0.5, parent: None },
-            Clone { id: "sub".into(), ccf: 0.8, parent: Some("root".into()) },
+            Clone {
+                id: "root".into(),
+                ccf: 0.5,
+                parent: None,
+            },
+            Clone {
+                id: "sub".into(),
+                ccf: 0.8,
+                parent: Some("root".into()),
+            },
         ]);
         assert!(result.is_err());
     }
@@ -159,8 +194,16 @@ mod tests {
     #[test]
     fn test_reject_unknown_parent() {
         let result = ClonalTree::new(vec![
-            Clone { id: "root".into(), ccf: 1.0, parent: None },
-            Clone { id: "sub".into(), ccf: 0.5, parent: Some("nonexistent".into()) },
+            Clone {
+                id: "root".into(),
+                ccf: 1.0,
+                parent: None,
+            },
+            Clone {
+                id: "sub".into(),
+                ccf: 0.5,
+                parent: Some("nonexistent".into()),
+            },
         ]);
         assert!(result.is_err());
     }
@@ -168,8 +211,16 @@ mod tests {
     #[test]
     fn test_reject_no_root() {
         let result = ClonalTree::new(vec![
-            Clone { id: "a".into(), ccf: 0.5, parent: Some("b".into()) },
-            Clone { id: "b".into(), ccf: 0.8, parent: Some("a".into()) },
+            Clone {
+                id: "a".into(),
+                ccf: 0.5,
+                parent: Some("b".into()),
+            },
+            Clone {
+                id: "b".into(),
+                ccf: 0.8,
+                parent: Some("a".into()),
+            },
         ]);
         assert!(result.is_err());
     }
@@ -177,8 +228,16 @@ mod tests {
     #[test]
     fn test_reject_multiple_roots() {
         let result = ClonalTree::new(vec![
-            Clone { id: "a".into(), ccf: 1.0, parent: None },
-            Clone { id: "b".into(), ccf: 1.0, parent: None },
+            Clone {
+                id: "a".into(),
+                ccf: 1.0,
+                parent: None,
+            },
+            Clone {
+                id: "b".into(),
+                ccf: 1.0,
+                parent: None,
+            },
         ]);
         assert!(result.is_err());
     }
@@ -191,17 +250,22 @@ mod tests {
 
     #[test]
     fn test_ccf_out_of_range() {
-        let result = ClonalTree::new(vec![
-            Clone { id: "root".into(), ccf: 1.5, parent: None },
-        ]);
+        let result = ClonalTree::new(vec![Clone {
+            id: "root".into(),
+            ccf: 1.5,
+            parent: None,
+        }]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_single_clone() {
-        let tree = ClonalTree::new(vec![
-            Clone { id: "root".into(), ccf: 1.0, parent: None },
-        ]).unwrap();
+        let tree = ClonalTree::new(vec![Clone {
+            id: "root".into(),
+            ccf: 1.0,
+            parent: None,
+        }])
+        .unwrap();
         assert_eq!(tree.clones().len(), 1);
         assert!(tree.children_of("root").is_empty());
     }

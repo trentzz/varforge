@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use crate::io::config::{
-    Config, FragmentConfig, FragmentModel, SampleConfig, SampleEntry, TumourConfig, CloneConfig,
+    CloneConfig, Config, FragmentConfig, FragmentModel, SampleConfig, SampleEntry, TumourConfig,
 };
 
 // ---------------------------------------------------------------------------
@@ -91,7 +91,10 @@ impl MultiSamplePlan {
             return None;
         }
         let samples = entries.iter().map(SampleDelta::from_entry).collect();
-        Some(Self { base: config, samples })
+        Some(Self {
+            base: config,
+            samples,
+        })
     }
 
     /// Resolve the full `Config` for every sample.
@@ -191,7 +194,11 @@ fn apply_tumour_fraction(
             // Build a minimal TumourConfig from the clonal_shift map.
             let clones: Vec<CloneConfig> = clonal_shift
                 .iter()
-                .map(|(id, &ccf)| CloneConfig { id: id.clone(), ccf, parent: None })
+                .map(|(id, &ccf)| CloneConfig {
+                    id: id.clone(),
+                    ccf,
+                    parent: None,
+                })
                 .collect();
             cfg.tumour = Some(TumourConfig {
                 purity: tumour_fraction,
@@ -238,7 +245,13 @@ pub fn write_combined_manifest(
         serde_json::to_string_pretty(&manifest)
             .map_err(|e| anyhow::anyhow!("failed to serialize combined manifest: {}", e))?,
     )
-    .map_err(|e| anyhow::anyhow!("failed to write combined manifest {}: {}", manifest_path.display(), e))?;
+    .map_err(|e| {
+        anyhow::anyhow!(
+            "failed to write combined manifest {}: {}",
+            manifest_path.display(),
+            e
+        )
+    })?;
 
     tracing::info!("combined manifest written to {}", manifest_path.display());
     Ok(())
@@ -292,8 +305,16 @@ mod tests {
                 purity: 0.5,
                 ploidy: 2,
                 clones: vec![
-                    CloneConfig { id: "clone_A".to_string(), ccf: 1.0, parent: None },
-                    CloneConfig { id: "clone_B".to_string(), ccf: 0.4, parent: Some("clone_A".to_string()) },
+                    CloneConfig {
+                        id: "clone_A".to_string(),
+                        ccf: 1.0,
+                        parent: None,
+                    },
+                    CloneConfig {
+                        id: "clone_B".to_string(),
+                        ccf: 0.4,
+                        parent: Some("clone_A".to_string()),
+                    },
                 ],
             }),
             mutations: None,
@@ -352,7 +373,10 @@ samples:
         assert_eq!(entries[0].name, "diagnosis");
         assert!((entries[0].coverage - 200.0).abs() < 1e-9);
         assert!((entries[0].tumour_fraction - 0.05).abs() < 1e-9);
-        assert!(matches!(entries[0].fragment_model, Some(FragmentModel::Cfda)));
+        assert!(matches!(
+            entries[0].fragment_model,
+            Some(FragmentModel::Cfda)
+        ));
 
         assert_eq!(entries[2].name, "relapse");
         assert_eq!(entries[2].clonal_shift.len(), 2);
@@ -399,7 +423,10 @@ samples:
         // Both samples share the same mutations config (or lack thereof).
         let m0 = &resolved[0].config.mutations;
         let m1 = &resolved[1].config.mutations;
-        assert!(m0.is_some() && m1.is_some(), "both should have mutations config");
+        assert!(
+            m0.is_some() && m1.is_some(),
+            "both should have mutations config"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -445,9 +472,18 @@ samples:
                 .purity
         };
 
-        assert!((purity(0) - 0.05).abs() < 1e-9, "diagnosis purity should be 0.05");
-        assert!((purity(1) - 0.001).abs() < 1e-9, "post_treatment purity should be 0.001");
-        assert!((purity(2) - 0.03).abs() < 1e-9, "relapse purity should be 0.03");
+        assert!(
+            (purity(0) - 0.05).abs() < 1e-9,
+            "diagnosis purity should be 0.05"
+        );
+        assert!(
+            (purity(1) - 0.001).abs() < 1e-9,
+            "post_treatment purity should be 0.001"
+        );
+        assert!(
+            (purity(2) - 0.03).abs() < 1e-9,
+            "relapse purity should be 0.03"
+        );
 
         // All different from each other.
         assert_ne!(purity(0).to_bits(), purity(1).to_bits());
@@ -483,11 +519,25 @@ samples:
             .as_ref()
             .expect("tumour must be present");
 
-        let clone_a = tumour.clones.iter().find(|c| c.id == "clone_A").expect("clone_A must exist");
-        let clone_b = tumour.clones.iter().find(|c| c.id == "clone_B").expect("clone_B must exist");
+        let clone_a = tumour
+            .clones
+            .iter()
+            .find(|c| c.id == "clone_A")
+            .expect("clone_A must exist");
+        let clone_b = tumour
+            .clones
+            .iter()
+            .find(|c| c.id == "clone_B")
+            .expect("clone_B must exist");
 
-        assert!((clone_a.ccf - 0.8).abs() < 1e-9, "clone_A CCF should be 0.8 after shift");
-        assert!((clone_b.ccf - 0.1).abs() < 1e-9, "clone_B CCF should be 0.1 after shift");
+        assert!(
+            (clone_a.ccf - 0.8).abs() < 1e-9,
+            "clone_A CCF should be 0.8 after shift"
+        );
+        assert!(
+            (clone_b.ccf - 0.1).abs() < 1e-9,
+            "clone_B CCF should be 0.1 after shift"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -572,7 +622,9 @@ samples:
         assert_eq!(parsed["multi_sample"], true);
         assert_eq!(parsed["sample_count"], 2);
 
-        let samples = parsed["samples"].as_array().expect("samples should be an array");
+        let samples = parsed["samples"]
+            .as_array()
+            .expect("samples should be an array");
         assert_eq!(samples.len(), 2);
         assert_eq!(samples[0]["name"], "diagnosis");
         assert_eq!(samples[1]["name"], "relapse");

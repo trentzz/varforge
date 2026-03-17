@@ -111,8 +111,8 @@ impl PcrFamilySizeSampler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn test_normal_fragment_sampler() {
@@ -121,7 +121,11 @@ mod tests {
         let sizes: Vec<usize> = (0..1000).map(|_| sampler.sample(&mut rng)).collect();
 
         let mean = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
-        assert!((mean - 300.0).abs() < 10.0, "mean {} too far from 300", mean);
+        assert!(
+            (mean - 300.0).abs() < 10.0,
+            "mean {} too far from 300",
+            mean
+        );
         assert!(sizes.iter().all(|&s| s >= 50), "no fragment below minimum");
     }
 
@@ -133,7 +137,11 @@ mod tests {
 
         let mean = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
         // With 85% mono (167) and 15% di (334), expected mean ~192
-        assert!(mean > 150.0 && mean < 230.0, "cfDNA mean {} unexpected", mean);
+        assert!(
+            mean > 150.0 && mean < 230.0,
+            "cfDNA mean {} unexpected",
+            mean
+        );
     }
 
     #[test]
@@ -144,10 +152,12 @@ mod tests {
 
         let normal_mean: f64 = (0..5000)
             .map(|_| sampler_normal.sample(&mut rng) as f64)
-            .sum::<f64>() / 5000.0;
+            .sum::<f64>()
+            / 5000.0;
         let ctdna_mean: f64 = (0..5000)
             .map(|_| sampler_ctdna.sample(&mut rng) as f64)
-            .sum::<f64>() / 5000.0;
+            .sum::<f64>()
+            / 5000.0;
 
         assert!(
             ctdna_mean < normal_mean,

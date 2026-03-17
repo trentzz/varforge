@@ -16,10 +16,7 @@ pub fn read_pairs_for_coverage(region_length: u64, coverage: f64, read_length: u
 ///
 /// Each region is sized to produce a workable number of reads.
 /// Boundaries avoid splitting at variant sites.
-pub fn partition_regions(
-    chrom_lengths: &[(String, u64)],
-    chunk_size: u64,
-) -> Vec<Region> {
+pub fn partition_regions(chrom_lengths: &[(String, u64)], chunk_size: u64) -> Vec<Region> {
     let mut regions = Vec::new();
     for (chrom, length) in chrom_lengths {
         let mut start = 0u64;
@@ -38,7 +35,10 @@ pub fn intersect_with_targets(regions: &[Region], targets: &[Region]) -> Vec<Reg
     let mut result = Vec::new();
     for region in regions {
         for target in targets {
-            if region.chrom == target.chrom && region.start < target.end && region.end > target.start {
+            if region.chrom == target.chrom
+                && region.start < target.end
+                && region.end > target.start
+            {
                 result.push(Region::new(
                     region.chrom.clone(),
                     region.start.max(target.start),
@@ -77,10 +77,7 @@ mod tests {
 
     #[test]
     fn test_partition_regions() {
-        let chroms = vec![
-            ("chr1".to_string(), 1000u64),
-            ("chr2".to_string(), 500u64),
-        ];
+        let chroms = vec![("chr1".to_string(), 1000u64), ("chr2".to_string(), 500u64)];
         let regions = partition_regions(&chroms, 300);
         assert_eq!(regions.len(), 6); // chr1: 4 chunks, chr2: 2 chunks
 
@@ -99,9 +96,7 @@ mod tests {
             Region::new("chr1", 1000, 2000),
             Region::new("chr2", 0, 1000),
         ];
-        let targets = vec![
-            Region::new("chr1", 500, 1500),
-        ];
+        let targets = vec![Region::new("chr1", 500, 1500)];
         let intersected = intersect_with_targets(&regions, &targets);
         assert_eq!(intersected.len(), 2);
         assert_eq!(intersected[0], Region::new("chr1", 500, 1000));

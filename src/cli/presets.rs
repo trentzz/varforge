@@ -345,9 +345,10 @@ mod tests {
 
     #[test]
     fn test_all_presets_valid() {
+        use crate::io::config::{
+            Config, FragmentConfig, OutputConfig, QualityConfig, SampleConfig,
+        };
         use std::path::PathBuf;
-        use crate::io::config::{Config, OutputConfig, FragmentConfig,
-                                 QualityConfig, SampleConfig};
 
         let base_config = || Config {
             reference: PathBuf::from("/dev/null"),
@@ -381,7 +382,10 @@ mod tests {
             let mut cfg = base_config();
             apply_preset_to_config(&mut cfg, &overlay);
             // Basic sanity: coverage must be positive after applying preset.
-            assert!(cfg.sample.coverage > 0.0, "preset '{name}' gave non-positive coverage");
+            assert!(
+                cfg.sample.coverage > 0.0,
+                "preset '{name}' gave non-positive coverage"
+            );
         }
     }
 
@@ -393,9 +397,10 @@ mod tests {
     #[test]
     fn test_preset_precedence_yaml_wins() {
         // When YAML already set a value, the preset must NOT overwrite it.
+        use crate::io::config::{
+            Config, FragmentConfig, OutputConfig, QualityConfig, SampleConfig,
+        };
         use std::path::PathBuf;
-        use crate::io::config::{Config, OutputConfig, FragmentConfig,
-                                 QualityConfig, SampleConfig};
 
         let mut cfg = Config {
             reference: PathBuf::from("/dev/null"),
@@ -407,7 +412,10 @@ mod tests {
                 manifest: false,
             },
             // User set coverage to 60x in YAML.
-            sample: SampleConfig { coverage: 60.0, ..SampleConfig::default() },
+            sample: SampleConfig {
+                coverage: 60.0,
+                ..SampleConfig::default()
+            },
             fragment: FragmentConfig::default(),
             quality: QualityConfig::default(),
             tumour: None,

@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use noodles_bam as bam;
 use noodles_bgzf as bgzf;
+use noodles_core::Position;
 use noodles_sam::{
     self as sam,
     alignment::{
@@ -21,7 +22,6 @@ use noodles_sam::{
         Map,
     },
 };
-use noodles_core::Position;
 
 use crate::io::config::SampleConfig;
 
@@ -58,12 +58,10 @@ impl BamWriter {
         let hd = {
             let mut hd = Map::<map::Header>::new(Version::new(1, 6));
             // Set sort order to coordinate via other_fields
-            let so_tag = noodles_sam::header::record::value::map::tag::Other::try_from(
-                [b'S', b'O'],
-            )
-            .map_err(|_| anyhow::anyhow!("invalid SO tag"))?;
-            hd.other_fields_mut()
-                .insert(so_tag, "coordinate".into());
+            let so_tag =
+                noodles_sam::header::record::value::map::tag::Other::try_from([b'S', b'O'])
+                    .map_err(|_| anyhow::anyhow!("invalid SO tag"))?;
+            hd.other_fields_mut().insert(so_tag, "coordinate".into());
             hd
         };
 
@@ -73,10 +71,8 @@ impl BamWriter {
         for (name, length) in ref_sequences {
             let len = NonZeroUsize::try_from(*length as usize)
                 .with_context(|| format!("reference sequence length 0 for {}", name))?;
-            builder = builder.add_reference_sequence(
-                name.as_str(),
-                Map::<ReferenceSequence>::new(len),
-            );
+            builder =
+                builder.add_reference_sequence(name.as_str(), Map::<ReferenceSequence>::new(len));
         }
 
         // Build @RG with SM, PL, LB fields via other_fields
@@ -101,9 +97,7 @@ impl BamWriter {
                 .insert(lb_tag, sample_name.as_str().into());
         }
 
-        let header = builder
-            .add_read_group(sample_name.as_str(), rg)
-            .build();
+        let header = builder.add_read_group(sample_name.as_str(), rg).build();
 
         let mut writer = bam::io::Writer::new(file);
         writer
@@ -166,10 +160,10 @@ impl BamWriter {
             | Flags::REVERSE_COMPLEMENTED
             | Flags::LAST_SEGMENT;
 
-        let cigar_ops_r1 = parse_cigar(cigar_r1)
-            .with_context(|| format!("failed to parse CIGAR: {cigar_r1}"))?;
-        let cigar_ops_r2 = parse_cigar(cigar_r2)
-            .with_context(|| format!("failed to parse CIGAR: {cigar_r2}"))?;
+        let cigar_ops_r1 =
+            parse_cigar(cigar_r1).with_context(|| format!("failed to parse CIGAR: {cigar_r1}"))?;
+        let cigar_ops_r2 =
+            parse_cigar(cigar_r2).with_context(|| format!("failed to parse CIGAR: {cigar_r2}"))?;
 
         let r1 = RecordBuf::builder()
             .set_name(pair.name.as_str())
@@ -212,6 +206,7 @@ impl BamWriter {
     /// - `umi`: UMI barcode sequence string (written as `RX:Z:...`)
     /// - `family_id`: molecular family identifier (written as `MI:i:...`)
     #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
     pub fn write_pair_with_umi(
         &mut self,
         pair: &crate::core::types::ReadPair,
@@ -244,10 +239,10 @@ impl BamWriter {
             | Flags::REVERSE_COMPLEMENTED
             | Flags::LAST_SEGMENT;
 
-        let cigar_ops_r1 = parse_cigar(cigar_r1)
-            .with_context(|| format!("failed to parse CIGAR: {cigar_r1}"))?;
-        let cigar_ops_r2 = parse_cigar(cigar_r2)
-            .with_context(|| format!("failed to parse CIGAR: {cigar_r2}"))?;
+        let cigar_ops_r1 =
+            parse_cigar(cigar_r1).with_context(|| format!("failed to parse CIGAR: {cigar_r1}"))?;
+        let cigar_ops_r2 =
+            parse_cigar(cigar_r2).with_context(|| format!("failed to parse CIGAR: {cigar_r2}"))?;
 
         let data_r1: Data = [
             (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
@@ -461,10 +456,7 @@ mod tests {
         assert_eq!(r1.name().unwrap(), b"read1".as_ref());
         assert_eq!(r1.reference_sequence_id(), Some(0));
         // Position is 1-based in noodles: we wrote pos=1000 (0-based) => 1001
-        assert_eq!(
-            usize::from(r1.alignment_start().unwrap()),
-            1001
-        );
+        assert_eq!(usize::from(r1.alignment_start().unwrap()), 1001);
         assert!(!r1.sequence().is_empty());
     }
 
@@ -573,9 +565,7 @@ mod tests {
         let records = read_back_records(tmp.path(), &header);
         let r1 = &records[0];
 
-        let ops: Vec<Op> = r1
-            .cigar()
-            .as_ref().to_vec();
+        let ops: Vec<Op> = r1.cigar().as_ref().to_vec();
 
         assert_eq!(ops.len(), 3);
         assert_eq!(ops[0].kind(), Kind::Match);

@@ -34,14 +34,13 @@ pub fn inject_ffpe_damage<R: Rng>(
 /// Inject oxidative damage (8-oxoguanine / oxoG artifacts).
 ///
 /// oxoG causes G>T transversions, predominantly on one strand.
-pub fn inject_oxog_damage<R: Rng>(
-    seq: &mut [u8],
-    damage_rate: f64,
-    is_read1: bool,
-    rng: &mut R,
-) {
+pub fn inject_oxog_damage<R: Rng>(seq: &mut [u8], damage_rate: f64, is_read1: bool, rng: &mut R) {
     // oxoG artifacts show strand asymmetry: primarily affect read 1
-    let effective_rate = if is_read1 { damage_rate } else { damage_rate * 0.1 };
+    let effective_rate = if is_read1 {
+        damage_rate
+    } else {
+        damage_rate * 0.1
+    };
 
     for base in seq.iter_mut() {
         if *base == b'G' && rng.gen::<f64>() < effective_rate {
@@ -65,8 +64,8 @@ fn end_enrichment(pos: usize, length: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn test_ffpe_forward_strand_c_to_t() {
@@ -75,7 +74,11 @@ mod tests {
         let mut seq = original.clone();
         inject_ffpe_damage(&mut seq, 0.05, false, &mut rng);
 
-        let mutations: usize = seq.iter().zip(original.iter()).filter(|(a, b)| a != b).count();
+        let mutations: usize = seq
+            .iter()
+            .zip(original.iter())
+            .filter(|(a, b)| a != b)
+            .count();
         assert!(mutations > 0, "should have some C>T damage");
 
         // All mutations should be C>T
@@ -94,7 +97,11 @@ mod tests {
         let mut seq = original.clone();
         inject_ffpe_damage(&mut seq, 0.05, true, &mut rng);
 
-        let mutations: usize = seq.iter().zip(original.iter()).filter(|(a, b)| a != b).count();
+        let mutations: usize = seq
+            .iter()
+            .zip(original.iter())
+            .filter(|(a, b)| a != b)
+            .count();
         assert!(mutations > 0, "should have some G>A damage");
 
         for (new, old) in seq.iter().zip(original.iter()) {
@@ -120,7 +127,10 @@ mod tests {
         let original = vec![b'A'; 1000];
         let mut seq = original.clone();
         inject_ffpe_damage(&mut seq, 1.0, false, &mut rng);
-        assert_eq!(seq, original, "A bases should not be affected by FFPE on forward strand");
+        assert_eq!(
+            seq, original,
+            "A bases should not be affected by FFPE on forward strand"
+        );
     }
 
     #[test]
@@ -163,6 +173,11 @@ mod tests {
     fn test_end_enrichment() {
         let start = end_enrichment(0, 100);
         let middle = end_enrichment(50, 100);
-        assert!(start > middle, "ends ({}) should have more damage than middle ({})", start, middle);
+        assert!(
+            start > middle,
+            "ends ({}) should have more damage than middle ({})",
+            start,
+            middle
+        );
     }
 }

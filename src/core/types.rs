@@ -46,7 +46,11 @@ pub struct Read {
 
 impl Read {
     pub fn new(seq: Vec<u8>, qual: Vec<u8>) -> Self {
-        assert_eq!(seq.len(), qual.len(), "sequence and quality length mismatch");
+        assert_eq!(
+            seq.len(),
+            qual.len(),
+            "sequence and quality length mismatch"
+        );
         Self { seq, qual }
     }
 
@@ -65,12 +69,29 @@ impl Read {
 /// Mutation types that can be spiked into reads.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MutationType {
-    Snv { pos: u64, ref_base: u8, alt_base: u8 },
-    Indel { pos: u64, ref_seq: Vec<u8>, alt_seq: Vec<u8> },
-    Mnv { pos: u64, ref_seq: Vec<u8>, alt_seq: Vec<u8> },
+    Snv {
+        pos: u64,
+        ref_base: u8,
+        alt_base: u8,
+    },
+    Indel {
+        pos: u64,
+        ref_seq: Vec<u8>,
+        alt_seq: Vec<u8>,
+    },
+    Mnv {
+        pos: u64,
+        ref_seq: Vec<u8>,
+        alt_seq: Vec<u8>,
+    },
     /// Structural variant (>50 bp) with breakend notation for truth VCF.
     #[allow(dead_code)]
-    Sv { sv_type: SvType, chrom: String, start: u64, end: u64 },
+    Sv {
+        sv_type: SvType,
+        chrom: String,
+        start: u64,
+        end: u64,
+    },
 }
 
 /// Structural variant type classifications.

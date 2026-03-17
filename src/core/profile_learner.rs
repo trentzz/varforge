@@ -12,15 +12,10 @@ use anyhow::{Context, Result};
 use noodles_bam as bam;
 use noodles_sam::{
     self as sam,
-    alignment::{
-        record::Sequence as _,
-        record_buf::RecordBuf,
-    },
+    alignment::{record::Sequence as _, record_buf::RecordBuf},
 };
 
-use crate::core::error_profile::{
-    ContextEffectJson, ProfileJson, QualityDistributionJson,
-};
+use crate::core::error_profile::{ContextEffectJson, ProfileJson, QualityDistributionJson};
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -146,9 +141,7 @@ impl ProfileLearner {
             let is_r2 = record.flags().is_last_segment();
 
             // Quality scores.
-            let quals: Vec<u8> = record
-                .quality_scores()
-                .as_ref().to_vec();
+            let quals: Vec<u8> = record.quality_scores().as_ref().to_vec();
             let target = if is_r2 {
                 &mut stats.quality_counts_r2
             } else {
@@ -169,10 +162,7 @@ impl ProfileLearner {
             }
 
             // GC bias from sequence.
-            let seq_bytes: Vec<u8> = record
-                .sequence()
-                .iter()
-                .collect();
+            let seq_bytes: Vec<u8> = record.sequence().iter().collect();
             if !seq_bytes.is_empty() {
                 let gc = gc_percent(&seq_bytes);
                 let depth = 1u64; // each read contributes 1 unit of "depth"
@@ -199,12 +189,12 @@ impl ProfileLearner {
         // R1 quality distribution.
         let read1 = build_quality_distribution(&stats.quality_counts_r1, read_length);
         // R2 quality distribution (if any R2 data present).
-        let has_r2 = stats
-            .quality_counts_r2
-            .iter()
-            .any(|h| !h.is_empty());
+        let has_r2 = stats.quality_counts_r2.iter().any(|h| !h.is_empty());
         let read2 = if has_r2 {
-            Some(build_quality_distribution(&stats.quality_counts_r2, read_length))
+            Some(build_quality_distribution(
+                &stats.quality_counts_r2,
+                read_length,
+            ))
         } else {
             None
         };
@@ -213,10 +203,8 @@ impl ProfileLearner {
         let substitution_matrix = build_substitution_matrix(&stats.substitution_counts);
 
         // Context effects: flag contexts with substantially elevated error rates.
-        let context_effects = build_context_effects(
-            &stats.context_error_counts,
-            &stats.context_total_counts,
-        );
+        let context_effects =
+            build_context_effects(&stats.context_error_counts, &stats.context_total_counts);
 
         Ok(ProfileJson {
             platform: None,
@@ -256,9 +244,7 @@ impl ProfileLearner {
 
             let is_r2 = record.flags().is_last_segment();
 
-            let quals: Vec<u8> = record
-                .quality_scores()
-                .as_ref().to_vec();
+            let quals: Vec<u8> = record.quality_scores().as_ref().to_vec();
             let target = if is_r2 {
                 &mut stats.quality_counts_r2
             } else {
@@ -277,10 +263,7 @@ impl ProfileLearner {
                 }
             }
 
-            let seq_bytes: Vec<u8> = record
-                .sequence()
-                .iter()
-                .collect();
+            let seq_bytes: Vec<u8> = record.sequence().iter().collect();
             if !seq_bytes.is_empty() {
                 let gc = gc_percent(&seq_bytes);
                 stats.gc_bias[gc].0 += 1;
@@ -416,8 +399,13 @@ fn build_context_effects(
         if rate > global_rate * 5.0 {
             // Penalty in Phred points: -10 * log10(rate / global_rate), capped at 20.
             let penalty = (-10.0 * (global_rate / rate).log10()).round() as u8;
-            let penalty = penalty.min(20).max(1);
-            effects.insert(ctx.clone(), ContextEffectJson { quality_penalty: penalty });
+            let penalty = penalty.clamp(1, 20);
+            effects.insert(
+                ctx.clone(),
+                ContextEffectJson {
+                    quality_penalty: penalty,
+                },
+            );
         }
     }
     effects
@@ -449,12 +437,12 @@ pub fn make_test_record(
     pos: usize,
     ref_id: usize,
 ) -> Result<RecordBuf> {
+    use crate::io::bam::parse_cigar;
     use noodles_core::Position;
     use noodles_sam::alignment::{
         record::MappingQuality,
         record_buf::{Cigar, QualityScores, Sequence},
     };
-    use crate::io::bam::parse_cigar;
 
     let cigar_str = format!("{}M", seq.len());
     let cigar_ops = parse_cigar(&cigar_str)?;
@@ -469,8 +457,8 @@ pub fn make_test_record(
             | noodles_sam::alignment::record::Flags::FIRST_SEGMENT;
     }
 
-    let alignment_pos = Position::new(pos + 1)
-        .ok_or_else(|| anyhow::anyhow!("invalid position"))?;
+    let alignment_pos =
+        Position::new(pos + 1).ok_or_else(|| anyhow::anyhow!("invalid position"))?;
     let mate_pos = Position::new(pos + seq.len() + 1)
         .ok_or_else(|| anyhow::anyhow!("invalid mate position"))?;
 
@@ -505,8 +493,8 @@ pub fn write_test_bam(
         Map,
     };
 
-    let ref_len_nz = NonZeroUsize::try_from(ref_len as usize)
-        .context("reference length must be > 0")?;
+    let ref_len_nz =
+        NonZeroUsize::try_from(ref_len as usize).context("reference length must be > 0")?;
 
     let hd = Map::<map::Header>::new(Version::new(1, 6));
     let header = sam::Header::builder()
@@ -516,7 +504,9 @@ pub fn write_test_bam(
 
     let file = std::fs::File::create(path).context("failed to create test BAM")?;
     let mut writer = bam::io::Writer::new(file);
-    writer.write_header(&header).context("failed to write test BAM header")?;
+    writer
+        .write_header(&header)
+        .context("failed to write test BAM header")?;
 
     for record in records {
         use noodles_sam::alignment::io::Write as _;
@@ -538,8 +528,8 @@ mod tests {
     use super::*;
     use crate::core::error_profile::EmpiricalQualityModel;
     use crate::core::quality::QualityModel;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     fn learner() -> ProfileLearner {
         ProfileLearner::new(LearnerConfig {
@@ -576,7 +566,11 @@ mod tests {
             "wrong number of positions"
         );
         for (pos, entries) in profile.quality_distribution.read1.iter().enumerate() {
-            assert_eq!(entries.len(), 1, "pos {pos}: expected exactly 1 quality bucket");
+            assert_eq!(
+                entries.len(),
+                1,
+                "pos {pos}: expected exactly 1 quality bucket"
+            );
             assert!(
                 (entries[0][0] - 37.0).abs() < f64::EPSILON,
                 "pos {pos}: quality should be 37"
@@ -658,8 +652,7 @@ mod tests {
 
         let mut stats = LearnerStats::new(read_len);
         for record in &all {
-            let seq_bytes: Vec<u8> =
-                record.sequence().iter().collect();
+            let seq_bytes: Vec<u8> = record.sequence().iter().collect();
             let gc = gc_percent(&seq_bytes);
             stats.gc_bias[gc].0 += 1;
             stats.gc_bias[gc].1 += 1;
@@ -695,7 +688,10 @@ mod tests {
         // Must be serialisable to JSON.
         let json = serde_json::to_string(&profile).expect("profile must serialize to JSON");
         assert!(json.contains("read1"), "JSON must contain read1 key");
-        assert!(json.contains("quality_distribution"), "JSON must contain quality_distribution");
+        assert!(
+            json.contains("quality_distribution"),
+            "JSON must contain quality_distribution"
+        );
 
         // Must be re-parseable as a valid EmpiricalQualityModel.
         let model = EmpiricalQualityModel::from_json_str(&json)
@@ -731,15 +727,16 @@ mod tests {
             if i >= 50 {
                 break;
             }
-            let quals: Vec<u8> = record
-                .quality_scores()
-                .as_ref().to_vec();
+            let quals: Vec<u8> = record.quality_scores().as_ref().to_vec();
             for (pos, &q) in quals.iter().enumerate() {
                 *stats.quality_counts_r1[pos].entry(q).or_insert(0) += 1;
             }
             stats.reads_examined += 1;
         }
-        assert_eq!(stats.reads_examined, 50, "should have examined exactly 50 reads");
+        assert_eq!(
+            stats.reads_examined, 50,
+            "should have examined exactly 50 reads"
+        );
     }
 
     // Test 6 – round-trip: learned profile produces a model with similar quality distribution.
@@ -755,8 +752,8 @@ mod tests {
         let json = serde_json::to_string(&profile).expect("profile must serialize");
 
         // Reload into EmpiricalQualityModel.
-        let model = EmpiricalQualityModel::from_json_str(&json)
-            .expect("serialized profile must reload");
+        let model =
+            EmpiricalQualityModel::from_json_str(&json).expect("serialized profile must reload");
 
         // Generate qualities and check mean ≈ 30.
         let mut rng = StdRng::seed_from_u64(42);

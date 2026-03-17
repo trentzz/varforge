@@ -13,10 +13,7 @@ pub fn generate_umi<R: Rng>(length: usize, rng: &mut R) -> Vec<u8> {
 /// - Alpha strand read 1 carries A+B
 /// - Beta strand read 1 carries B+A
 #[allow(dead_code)]
-pub fn generate_duplex_umi_pair<R: Rng>(
-    length: usize,
-    rng: &mut R,
-) -> (Vec<u8>, Vec<u8>) {
+pub fn generate_duplex_umi_pair<R: Rng>(length: usize, rng: &mut R) -> (Vec<u8>, Vec<u8>) {
     let umi_a = generate_umi(length, rng);
     let umi_b = generate_umi(length, rng);
 
@@ -68,8 +65,8 @@ pub fn format_rx_tag(umi: &[u8], umi_length: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn test_generate_umi_length() {
@@ -109,7 +106,11 @@ mod tests {
         let mut errored = original.clone();
         inject_umi_errors(&mut errored, 0.01, &mut rng);
 
-        let errors = original.iter().zip(errored.iter()).filter(|(a, b)| a != b).count();
+        let errors = original
+            .iter()
+            .zip(errored.iter())
+            .filter(|(a, b)| a != b)
+            .count();
         let rate = errors as f64 / 1000.0;
         assert!(
             (rate - 0.01).abs() < 0.01,
