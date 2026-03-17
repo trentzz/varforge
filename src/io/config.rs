@@ -431,6 +431,10 @@ pub fn validate(config: &Config) -> Result<()> {
         config.reference.display()
     );
 
+    if let Some(ref bed) = config.regions_bed {
+        anyhow::ensure!(bed.exists(), "regions_bed file not found: {}", bed.display());
+    }
+
     anyhow::ensure!(
         config.sample.coverage > 0.0,
         "coverage must be positive, got {}",

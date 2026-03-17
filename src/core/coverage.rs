@@ -30,7 +30,6 @@ pub fn partition_regions(chrom_lengths: &[(String, u64)], chunk_size: u64) -> Ve
 }
 
 /// Filter regions to only those overlapping a set of target intervals.
-#[allow(dead_code)]
 pub fn intersect_with_targets(regions: &[Region], targets: &[Region]) -> Vec<Region> {
     let mut result = Vec::new();
     for region in regions {

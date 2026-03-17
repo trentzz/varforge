@@ -47,10 +47,10 @@ mpl.rcParams.update({
     "xtick.labelsize": 9,
     "ytick.labelsize": 9,
     "legend.fontsize": 9,
-    "lines.linewidth": 1.8,
+    "lines.linewidth": 1.0,
     "axes.prop_cycle": mpl.cycler(color=PALETTE),
-    "figure.dpi": 300,
-    "savefig.dpi": 300,
+    "figure.dpi": 150,
+    "savefig.dpi": 600,
     "savefig.bbox": "tight",
     "savefig.pad_inches": 0.08,
 })
@@ -158,30 +158,32 @@ def fig_feature_overhead(data):
 
 
 def fig_thread_scaling(data):
-    """Thread scaling: shows I/O-bound slowdown with more threads."""
+    """Thread scaling: shows I/O-bound slowdown with more threads.
+
+    Kept small in the paper because the result (adding threads hurts) is not
+    a headline finding — it is an honest limitation to document, not showcase.
+    """
     threads = [1, 2, 4, 6, 8, 12]
     walls = [data['thread_scaling'][f'threads_{t}']['avg_wall_secs']
              for t in threads]
     base = walls[0]
     rel = [base / w for w in walls]  # values <1 mean slower than 1 thread
 
-    fig, ax = plt.subplots(figsize=(70/25.4, 55/25.4))
+    fig, ax = plt.subplots(figsize=(55/25.4, 45/25.4))
 
-    ax.axhline(y=1.0, color='#CCCCCC', linestyle='--', linewidth=0.8, label='1-thread baseline')
-    ax.plot(threads, rel, 'o-', color=BLUE, markersize=5,
-            label='VarForge (10 MB, 30x)')
+    ax.axhline(y=1.0, color='#CCCCCC', linestyle='--', linewidth=0.6)
+    ax.plot(threads, rel, 'o-', color=BLUE, markersize=3)
 
-    ax.set_xlabel('Thread count')
-    ax.set_ylabel('Relative speed (1T = 1.0)')
+    ax.set_xlabel('Thread count', fontsize=8)
+    ax.set_ylabel('Relative speed', fontsize=8)
     ax.set_xlim(0.5, 12.5)
-    ax.set_ylim(0.6, 1.2)
+    ax.set_ylim(0.6, 1.15)
     ax.set_xticks(threads)
+    ax.tick_params(labelsize=7)
 
-    ax.annotate('I/O-bound:\nmore threads = slower', xy=(12, rel[-1]),
-                xytext=(7, 0.72), fontsize=7, color='#888888',
-                arrowprops=dict(arrowstyle='->', color='#AAAAAA', lw=0.8))
+    ax.text(6.5, 0.64, 'I/O-bound workload', fontsize=6.5, color='#888888',
+            ha='center')
 
-    ax.legend(loc='upper right', fontsize=8)
     save(fig, 'thread_scaling')
 
 

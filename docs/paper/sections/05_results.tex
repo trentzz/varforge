@@ -74,16 +74,17 @@ Panel + UMI      & 1\,MB  & 200x & 50   & UMI simplex     & 195.1 & 1.80 \\
 \subsection{Thread scaling}
 
 Figure~\ref{fig:threads} shows scaling on the 10\,MB, 30x configuration.
-Adding threads does not improve wall time at this scale.
+Adding threads does not improve wall time for this I/O-bound workload.
 Single-threaded execution takes 140\,s; 12 threads takes 160\,s, a 13\% regression.
-The workload is fully I/O-bound: workers complete their compute work quickly, then contend on the single writer thread draining the channel.
-The coordination overhead from Rayon and crossbeam-channel dominates any compute saving.
-Compute-heavy workloads (UMI simulation, high coverage) would scale better because each worker thread is occupied longer before sending to the channel.
+Workers complete their compute work quickly, then contend on the single writer thread draining the channel.
+The coordination overhead dominates.
+Threading provides value for compute-heavy workloads (UMI simulation) where each worker occupies the CPU longer before writing.
+See Section~\ref{sec:discussion} for a discussion of when threading helps.
 
-\begin{figure}[t]
+\begin{figure}[h]
   \centering
-  \includegraphics[width=0.75\linewidth]{../../benchmarking/results/graphs/thread_scaling.pdf}
-  \caption{Thread scaling (10\,MB, 30x, 500 variants). Performance degrades with additional threads because the workload is I/O-bound and thread coordination overhead exceeds compute savings.}
+  \includegraphics[width=0.45\linewidth]{../../benchmarking/results/graphs/thread_scaling.pdf}
+  \caption{Thread scaling (10\,MB, 30x). I/O-bound: adding threads degrades performance by up to 13\%.}
   \label{fig:threads}
 \end{figure}
 

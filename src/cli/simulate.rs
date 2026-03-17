@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use super::SimulateOpts;
 use crate::cli::presets;
 use crate::core::capture::CaptureModel;
-use crate::core::coverage::{partition_regions, read_pairs_for_coverage};
+use crate::core::coverage::{intersect_with_targets, partition_regions, read_pairs_for_coverage};
 use crate::core::engine::{derive_region_seed, AppliedVariant, SimulationEngine};
 use crate::core::multi_sample::{write_combined_manifest, MultiSamplePlan, SampleManifestEntry};
 use crate::core::types::{MutationType, ReadPair, Region, Variant};
@@ -194,6 +194,26 @@ fn run_single_sample(
     // -----------------------------------------------------------------------
     let regions = partition_regions(&chrom_lengths, DEFAULT_CHUNK_SIZE);
     tracing::info!("partitioned into {} regions", regions.len());
+
+    // Filter to BED targets if specified.
+    let regions = if let Some(ref bed_path) = cfg.regions_bed {
+        let targets = parse_bed_file(bed_path)
+            .with_context(|| format!("failed to parse regions BED: {}", bed_path.display()))?;
+        tracing::info!(
+            "filtering {} regions to {} BED targets",
+            regions.len(),
+            targets.len()
+        );
+        let filtered = intersect_with_targets(&regions, &targets);
+        anyhow::ensure!(
+            !filtered.is_empty(),
+            "regions_bed produced zero overlapping regions; check chromosome names match the reference"
+        );
+        tracing::info!("BED filter retained {} regions", filtered.len());
+        filtered
+    } else {
+        regions
+    };
 
     // -----------------------------------------------------------------------
     // Generate / load variants
