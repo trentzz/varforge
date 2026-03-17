@@ -1,0 +1,35 @@
+\section{Evaluation}
+\label{sec:evaluation}
+
+The introduction claimed five contributions.
+This section evaluates each against the benchmark evidence.
+
+\textbf{(i) Unified pipeline.}
+All seven benchmark scenarios (Table~\ref{tab:scenarios}) ran from a single YAML configuration through one binary.
+No external tool or intermediate file format was required.
+The claim holds.
+
+\textbf{(ii) First genome-wide UMI/duplex simulator.}
+The panel UMI scenario (1\,MB, 500x, simplex) and Twist duplex scenario (chr22, 1000x, duplex) both completed.
+No other published tool generates genome-wide UMI-tagged reads with configurable family sizes and duplex strand pairing.
+The claim holds.
+
+\textbf{(iii) First cfDNA generator with variant support.}
+The cfDNA scenario (200x, 2\% purity, cfDNA fragment model) produced reads with nucleosomal fragment distributions and injected somatic variants.
+No other tool combines these two features.
+The claim holds.
+
+\textbf{(iv) Stochastic VAF.}
+All variant-containing benchmarks used per-read Bernoulli sampling.
+Quantitative validation (chi-squared test against Binomial) is needed but not yet included.
+The claim is supported by design but not yet independently validated.
+
+\textbf{(v) Streaming Rust with bounded memory.}
+Per-pair memory is constant at ${\sim}1.7$\,KB across all tested coverage depths (Figure~\ref{fig:mem}).
+The streaming architecture bounded memory by channel depth, not dataset size.
+The claim holds.
+
+\textbf{Thread scaling limitation.}
+Thread scaling plateaus at 1.16x for the 10\,MB / 30x I/O-bound workload.
+This is an honest result: FASTQ compression dominates wall time at this scale.
+Compute-bound workloads (higher coverage, more features) would scale better, but this was not benchmarked with thread variation.

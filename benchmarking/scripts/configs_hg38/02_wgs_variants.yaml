@@ -1,38 +1,28 @@
-# Benchmark 10: Large genome - 50MB ref, 30x, 1000 variants
-reference: benchmarking/ref_50mb.fa
-
+reference: /home/trent/tfiles/code/varforge/benchmarking/chr22.fa
 output:
-  directory: benchmarking/runs/10_large_genome
+  directory: /tmp/hg38_bench_placeholder
   fastq: true
   bam: false
   truth_vcf: true
   manifest: true
-
 sample:
-  name: LARGE_GENOME
+  name: WGS_VARIANTS
   read_length: 150
   coverage: 30.0
-
 fragment:
   model: normal
   mean: 300.0
   sd: 50.0
-
-quality:
-  mean_quality: 36
-  tail_decay: 0.003
-
-tumour:
-  purity: 0.70
-  ploidy: 2
-
 mutations:
   random:
-    count: 1000
+    count: 500
     vaf_min: 0.05
     vaf_max: 0.50
     snv_fraction: 0.80
     indel_fraction: 0.15
     mnv_fraction: 0.05
-
-seed: 1
+tumour:
+  purity: 0.70
+chromosomes:
+  - chr22
+seed: 42

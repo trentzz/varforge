@@ -1,8 +1,8 @@
 # Benchmark 05: UMI simplex - 10MB ref, 100x, UMI enabled (inline, no duplex)
-reference: /home/trent/tfiles/code/varforge/benchmark_output/ref_10mb.fa
+reference: benchmarking/ref_10mb.fa
 
 output:
-  directory: /home/trent/tfiles/code/varforge/benchmark_output/runs/05_umi_simplex
+  directory: benchmarking/runs/05_umi_simplex
   fastq: true
   bam: false
   truth_vcf: true

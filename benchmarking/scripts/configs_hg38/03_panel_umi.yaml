@@ -1,0 +1,35 @@
+reference: /home/trent/tfiles/code/varforge/benchmarking/chr22.fa
+output:
+  directory: /tmp/hg38_bench_placeholder
+  fastq: true
+  bam: false
+  truth_vcf: true
+  manifest: true
+sample:
+  name: PANEL_UMI
+  read_length: 150
+  coverage: 500.0
+fragment:
+  model: normal
+  mean: 250.0
+  sd: 40.0
+mutations:
+  random:
+    count: 50
+    vaf_min: 0.01
+    vaf_max: 0.30
+    snv_fraction: 0.80
+    indel_fraction: 0.15
+    mnv_fraction: 0.05
+tumour:
+  purity: 0.50
+umi:
+  length: 8
+  duplex: false
+  pcr_cycles: 10
+  family_size_mean: 3.0
+  family_size_sd: 1.5
+  inline: true
+chromosomes:
+  - chr22
+seed: 42

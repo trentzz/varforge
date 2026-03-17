@@ -1,8 +1,8 @@
 # Benchmark 09: All features - 10MB ref, 100x, variants + UMI + artifacts
-reference: /home/trent/tfiles/code/varforge/benchmark_output/ref_10mb.fa
+reference: benchmarking/ref_10mb.fa
 
 output:
-  directory: /home/trent/tfiles/code/varforge/benchmark_output/runs/09_all_features
+  directory: benchmarking/runs/09_all_features
   fastq: true
   bam: false
   truth_vcf: true

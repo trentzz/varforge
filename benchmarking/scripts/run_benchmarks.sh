@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # VarForge Comprehensive Benchmark Runner
-# Run from: /home/trent/tfiles/code/varforge/
+# Run from: 
 set -euo pipefail
 
 VARFORGE="./target/release/varforge"
@@ -186,7 +186,7 @@ COVERAGES=(1 5 10 30 50 100 200)
 COV_CONFIG_DIR="${BENCH_DIR}/configs_cov"
 mkdir -p "${COV_CONFIG_DIR}"
 cat > "${COV_CONFIG_DIR}/cov_scale_base.yaml" << COVYAML
-reference: /home/trent/tfiles/code/varforge/benchmark_output/ref_1mb.fa
+reference: benchmark_output/ref_1mb.fa
 output:
   directory: /tmp/cov_scale_placeholder
   fastq: true
@@ -248,7 +248,7 @@ echo "=== STEP 6: Feature Overhead ==="
 
 FEAT_CONFIGS_DIR="${BENCH_DIR}/configs_features"
 mkdir -p "${FEAT_CONFIGS_DIR}"
-REF1MB="/home/trent/tfiles/code/varforge/benchmark_output/ref_1mb.fa"
+REF1MB="benchmark_output/ref_1mb.fa"
 
 # Base (no features)
 cat > "${FEAT_CONFIGS_DIR}/feat_base.yaml" << YAML

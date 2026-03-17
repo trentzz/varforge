@@ -1,8 +1,8 @@
 # Benchmark 03: High coverage - 10MB ref, 100x, 500 variants
-reference: /home/trent/tfiles/code/varforge/benchmark_output/ref_10mb.fa
+reference: benchmarking/ref_10mb.fa
 
 output:
-  directory: /home/trent/tfiles/code/varforge/benchmark_output/runs/03_high_coverage
+  directory: benchmarking/runs/03_high_coverage
   fastq: true
   bam: false
   truth_vcf: true

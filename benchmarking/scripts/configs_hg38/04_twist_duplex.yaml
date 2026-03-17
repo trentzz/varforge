@@ -1,0 +1,37 @@
+# Twist Biosciences UMI duplex-style protocol
+# 5bp UMI (random), duplex mode, high depth for MRD/ctDNA
+reference: /home/trent/tfiles/code/varforge/benchmarking/chr22.fa
+output:
+  directory: /tmp/hg38_bench_placeholder
+  fastq: true
+  bam: false
+  truth_vcf: true
+  manifest: true
+sample:
+  name: TWIST_DUPLEX
+  read_length: 150
+  coverage: 1000.0
+fragment:
+  model: normal
+  mean: 200.0
+  sd: 35.0
+mutations:
+  random:
+    count: 50
+    vaf_min: 0.005
+    vaf_max: 0.10
+    snv_fraction: 0.85
+    indel_fraction: 0.10
+    mnv_fraction: 0.05
+tumour:
+  purity: 0.05
+umi:
+  length: 5
+  duplex: true
+  pcr_cycles: 12
+  family_size_mean: 4.0
+  family_size_sd: 2.0
+  inline: true
+chromosomes:
+  - chr22
+seed: 42

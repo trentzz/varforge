@@ -1,8 +1,8 @@
 # Benchmark 06: UMI duplex - 10MB ref, 100x, duplex UMI enabled
-reference: /home/trent/tfiles/code/varforge/benchmark_output/ref_10mb.fa
+reference: benchmarking/ref_10mb.fa
 
 output:
-  directory: /home/trent/tfiles/code/varforge/benchmark_output/runs/06_umi_duplex
+  directory: benchmarking/runs/06_umi_duplex
   fastq: true
   bam: false
   truth_vcf: true

@@ -1,9 +1,9 @@
 # Benchmark 11: Panel simulation - 1MB ref, 200x, UMI, 50 variants
 # Note: reduced from 500x to 200x for memory feasibility (12GB RAM)
-reference: /home/trent/tfiles/code/varforge/benchmark_output/ref_1mb.fa
+reference: benchmarking/ref_1mb.fa
 
 output:
-  directory: /home/trent/tfiles/code/varforge/benchmark_output/runs/11_panel_simulation
+  directory: benchmarking/runs/11_panel_simulation
   fastq: true
   bam: false
   truth_vcf: true

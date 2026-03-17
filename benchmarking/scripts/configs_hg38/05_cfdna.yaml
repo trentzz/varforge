@@ -1,31 +1,19 @@
-# Benchmark 07: cfDNA mode - 10MB ref, 200x, cfDNA fragments, low TF (2%)
-reference: benchmarking/ref_1mb.fa
-
+# cfDNA liquid biopsy simulation
+reference: /home/trent/tfiles/code/varforge/benchmarking/chr22.fa
 output:
-  directory: benchmarking/runs/07_cfdna
+  directory: /tmp/hg38_bench_placeholder
   fastq: true
   bam: false
   truth_vcf: true
   manifest: true
-
 sample:
   name: CFDNA
   read_length: 150
   coverage: 200.0
-
 fragment:
-  model: cfda
+  model: cfdna
   mean: 167.0
   sd: 20.0
-
-quality:
-  mean_quality: 36
-  tail_decay: 0.003
-
-tumour:
-  purity: 0.02
-  ploidy: 2
-
 mutations:
   random:
     count: 200
@@ -34,5 +22,8 @@ mutations:
     snv_fraction: 0.80
     indel_fraction: 0.15
     mnv_fraction: 0.05
-
-seed: 1
+tumour:
+  purity: 0.02
+chromosomes:
+  - chr22
+seed: 42
