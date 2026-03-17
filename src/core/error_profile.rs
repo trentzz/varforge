@@ -148,10 +148,8 @@ impl EmpiricalQualityModel {
                     "quality_distribution entry at position {} is empty",
                     pos
                 );
-                let mut entries: Vec<(u8, f64)> = pairs
-                    .iter()
-                    .map(|pair| (pair[0] as u8, pair[1]))
-                    .collect();
+                let mut entries: Vec<(u8, f64)> =
+                    pairs.iter().map(|pair| (pair[0] as u8, pair[1])).collect();
 
                 let total: f64 = entries.iter().map(|(_, w)| w).sum();
                 anyhow::ensure!(
@@ -205,7 +203,12 @@ impl EmpiricalQualityModel {
         BASES
             .iter()
             .filter(|&&b| b != from)
-            .map(|&to| self.substitution_matrix.get(&(from, to)).copied().unwrap_or(0.0))
+            .map(|&to| {
+                self.substitution_matrix
+                    .get(&(from, to))
+                    .copied()
+                    .unwrap_or(0.0)
+            })
             .sum()
     }
 
@@ -219,8 +222,11 @@ impl EmpiricalQualityModel {
         let r: f64 = rng.gen::<f64>() * total;
         let mut cumulative = 0.0;
         for &to in BASES.iter().filter(|&&b| b != from) {
-            cumulative +=
-                self.substitution_matrix.get(&(from, to)).copied().unwrap_or(0.0);
+            cumulative += self
+                .substitution_matrix
+                .get(&(from, to))
+                .copied()
+                .unwrap_or(0.0);
             if r <= cumulative {
                 return to;
             }
@@ -238,8 +244,7 @@ impl EmpiricalQualityModel {
             for end in ctx_len..=seq.len() {
                 let window = &seq[end - ctx_len..end];
                 if window == ctx_bytes.as_slice() && end < qualities.len() {
-                    qualities[end] =
-                        qualities[end].saturating_sub(effect.quality_penalty).max(2);
+                    qualities[end] = qualities[end].saturating_sub(effect.quality_penalty).max(2);
                 }
             }
         }
@@ -302,8 +307,8 @@ pub fn load_from_config(profile_path: Option<&Path>) -> Result<Option<EmpiricalQ
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     use crate::core::quality::{ParametricQualityModel, QualityModel};
 
@@ -483,12 +488,19 @@ mod tests {
 
         let seq = b"GGGA";
         let mut qualities = model.generate_qualities(4, &mut rng);
-        assert!(qualities.iter().all(|&q| q == 30), "all should start at Q30");
+        assert!(
+            qualities.iter().all(|&q| q == 30),
+            "all should start at Q30"
+        );
 
         model.apply_context_effects(seq, &mut qualities);
 
         // Position 3 (A, after GGG) should drop to 25.
-        assert_eq!(qualities[3], 25, "expected Q25 after GGG context, got {}", qualities[3]);
+        assert_eq!(
+            qualities[3], 25,
+            "expected Q25 after GGG context, got {}",
+            qualities[3]
+        );
         assert_eq!(qualities[0], 30);
         assert_eq!(qualities[1], 30);
         assert_eq!(qualities[2], 30);
@@ -512,8 +524,7 @@ mod tests {
         let parametric = ParametricQualityModel::new(36, 0.003);
         use_model(&parametric, &mut rng);
 
-        let empirical =
-            EmpiricalQualityModel::from_json_str(minimal_profile_json()).unwrap();
+        let empirical = EmpiricalQualityModel::from_json_str(minimal_profile_json()).unwrap();
         use_model(&empirical, &mut rng);
     }
 
@@ -521,7 +532,10 @@ mod tests {
     #[test]
     fn test_fallback_to_parametric() {
         let result = load_from_config(None).expect("should not error with no path");
-        assert!(result.is_none(), "expected None when no profile path is set");
+        assert!(
+            result.is_none(),
+            "expected None when no profile path is set"
+        );
 
         let model = ParametricQualityModel::new(36, 0.003);
         let mut rng = StdRng::seed_from_u64(42);

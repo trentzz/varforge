@@ -39,8 +39,8 @@ pub fn sample_alt_count<R: Rng>(total_depth: u32, expected_vaf: f64, rng: &mut R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn test_expected_vaf_simple() {
@@ -110,9 +110,15 @@ mod tests {
         let n = 100_000;
         let depth = 30u32;
         let vaf = 0.1;
-        let counts: Vec<u32> = (0..n).map(|_| sample_alt_count(depth, vaf, &mut rng)).collect();
+        let counts: Vec<u32> = (0..n)
+            .map(|_| sample_alt_count(depth, vaf, &mut rng))
+            .collect();
         let mean = counts.iter().sum::<u32>() as f64 / n as f64;
-        let variance = counts.iter().map(|&c| (c as f64 - mean).powi(2)).sum::<f64>() / n as f64;
+        let variance = counts
+            .iter()
+            .map(|&c| (c as f64 - mean).powi(2))
+            .sum::<f64>()
+            / n as f64;
         // Expected variance = n*p*(1-p) = 30 * 0.1 * 0.9 = 2.7
         assert!(
             (variance - 2.7).abs() < 0.5,
@@ -125,8 +131,13 @@ mod tests {
     fn test_binomial_not_deterministic() {
         // The whole point: same VAF/depth should give DIFFERENT counts
         let mut rng = StdRng::seed_from_u64(42);
-        let counts: Vec<u32> = (0..100).map(|_| sample_alt_count(30, 0.1, &mut rng)).collect();
+        let counts: Vec<u32> = (0..100)
+            .map(|_| sample_alt_count(30, 0.1, &mut rng))
+            .collect();
         let unique: std::collections::HashSet<_> = counts.iter().collect();
-        assert!(unique.len() > 1, "binomial sampling should produce variable counts");
+        assert!(
+            unique.len() > 1,
+            "binomial sampling should produce variable counts"
+        );
     }
 }

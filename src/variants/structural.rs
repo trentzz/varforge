@@ -6,11 +6,33 @@ use crate::variants::vaf::sample_alt_count;
 /// A structural variant with all parameters needed to generate affected reads.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StructuralVariant {
-    Deletion { chrom: String, start: u64, end: u64 },
-    Insertion { chrom: String, pos: u64, sequence: Vec<u8> },
-    Inversion { chrom: String, start: u64, end: u64 },
-    Duplication { chrom: String, start: u64, end: u64, copies: u32 },
-    Translocation { chrom1: String, pos1: u64, chrom2: String, pos2: u64 },
+    Deletion {
+        chrom: String,
+        start: u64,
+        end: u64,
+    },
+    Insertion {
+        chrom: String,
+        pos: u64,
+        sequence: Vec<u8>,
+    },
+    Inversion {
+        chrom: String,
+        start: u64,
+        end: u64,
+    },
+    Duplication {
+        chrom: String,
+        start: u64,
+        end: u64,
+        copies: u32,
+    },
+    Translocation {
+        chrom1: String,
+        pos1: u64,
+        chrom2: String,
+        pos2: u64,
+    },
 }
 
 impl StructuralVariant {
@@ -94,11 +116,7 @@ pub enum SvReadEffect {
 /// (low-quality `N` bases).
 ///
 /// Returns the `SvReadEffect` describing what happened.
-pub fn apply_deletion(
-    read: &mut Read,
-    read_start: u64,
-    sv: &StructuralVariant,
-) -> SvReadEffect {
+pub fn apply_deletion(read: &mut Read, read_start: u64, sv: &StructuralVariant) -> SvReadEffect {
     let (chrom_sv, del_start, del_end) = match sv {
         StructuralVariant::Deletion { chrom, start, end } => (chrom.as_str(), *start, *end),
         _ => return SvReadEffect::Unaffected,
@@ -146,11 +164,7 @@ pub fn apply_deletion(
 /// Reads that overlap the insertion point get the inserted sequence embedded
 /// at the correct offset; excess bases at the 3' end are soft-clipped to keep
 /// the read length constant.
-pub fn apply_insertion(
-    read: &mut Read,
-    read_start: u64,
-    sv: &StructuralVariant,
-) -> SvReadEffect {
+pub fn apply_insertion(read: &mut Read, read_start: u64, sv: &StructuralVariant) -> SvReadEffect {
     let (ins_pos, ins_seq) = match sv {
         StructuralVariant::Insertion { pos, sequence, .. } => (*pos, sequence.as_slice()),
         _ => return SvReadEffect::Unaffected,
@@ -204,11 +218,7 @@ pub fn apply_insertion(
 /// Reads that fall entirely within the inverted interval have their sequence
 /// reverse-complemented.  Reads spanning a boundary are partially
 /// reverse-complemented and soft-clipped.
-pub fn apply_inversion(
-    read: &mut Read,
-    read_start: u64,
-    sv: &StructuralVariant,
-) -> SvReadEffect {
+pub fn apply_inversion(read: &mut Read, read_start: u64, sv: &StructuralVariant) -> SvReadEffect {
     let (inv_start, inv_end) = match sv {
         StructuralVariant::Inversion { start, end, .. } => (*start, *end),
         _ => return SvReadEffect::Unaffected,
@@ -241,13 +251,11 @@ pub fn apply_inversion(
 /// the duplicated copy joins the original) are modified to show the junction
 /// sequence.  Coverage elevation in the duplicated region is handled by the
 /// caller (by generating extra reads from the duplicated coordinates).
-pub fn apply_duplication(
-    read: &mut Read,
-    read_start: u64,
-    sv: &StructuralVariant,
-) -> SvReadEffect {
+pub fn apply_duplication(read: &mut Read, read_start: u64, sv: &StructuralVariant) -> SvReadEffect {
     let (dup_start, dup_end, _copies) = match sv {
-        StructuralVariant::Duplication { start, end, copies, .. } => (*start, *end, *copies),
+        StructuralVariant::Duplication {
+            start, end, copies, ..
+        } => (*start, *end, *copies),
         _ => return SvReadEffect::Unaffected,
     };
 
@@ -284,9 +292,12 @@ pub fn apply_translocation(
     partner_seq: &[u8],
 ) -> SvReadEffect {
     let (chrom1, pos1, _chrom2, _pos2) = match sv {
-        StructuralVariant::Translocation { chrom1, pos1, chrom2, pos2 } => {
-            (chrom1.as_str(), *pos1, chrom2.as_str(), *pos2)
-        }
+        StructuralVariant::Translocation {
+            chrom1,
+            pos1,
+            chrom2,
+            pos2,
+        } => (chrom1.as_str(), *pos1, chrom2.as_str(), *pos2),
         _ => return SvReadEffect::Unaffected,
     };
 
@@ -304,8 +315,7 @@ pub fn apply_translocation(
 
     // Replace sequence after breakpoint with partner sequence
     let available = partner_seq.len().min(bases_from_partner);
-    read.seq[split_offset..split_offset + available]
-        .copy_from_slice(&partner_seq[..available]);
+    read.seq[split_offset..split_offset + available].copy_from_slice(&partner_seq[..available]);
 
     // Any bases beyond available partner seq become Ns
     for b in &mut read.seq[split_offset + available..] {
@@ -328,11 +338,7 @@ pub fn apply_translocation(
 /// allele.  Returns the number of alt reads to generate using binomial
 /// sampling (same model as small variants).
 #[allow(dead_code)]
-pub fn sample_sv_alt_count<R: Rng>(
-    total_depth: u32,
-    expected_vaf: f64,
-    rng: &mut R,
-) -> u32 {
+pub fn sample_sv_alt_count<R: Rng>(total_depth: u32, expected_vaf: f64, rng: &mut R) -> u32 {
     sample_alt_count(total_depth, expected_vaf, rng)
 }
 
@@ -363,7 +369,9 @@ pub fn sv_vcf_info(sv: &StructuralVariant) -> String {
             let svlen = end.saturating_sub(*start);
             format!("SVTYPE=INV;END={end};SVLEN={svlen}")
         }
-        StructuralVariant::Duplication { start, end, copies, .. } => {
+        StructuralVariant::Duplication {
+            start, end, copies, ..
+        } => {
             let svlen = end.saturating_sub(*start);
             format!("SVTYPE=DUP;END={end};SVLEN={svlen};CN={copies}")
         }
@@ -447,8 +455,8 @@ fn complement(b: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     fn make_read(seq: &[u8]) -> Read {
         Read::new(seq.to_vec(), vec![30; seq.len()])
@@ -469,7 +477,11 @@ mod tests {
         let mut read = make_read(b"ACGTACGTACGTACGTACGT"); // 20 bp
         let effect = apply_deletion(&mut read, 105, &sv);
 
-        assert_eq!(effect, SvReadEffect::SplitLeft, "read spanning left breakpoint should be split-left");
+        assert_eq!(
+            effect,
+            SvReadEffect::SplitLeft,
+            "read spanning left breakpoint should be split-left"
+        );
 
         // Bases 0..5 (positions 105-109) are kept; positions 110+ are soft-clipped (N, qual=0)
         let keep = (110 - 105) as usize; // 5
@@ -524,7 +536,11 @@ mod tests {
         let effect = apply_insertion(&mut read, 100, &sv);
 
         assert_eq!(effect, SvReadEffect::Modified);
-        assert_eq!(read.len(), original_len, "read length must be preserved after insertion");
+        assert_eq!(
+            read.len(),
+            original_len,
+            "read length must be preserved after insertion"
+        );
 
         // First 4 bases unchanged (positions 100-103)
         assert_eq!(&read.seq[..4], b"ACGT");
@@ -557,7 +573,10 @@ mod tests {
         let effect2 = apply_inversion(&mut read2, 100, &sv);
         assert_eq!(effect2, SvReadEffect::Modified);
         // revcomp("AAAACCCC") = reverse "CCCCAAAA", complement = "GGGGTTTT"
-        assert_eq!(&read2.seq, b"GGGGTTTT", "inverted read should be reverse-complemented");
+        assert_eq!(
+            &read2.seq, b"GGGGTTTT",
+            "inverted read should be reverse-complemented"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -649,8 +668,9 @@ mod tests {
         );
 
         // Verify stochasticity: counts are not all identical
-        let counts: Vec<u32> =
-            (0..100).map(|_| sample_sv_alt_count(depth, vaf, &mut rng)).collect();
+        let counts: Vec<u32> = (0..100)
+            .map(|_| sample_sv_alt_count(depth, vaf, &mut rng))
+            .collect();
         let unique: std::collections::HashSet<_> = counts.iter().copied().collect();
         assert!(unique.len() > 1, "SV VAF sampling should be stochastic");
     }
@@ -667,7 +687,10 @@ mod tests {
             end: 2000,
         };
         let info = sv_vcf_info(&del);
-        assert!(info.contains("SVTYPE=DEL"), "DEL INFO must contain SVTYPE=DEL");
+        assert!(
+            info.contains("SVTYPE=DEL"),
+            "DEL INFO must contain SVTYPE=DEL"
+        );
         assert!(info.contains("END=2000"), "DEL INFO must contain END");
         assert!(info.contains("SVLEN=-1000"), "DEL INFO must contain SVLEN");
         assert_eq!(sv_vcf_alt(&del), "<DEL>");
@@ -701,6 +724,9 @@ mod tests {
             "BND ALT {alt_bnd} must contain mate chrom and position"
         );
         // Standard BND format uses ]chrom:pos] notation
-        assert!(alt_bnd.starts_with('N'), "BND ALT must start with N anchor base");
+        assert!(
+            alt_bnd.starts_with('N'),
+            "BND ALT must start with N anchor base"
+        );
     }
 }

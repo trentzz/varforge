@@ -343,74 +343,234 @@ pub fn drivers_for(preset_name: &str) -> &'static [DriverMutation] {
 
 #[allow(dead_code)]
 static LUNG_ADENO_DRIVERS: &[DriverMutation] = &[
-    DriverMutation { gene: "KRAS",  alteration: "G12C",  prevalence: 0.13 },
-    DriverMutation { gene: "EGFR",  alteration: "L858R", prevalence: 0.10 },
-    DriverMutation { gene: "EGFR",  alteration: "exon19del", prevalence: 0.10 },
-    DriverMutation { gene: "TP53",  alteration: "various", prevalence: 0.46 },
-    DriverMutation { gene: "STK11", alteration: "various", prevalence: 0.17 },
-    DriverMutation { gene: "KEAP1", alteration: "various", prevalence: 0.12 },
+    DriverMutation {
+        gene: "KRAS",
+        alteration: "G12C",
+        prevalence: 0.13,
+    },
+    DriverMutation {
+        gene: "EGFR",
+        alteration: "L858R",
+        prevalence: 0.10,
+    },
+    DriverMutation {
+        gene: "EGFR",
+        alteration: "exon19del",
+        prevalence: 0.10,
+    },
+    DriverMutation {
+        gene: "TP53",
+        alteration: "various",
+        prevalence: 0.46,
+    },
+    DriverMutation {
+        gene: "STK11",
+        alteration: "various",
+        prevalence: 0.17,
+    },
+    DriverMutation {
+        gene: "KEAP1",
+        alteration: "various",
+        prevalence: 0.12,
+    },
 ];
 
 #[allow(dead_code)]
 static COLORECTAL_DRIVERS: &[DriverMutation] = &[
-    DriverMutation { gene: "KRAS",  alteration: "G12D/V", prevalence: 0.45 },
-    DriverMutation { gene: "APC",   alteration: "truncating", prevalence: 0.80 },
-    DriverMutation { gene: "TP53",  alteration: "various", prevalence: 0.60 },
-    DriverMutation { gene: "SMAD4", alteration: "various", prevalence: 0.15 },
-    DriverMutation { gene: "PIK3CA", alteration: "various", prevalence: 0.20 },
+    DriverMutation {
+        gene: "KRAS",
+        alteration: "G12D/V",
+        prevalence: 0.45,
+    },
+    DriverMutation {
+        gene: "APC",
+        alteration: "truncating",
+        prevalence: 0.80,
+    },
+    DriverMutation {
+        gene: "TP53",
+        alteration: "various",
+        prevalence: 0.60,
+    },
+    DriverMutation {
+        gene: "SMAD4",
+        alteration: "various",
+        prevalence: 0.15,
+    },
+    DriverMutation {
+        gene: "PIK3CA",
+        alteration: "various",
+        prevalence: 0.20,
+    },
 ];
 
 #[allow(dead_code)]
 static BREAST_TNBC_DRIVERS: &[DriverMutation] = &[
-    DriverMutation { gene: "TP53",  alteration: "various", prevalence: 0.80 },
-    DriverMutation { gene: "BRCA1", alteration: "germline/somatic", prevalence: 0.20 },
-    DriverMutation { gene: "RB1",   alteration: "loss", prevalence: 0.20 },
-    DriverMutation { gene: "PIK3CA", alteration: "various", prevalence: 0.10 },
+    DriverMutation {
+        gene: "TP53",
+        alteration: "various",
+        prevalence: 0.80,
+    },
+    DriverMutation {
+        gene: "BRCA1",
+        alteration: "germline/somatic",
+        prevalence: 0.20,
+    },
+    DriverMutation {
+        gene: "RB1",
+        alteration: "loss",
+        prevalence: 0.20,
+    },
+    DriverMutation {
+        gene: "PIK3CA",
+        alteration: "various",
+        prevalence: 0.10,
+    },
 ];
 
 #[allow(dead_code)]
 static MELANOMA_DRIVERS: &[DriverMutation] = &[
-    DriverMutation { gene: "BRAF",  alteration: "V600E", prevalence: 0.50 },
-    DriverMutation { gene: "NRAS",  alteration: "Q61R/K", prevalence: 0.20 },
-    DriverMutation { gene: "TERT",  alteration: "promoter C228T/C250T", prevalence: 0.74 },
-    DriverMutation { gene: "CDKN2A", alteration: "various", prevalence: 0.40 },
-    DriverMutation { gene: "PTEN",  alteration: "loss", prevalence: 0.20 },
+    DriverMutation {
+        gene: "BRAF",
+        alteration: "V600E",
+        prevalence: 0.50,
+    },
+    DriverMutation {
+        gene: "NRAS",
+        alteration: "Q61R/K",
+        prevalence: 0.20,
+    },
+    DriverMutation {
+        gene: "TERT",
+        alteration: "promoter C228T/C250T",
+        prevalence: 0.74,
+    },
+    DriverMutation {
+        gene: "CDKN2A",
+        alteration: "various",
+        prevalence: 0.40,
+    },
+    DriverMutation {
+        gene: "PTEN",
+        alteration: "loss",
+        prevalence: 0.20,
+    },
 ];
 
 #[allow(dead_code)]
 static AML_DRIVERS: &[DriverMutation] = &[
-    DriverMutation { gene: "FLT3",   alteration: "ITD",   prevalence: 0.25 },
-    DriverMutation { gene: "NPM1",   alteration: "W288fs", prevalence: 0.30 },
-    DriverMutation { gene: "DNMT3A", alteration: "R882H", prevalence: 0.22 },
-    DriverMutation { gene: "IDH1",   alteration: "R132H", prevalence: 0.08 },
-    DriverMutation { gene: "IDH2",   alteration: "R140Q", prevalence: 0.12 },
-    DriverMutation { gene: "TET2",   alteration: "various", prevalence: 0.10 },
+    DriverMutation {
+        gene: "FLT3",
+        alteration: "ITD",
+        prevalence: 0.25,
+    },
+    DriverMutation {
+        gene: "NPM1",
+        alteration: "W288fs",
+        prevalence: 0.30,
+    },
+    DriverMutation {
+        gene: "DNMT3A",
+        alteration: "R882H",
+        prevalence: 0.22,
+    },
+    DriverMutation {
+        gene: "IDH1",
+        alteration: "R132H",
+        prevalence: 0.08,
+    },
+    DriverMutation {
+        gene: "IDH2",
+        alteration: "R140Q",
+        prevalence: 0.12,
+    },
+    DriverMutation {
+        gene: "TET2",
+        alteration: "various",
+        prevalence: 0.10,
+    },
 ];
 
 #[allow(dead_code)]
 static PROSTATE_DRIVERS: &[DriverMutation] = &[
-    DriverMutation { gene: "TMPRSS2-ERG", alteration: "fusion", prevalence: 0.50 },
-    DriverMutation { gene: "AR",    alteration: "amplification", prevalence: 0.30 },
-    DriverMutation { gene: "PTEN",  alteration: "loss", prevalence: 0.25 },
-    DriverMutation { gene: "TP53",  alteration: "various", prevalence: 0.25 },
-    DriverMutation { gene: "BRCA2", alteration: "germline/somatic", prevalence: 0.12 },
+    DriverMutation {
+        gene: "TMPRSS2-ERG",
+        alteration: "fusion",
+        prevalence: 0.50,
+    },
+    DriverMutation {
+        gene: "AR",
+        alteration: "amplification",
+        prevalence: 0.30,
+    },
+    DriverMutation {
+        gene: "PTEN",
+        alteration: "loss",
+        prevalence: 0.25,
+    },
+    DriverMutation {
+        gene: "TP53",
+        alteration: "various",
+        prevalence: 0.25,
+    },
+    DriverMutation {
+        gene: "BRCA2",
+        alteration: "germline/somatic",
+        prevalence: 0.12,
+    },
 ];
 
 #[allow(dead_code)]
 static PANCREATIC_DRIVERS: &[DriverMutation] = &[
-    DriverMutation { gene: "KRAS",   alteration: "G12D", prevalence: 0.92 },
-    DriverMutation { gene: "TP53",   alteration: "various", prevalence: 0.72 },
-    DriverMutation { gene: "SMAD4",  alteration: "various", prevalence: 0.32 },
-    DriverMutation { gene: "CDKN2A", alteration: "various", prevalence: 0.29 },
+    DriverMutation {
+        gene: "KRAS",
+        alteration: "G12D",
+        prevalence: 0.92,
+    },
+    DriverMutation {
+        gene: "TP53",
+        alteration: "various",
+        prevalence: 0.72,
+    },
+    DriverMutation {
+        gene: "SMAD4",
+        alteration: "various",
+        prevalence: 0.32,
+    },
+    DriverMutation {
+        gene: "CDKN2A",
+        alteration: "various",
+        prevalence: 0.29,
+    },
 ];
 
 #[allow(dead_code)]
 static GLIOBLASTOMA_DRIVERS: &[DriverMutation] = &[
-    DriverMutation { gene: "EGFR",  alteration: "amplification/EGFRvIII", prevalence: 0.57 },
-    DriverMutation { gene: "PTEN",  alteration: "loss", prevalence: 0.40 },
-    DriverMutation { gene: "TP53",  alteration: "various", prevalence: 0.28 },
-    DriverMutation { gene: "TERT",  alteration: "promoter C228T/C250T", prevalence: 0.72 },
-    DriverMutation { gene: "IDH1",  alteration: "R132H (IDH-mutant subset)", prevalence: 0.10 },
+    DriverMutation {
+        gene: "EGFR",
+        alteration: "amplification/EGFRvIII",
+        prevalence: 0.57,
+    },
+    DriverMutation {
+        gene: "PTEN",
+        alteration: "loss",
+        prevalence: 0.40,
+    },
+    DriverMutation {
+        gene: "TP53",
+        alteration: "various",
+        prevalence: 0.28,
+    },
+    DriverMutation {
+        gene: "TERT",
+        alteration: "promoter C228T/C250T",
+        prevalence: 0.72,
+    },
+    DriverMutation {
+        gene: "IDH1",
+        alteration: "R132H (IDH-mutant subset)",
+        prevalence: 0.10,
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -420,9 +580,9 @@ static GLIOBLASTOMA_DRIVERS: &[DriverMutation] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use crate::io::config::{Config, FragmentConfig, OutputConfig, QualityConfig, SampleConfig};
     use crate::cli::presets::apply_preset_to_config;
+    use crate::io::config::{Config, FragmentConfig, OutputConfig, QualityConfig, SampleConfig};
+    use std::path::PathBuf;
 
     // Helper: construct a base Config with all defaults.
     fn base_config() -> Config {
@@ -473,14 +633,22 @@ mod tests {
             );
 
             // Must have a mutation config
-            let muts = cfg.mutations.unwrap_or_else(|| panic!("preset 'cancer:{name}' must set mutations"));
+            let muts = cfg
+                .mutations
+                .unwrap_or_else(|| panic!("preset 'cancer:{name}' must set mutations"));
             let rand = muts
                 .random
                 .unwrap_or_else(|| panic!("preset 'cancer:{name}' must set random mutations"));
 
             assert!(rand.count > 0, "preset 'cancer:{name}' must have count > 0");
-            assert!(rand.vaf_min > 0.0, "preset 'cancer:{name}' vaf_min must be > 0");
-            assert!(rand.vaf_max > rand.vaf_min, "preset 'cancer:{name}' vaf_max must exceed vaf_min");
+            assert!(
+                rand.vaf_min > 0.0,
+                "preset 'cancer:{name}' vaf_min must be > 0"
+            );
+            assert!(
+                rand.vaf_max > rand.vaf_min,
+                "preset 'cancer:{name}' vaf_max must exceed vaf_min"
+            );
 
             let frac_sum = rand.snv_fraction + rand.indel_fraction + rand.mnv_fraction;
             assert!(
@@ -489,7 +657,9 @@ mod tests {
             );
 
             // Must have tumour purity set
-            let tumour = cfg.tumour.unwrap_or_else(|| panic!("preset 'cancer:{name}' must set tumour"));
+            let tumour = cfg
+                .tumour
+                .unwrap_or_else(|| panic!("preset 'cancer:{name}' must set tumour"));
             assert!(
                 (0.0..=1.0).contains(&tumour.purity),
                 "preset 'cancer:{name}' purity {} must be in [0, 1]",
@@ -507,13 +677,7 @@ mod tests {
     #[test]
     fn test_lung_adeno_signatures() {
         let overlay = get("lung_adeno").unwrap();
-        let rand = overlay
-            .mutations
-            .as_ref()
-            .unwrap()
-            .random
-            .as_ref()
-            .unwrap();
+        let rand = overlay.mutations.as_ref().unwrap().random.as_ref().unwrap();
 
         // SBS4 is almost entirely SNVs — fraction must be high.
         assert!(
@@ -542,13 +706,7 @@ mod tests {
     #[test]
     fn test_melanoma_high_tmb() {
         let overlay = get("melanoma").unwrap();
-        let rand = overlay
-            .mutations
-            .as_ref()
-            .unwrap()
-            .random
-            .as_ref()
-            .unwrap();
+        let rand = overlay.mutations.as_ref().unwrap().random.as_ref().unwrap();
 
         assert!(
             rand.count > HIGH_TMB_THRESHOLD_MUTS,
@@ -569,13 +727,7 @@ mod tests {
     #[test]
     fn test_aml_low_tmb() {
         let overlay = get("aml").unwrap();
-        let rand = overlay
-            .mutations
-            .as_ref()
-            .unwrap()
-            .random
-            .as_ref()
-            .unwrap();
+        let rand = overlay.mutations.as_ref().unwrap().random.as_ref().unwrap();
 
         assert!(
             rand.count <= LOW_TMB_THRESHOLD_MUTS,
@@ -602,14 +754,22 @@ mod tests {
         // melanoma: BRAF V600E expected
         let mel_drivers = drivers_for("melanoma");
         assert!(
-            mel_drivers.iter().any(|d| d.gene == "BRAF" && d.alteration.contains("V600E")),
+            mel_drivers
+                .iter()
+                .any(|d| d.gene == "BRAF" && d.alteration.contains("V600E")),
             "melanoma drivers must include BRAF V600E"
         );
 
         // aml: FLT3, NPM1, DNMT3A expected
         let aml_drivers = drivers_for("aml");
-        assert!(aml_drivers.iter().any(|d| d.gene == "FLT3"), "aml drivers must include FLT3");
-        assert!(aml_drivers.iter().any(|d| d.gene == "NPM1"), "aml drivers must include NPM1");
+        assert!(
+            aml_drivers.iter().any(|d| d.gene == "FLT3"),
+            "aml drivers must include FLT3"
+        );
+        assert!(
+            aml_drivers.iter().any(|d| d.gene == "NPM1"),
+            "aml drivers must include NPM1"
+        );
         assert!(
             aml_drivers.iter().any(|d| d.gene == "DNMT3A"),
             "aml drivers must include DNMT3A"

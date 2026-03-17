@@ -24,7 +24,6 @@ pub enum GcBiasModelKind {
     Custom,
 }
 
-
 /// Configuration block for GC bias (mirrors the YAML `gc_bias:` section).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GcBiasConfig {
@@ -191,10 +190,7 @@ mod tests {
     fn test_multiplier_at_50_percent() {
         let model = GcBiasModel::default();
         let m = model.coverage_multiplier(0.5);
-        assert!(
-            (m - 1.0).abs() < 1e-6,
-            "expected ~1.0 at 50% GC, got {m}"
-        );
+        assert!((m - 1.0).abs() < 1e-6, "expected ~1.0 at 50% GC, got {m}");
     }
 
     // 3. Multiplier is reduced at extreme GC (10% and 90%).
@@ -273,9 +269,9 @@ mod tests {
     //    GC-bias rejection sampling.
     #[test]
     fn test_coverage_distribution() {
+        use rand::rngs::StdRng;
         use rand::Rng;
         use rand::SeedableRng;
-        use rand::rngs::StdRng;
 
         let model = GcBiasModel::default();
         let mut rng = StdRng::seed_from_u64(42);

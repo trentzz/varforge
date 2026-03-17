@@ -35,12 +35,7 @@ fn write_minimal_fasta(dir: &Path) -> PathBuf {
 }
 
 /// Write a YAML config file to `dir/config.yaml` and return the path.
-fn write_config(
-    dir: &Path,
-    ref_path: &Path,
-    out_dir: &Path,
-    extra: &str,
-) -> PathBuf {
+fn write_config(dir: &Path, ref_path: &Path, out_dir: &Path, extra: &str) -> PathBuf {
     let cfg_path = dir.join("config.yaml");
     let content = format!(
         r#"
@@ -314,10 +309,7 @@ umi:
 
     let r1_content = decompress_gz(&r1);
     // All read headers should contain ":UMI:"
-    let headers: Vec<&str> = r1_content
-        .lines()
-        .filter(|l| l.starts_with('@'))
-        .collect();
+    let headers: Vec<&str> = r1_content.lines().filter(|l| l.starts_with('@')).collect();
     assert!(!headers.is_empty(), "should have some reads");
     for header in &headers {
         assert!(
@@ -451,7 +443,11 @@ seed: 99
 
     // Verify FASTQ format is valid.
     let content = decompress_gz(&r1);
-    assert_eq!(content.lines().count() % 4, 0, "cfDNA R1 should have 4 lines per record");
+    assert_eq!(
+        content.lines().count() % 4,
+        0,
+        "cfDNA R1 should have 4 lines per record"
+    );
 }
 
 /// 9. FFPE artifacts produce an elevated C>T transition rate compared to a
@@ -486,8 +482,14 @@ artifacts:
     let (ct_ctrl, opp_ctrl) = count_ct_transitions(&ctrl_content);
     let (ct_ffpe, opp_ffpe) = count_ct_transitions(&ffpe_content);
 
-    assert!(opp_ctrl > 0, "control run should produce reads with C opportunities");
-    assert!(opp_ffpe > 0, "FFPE run should produce reads with C opportunities");
+    assert!(
+        opp_ctrl > 0,
+        "control run should produce reads with C opportunities"
+    );
+    assert!(
+        opp_ffpe > 0,
+        "FFPE run should produce reads with C opportunities"
+    );
 
     let rate_ctrl = ct_ctrl as f64 / opp_ctrl as f64;
     let rate_ffpe = ct_ffpe as f64 / opp_ffpe as f64;
@@ -568,11 +570,18 @@ seed: 42
 
     // Verify the truth VCF was produced and has the correct header.
     let vcf_content = std::fs::read_to_string(&vcf_path).unwrap();
-    assert!(vcf_content.contains("##fileformat=VCFv4"), "VCF should have header");
+    assert!(
+        vcf_content.contains("##fileformat=VCFv4"),
+        "VCF should have header"
+    );
 
     // Verify reads were generated at high coverage.
     let n_reads = count_fastq_records(&r1);
-    assert!(n_reads > 50, "high-coverage purity test should produce many reads, got {}", n_reads);
+    assert!(
+        n_reads > 50,
+        "high-coverage purity test should produce many reads, got {}",
+        n_reads
+    );
 }
 
 /// 11. Subclonal variants have a lower VAF than clonal variants.
@@ -647,8 +656,14 @@ seed: 77
     assert!(vcf_path.exists(), "truth VCF not found for subclonal test");
 
     let vcf_content = std::fs::read_to_string(&vcf_path).unwrap();
-    assert!(vcf_content.contains("##fileformat=VCFv4"), "VCF should have header");
-    assert!(vcf_content.contains("##source=VarForge"), "VCF should have source");
+    assert!(
+        vcf_content.contains("##fileformat=VCFv4"),
+        "VCF should have header"
+    );
+    assert!(
+        vcf_content.contains("##source=VarForge"),
+        "VCF should have source"
+    );
 
     // Verify we got reads.
     let n_reads = count_fastq_records(&r1);
@@ -802,7 +817,10 @@ seed: 55
     assert!(vcf_path.exists(), "truth VCF not found for low-VAF test");
 
     let vcf_content = std::fs::read_to_string(&vcf_path).unwrap();
-    assert!(vcf_content.contains("##fileformat=VCFv4"), "VCF should have header");
+    assert!(
+        vcf_content.contains("##fileformat=VCFv4"),
+        "VCF should have header"
+    );
 
     // Check we got reads.
     let r1 = out_dir.path().join("LOWVAF_R1.fastq.gz");
@@ -876,16 +894,24 @@ seed: 33
     let cfg = config::load(&cfg_path).expect("failed to load multi-sample config");
     assert!(cfg.samples.is_some(), "config should have samples list");
 
-    let plan = MultiSamplePlan::from_config(cfg.clone())
-        .expect("multi-sample plan should be created");
+    let plan =
+        MultiSamplePlan::from_config(cfg.clone()).expect("multi-sample plan should be created");
     assert_eq!(plan.len(), 2, "plan should have 2 samples");
 
-    let resolved = plan.per_sample_configs().expect("per-sample configs should resolve");
+    let resolved = plan
+        .per_sample_configs()
+        .expect("per-sample configs should resolve");
     assert_eq!(resolved.len(), 2);
 
     let names: Vec<&str> = resolved.iter().map(|s| s.name.as_str()).collect();
-    assert!(names.contains(&"tp01"), "tp01 should be in resolved samples");
-    assert!(names.contains(&"tp02"), "tp02 should be in resolved samples");
+    assert!(
+        names.contains(&"tp01"),
+        "tp01 should be in resolved samples"
+    );
+    assert!(
+        names.contains(&"tp02"),
+        "tp02 should be in resolved samples"
+    );
 
     // Verify the tumour fractions differ between samples.
     let tp01 = resolved.iter().find(|s| s.name == "tp01").unwrap();
@@ -914,15 +940,17 @@ seed: 33
     // Now run simulation for each sample to verify end-to-end output.
     for sample in &resolved {
         let sample_cfg_path = dir.path().join(format!("{}_config.yaml", sample.name));
-        let sample_cfg_str = serde_yaml::to_string(&sample.config)
-            .expect("failed to serialize sample config");
+        let sample_cfg_str =
+            serde_yaml::to_string(&sample.config).expect("failed to serialize sample config");
         std::fs::write(&sample_cfg_path, sample_cfg_str.as_bytes()).unwrap();
 
         let sample_opts = default_opts(sample_cfg_path);
         simulate::run(sample_opts, None)
             .unwrap_or_else(|e| panic!("simulation failed for sample {}: {}", sample.name, e));
 
-        let r1 = sample.output_dir.join(format!("{}_R1.fastq.gz", sample.name));
+        let r1 = sample
+            .output_dir
+            .join(format!("{}_R1.fastq.gz", sample.name));
         assert!(
             r1.exists(),
             "R1 FASTQ not found for sample {} at {:?}",
@@ -1081,7 +1109,10 @@ seed: 13
 
     let content = decompress_gz(&r1);
     let headers: Vec<&str> = content.lines().filter(|l| l.starts_with('@')).collect();
-    assert!(!headers.is_empty(), "UMI+cfDNA simulation should produce reads");
+    assert!(
+        !headers.is_empty(),
+        "UMI+cfDNA simulation should produce reads"
+    );
 
     // All headers must carry the UMI tag.
     for header in &headers {
@@ -1122,14 +1153,26 @@ artifacts:
     let r1 = out_dir.path().join("TEST_R1.fastq.gz");
     let vcf = out_dir.path().join("TEST.truth.vcf");
 
-    assert!(r1.exists(), "R1 FASTQ not found for artifacts+variants test");
-    assert!(vcf.exists(), "truth VCF not found for artifacts+variants test");
+    assert!(
+        r1.exists(),
+        "R1 FASTQ not found for artifacts+variants test"
+    );
+    assert!(
+        vcf.exists(),
+        "truth VCF not found for artifacts+variants test"
+    );
 
     let vcf_content = std::fs::read_to_string(&vcf).unwrap();
-    assert!(vcf_content.contains("##fileformat=VCFv4"), "VCF should have proper header");
+    assert!(
+        vcf_content.contains("##fileformat=VCFv4"),
+        "VCF should have proper header"
+    );
 
     let n_reads = count_fastq_records(&r1);
-    assert!(n_reads > 0, "artifacts+variants simulation should produce reads");
+    assert!(
+        n_reads > 0,
+        "artifacts+variants simulation should produce reads"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1204,7 +1247,10 @@ performance:
     simulate::run(opts, None).expect("streaming high-coverage simulation should succeed");
 
     let r1 = out_dir.path().join("TEST_R1.fastq.gz");
-    assert!(r1.exists(), "R1 FASTQ not found for streaming high-coverage test");
+    assert!(
+        r1.exists(),
+        "R1 FASTQ not found for streaming high-coverage test"
+    );
 
     let n_reads = count_fastq_records(&r1);
     assert!(
@@ -1262,7 +1308,10 @@ performance:
         .filter(|(i, _)| i % 4 == 0)
         .map(|(_, l)| l)
         .collect();
-    assert!(!headers.is_empty(), "streaming UMI run should produce reads");
+    assert!(
+        !headers.is_empty(),
+        "streaming UMI run should produce reads"
+    );
 
     for header in &headers {
         assert!(
@@ -1320,15 +1369,27 @@ performance:
     // FASTQ output must exist and be non-empty.
     let r1 = out_dir.path().join("STREAMBOTH_R1.fastq.gz");
     let r2 = out_dir.path().join("STREAMBOTH_R2.fastq.gz");
-    assert!(r1.exists(), "R1 FASTQ not found for streaming BAM+FASTQ test");
-    assert!(r2.exists(), "R2 FASTQ not found for streaming BAM+FASTQ test");
+    assert!(
+        r1.exists(),
+        "R1 FASTQ not found for streaming BAM+FASTQ test"
+    );
+    assert!(
+        r2.exists(),
+        "R2 FASTQ not found for streaming BAM+FASTQ test"
+    );
 
     let r1_content = decompress_gz(&r1);
-    assert!(!r1_content.is_empty(), "streaming R1 FASTQ should not be empty");
+    assert!(
+        !r1_content.is_empty(),
+        "streaming R1 FASTQ should not be empty"
+    );
 
     // BAM output must exist and be non-empty with correct magic bytes.
     let bam_path = out_dir.path().join("STREAMBOTH.bam");
-    assert!(bam_path.exists(), "BAM file not found for streaming BAM+FASTQ test");
+    assert!(
+        bam_path.exists(),
+        "BAM file not found for streaming BAM+FASTQ test"
+    );
 
     let raw = std::fs::read(&bam_path).unwrap();
     assert!(raw.len() >= 4, "BAM file should not be empty");
@@ -1384,7 +1445,10 @@ performance:
 
     // FASTQ output must also be present and valid.
     let r1 = out_dir.path().join("TEST_R1.fastq.gz");
-    assert!(r1.exists(), "R1 FASTQ not found for streaming variants test");
+    assert!(
+        r1.exists(),
+        "R1 FASTQ not found for streaming variants test"
+    );
 
     let r1_content = decompress_gz(&r1);
     assert_eq!(

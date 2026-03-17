@@ -103,12 +103,10 @@ impl ReferenceGenome {
     /// - `region` extends beyond the chromosome length, or
     /// - an I/O error occurs.
     pub fn sequence(&self, region: &Region) -> Result<Vec<u8>> {
-        let chrom_len = self.chrom_lengths.get(&region.chrom).ok_or_else(|| {
-            anyhow!(
-                "chromosome '{}' not found in reference index",
-                region.chrom
-            )
-        })?;
+        let chrom_len = self
+            .chrom_lengths
+            .get(&region.chrom)
+            .ok_or_else(|| anyhow!("chromosome '{}' not found in reference index", region.chrom))?;
 
         if region.end > *chrom_len {
             bail!(
@@ -126,10 +124,20 @@ impl ReferenceGenome {
 
         // Convert from 0-based half-open [start, end) to 1-based inclusive [start+1, end].
         // We add 1 to start before converting so that the conversion catches overflow.
-        let start1: usize = usize::try_from(region.start + 1)
-            .map_err(|e| anyhow!("start position {} is too large for this platform: {}", region.start, e))?;
-        let end1: usize = usize::try_from(region.end)
-            .map_err(|e| anyhow!("end position {} is too large for this platform: {}", region.end, e))?;
+        let start1: usize = usize::try_from(region.start + 1).map_err(|e| {
+            anyhow!(
+                "start position {} is too large for this platform: {}",
+                region.start,
+                e
+            )
+        })?;
+        let end1: usize = usize::try_from(region.end).map_err(|e| {
+            anyhow!(
+                "end position {} is too large for this platform: {}",
+                region.end,
+                e
+            )
+        })?;
 
         let noodles_start = Position::try_from(start1)
             .map_err(|e| anyhow!("invalid start position {}: {}", region.start, e))?;

@@ -45,10 +45,7 @@ pub fn parse_vcf(
     known_chroms: Option<&[String]>,
     ref_seqs: Option<&RefSequences>,
 ) -> Result<VcfParseResult> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     let is_bgzipped = matches!(ext, "gz" | "bgz");
 
@@ -140,7 +137,11 @@ fn parse_record(
 
     // Skip records with no ALT (monomorphic reference, `.`).
     if alt_field == "." {
-        warn!(chrom = chrom, pos = pos_1based, "skipping record with no ALT allele");
+        warn!(
+            chrom = chrom,
+            pos = pos_1based,
+            "skipping record with no ALT allele"
+        );
         return Ok(None);
     }
 
@@ -157,15 +158,27 @@ fn parse_record(
     }
 
     // Skip BND / SV notation (task-08 territory).
-    if alt_allele.contains('[') || alt_allele.contains(']') || alt_allele.starts_with('.') || alt_allele.ends_with('.') {
-        warn!(chrom = chrom, pos = pos_1based, alt = alt_allele, "skipping SV/BND record");
+    if alt_allele.contains('[')
+        || alt_allele.contains(']')
+        || alt_allele.starts_with('.')
+        || alt_allele.ends_with('.')
+    {
+        warn!(
+            chrom = chrom,
+            pos = pos_1based,
+            alt = alt_allele,
+            "skipping SV/BND record"
+        );
         return Ok(None);
     }
 
     // Unknown chromosome check.
     if let Some(chroms) = known_chroms {
         if !chroms.iter().any(|c| c == chrom) {
-            warn!(chrom = chrom, "skipping variant on chromosome not in reference");
+            warn!(
+                chrom = chrom,
+                "skipping variant on chromosome not in reference"
+            );
             return Ok(None);
         }
     }
@@ -328,7 +341,11 @@ mod tests {
         assert!(
             matches!(
                 &v.mutation,
-                MutationType::Snv { pos: 999, ref_base: b'A', alt_base: b'T' }
+                MutationType::Snv {
+                    pos: 999,
+                    ref_base: b'A',
+                    alt_base: b'T'
+                }
             ),
             "unexpected mutation: {:?}",
             v.mutation
@@ -355,7 +372,10 @@ chr1\t200\t.\tATG\tA\t.\tPASS\t.\n"
             "expected insertion indel at pos 99, got {:?}",
             ins.mutation
         );
-        if let MutationType::Indel { ref_seq, alt_seq, .. } = &ins.mutation {
+        if let MutationType::Indel {
+            ref_seq, alt_seq, ..
+        } = &ins.mutation
+        {
             assert_eq!(ref_seq, b"A");
             assert_eq!(alt_seq, b"ATG");
         }
@@ -367,7 +387,10 @@ chr1\t200\t.\tATG\tA\t.\tPASS\t.\n"
             "expected deletion indel, got {:?}",
             del.mutation
         );
-        if let MutationType::Indel { ref_seq, alt_seq, .. } = &del.mutation {
+        if let MutationType::Indel {
+            ref_seq, alt_seq, ..
+        } = &del.mutation
+        {
             assert_eq!(ref_seq, b"ATG");
             assert_eq!(alt_seq, b"A");
         }
@@ -388,7 +411,10 @@ chr1\t200\t.\tATG\tA\t.\tPASS\t.\n"
             "expected MNV, got {:?}",
             v.mutation
         );
-        if let MutationType::Mnv { ref_seq, alt_seq, .. } = &v.mutation {
+        if let MutationType::Mnv {
+            ref_seq, alt_seq, ..
+        } = &v.mutation
+        {
             assert_eq!(ref_seq, b"AC");
             assert_eq!(alt_seq, b"TG");
         }
@@ -502,7 +528,11 @@ chrUNKNOWN\t500\t.\tG\tC\t.\tPASS\t.\n\
 chr2\t200\t.\tA\tG\t.\tPASS\t.\n"
         );
         let result = parse_vcf_str(&vcf, Some(&known_chroms()), None).unwrap();
-        assert_eq!(result.variants.len(), 2, "only chr1 and chr2 should be kept");
+        assert_eq!(
+            result.variants.len(),
+            2,
+            "only chr1 and chr2 should be kept"
+        );
         assert_eq!(result.skipped, 1, "chrUNKNOWN record should be skipped");
     }
 
@@ -522,7 +552,11 @@ chr2\t200\t.\tA\tG\t.\tPASS\t.\n"
         }
 
         let result = parse_vcf(tmp.path(), Some(&known_chroms()), None).unwrap();
-        assert_eq!(result.variants.len(), 1, "bgzipped VCF should parse correctly");
+        assert_eq!(
+            result.variants.len(),
+            1,
+            "bgzipped VCF should parse correctly"
+        );
         let v = &result.variants[0];
         assert!(
             (v.expected_vaf - 0.42).abs() < 1e-9,

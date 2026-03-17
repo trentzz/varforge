@@ -7,8 +7,8 @@
 //!   cargo bench -- fragment_sampling
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
 use std::io::Write;
 use tempfile::TempDir;
 
@@ -45,18 +45,14 @@ fn bench_fragment_sampling(c: &mut Criterion) {
     // Bulk throughput: how many fragments/sec
     for n in [1_000u64, 10_000u64, 100_000u64] {
         group.throughput(Throughput::Elements(n));
-        group.bench_with_input(
-            BenchmarkId::new("normal_bulk", n),
-            &n,
-            |b, &n| {
-                let mut rng = StdRng::seed_from_u64(42);
-                b.iter(|| {
-                    for _ in 0..n {
-                        black_box(normal_sampler.sample(&mut rng));
-                    }
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("normal_bulk", n), &n, |b, &n| {
+            let mut rng = StdRng::seed_from_u64(42);
+            b.iter(|| {
+                for _ in 0..n {
+                    black_box(normal_sampler.sample(&mut rng));
+                }
+            });
+        });
     }
 
     group.finish();
@@ -87,18 +83,14 @@ fn bench_quality_generation(c: &mut Criterion) {
     // Bulk: reads/sec at 150 bp
     for n in [1_000u64, 10_000u64] {
         group.throughput(Throughput::Elements(n));
-        group.bench_with_input(
-            BenchmarkId::new("bulk_reads", n),
-            &n,
-            |b, &n| {
-                let mut rng = StdRng::seed_from_u64(42);
-                b.iter(|| {
-                    for _ in 0..n {
-                        black_box(model.generate_qualities(150, &mut rng));
-                    }
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("bulk_reads", n), &n, |b, &n| {
+            let mut rng = StdRng::seed_from_u64(42);
+            b.iter(|| {
+                for _ in 0..n {
+                    black_box(model.generate_qualities(150, &mut rng));
+                }
+            });
+        });
     }
 
     group.finish();
@@ -205,9 +197,7 @@ fn bench_fastq_writing(c: &mut Criterion) {
     // At 150 bp: ~2 × (25 + 150 + 2 + 150 + 4) = ~662 bytes/pair, gzip ~2:1 → ~330 bytes
     // We report in terms of pairs written.
     for n_pairs in [100u64, 1_000u64, 10_000u64] {
-        let pairs: Vec<ReadPair> = (0..n_pairs as usize)
-            .map(|_| make_read_pair(150))
-            .collect();
+        let pairs: Vec<ReadPair> = (0..n_pairs as usize).map(|_| make_read_pair(150)).collect();
 
         group.throughput(Throughput::Elements(n_pairs));
         group.bench_with_input(
@@ -216,8 +206,7 @@ fn bench_fastq_writing(c: &mut Criterion) {
             |b, pairs| {
                 b.iter(|| {
                     let dir = TempDir::new().expect("tempdir");
-                    let mut writer =
-                        FastqWriter::new(dir.path(), "bench").expect("writer");
+                    let mut writer = FastqWriter::new(dir.path(), "bench").expect("writer");
                     writer.write_pairs(pairs, "bench").expect("write");
                     writer.finish().expect("finish");
                 });
@@ -305,18 +294,14 @@ fn bench_umi_generation(c: &mut Criterion) {
     // Bulk UMI generation throughput
     for n in [10_000u64, 100_000u64] {
         group.throughput(Throughput::Elements(n));
-        group.bench_with_input(
-            BenchmarkId::new("bulk_umi_generation", n),
-            &n,
-            |b, &n| {
-                let mut rng = StdRng::seed_from_u64(42);
-                b.iter(|| {
-                    for _ in 0..n {
-                        black_box(generate_umi(8, &mut rng));
-                    }
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("bulk_umi_generation", n), &n, |b, &n| {
+            let mut rng = StdRng::seed_from_u64(42);
+            b.iter(|| {
+                for _ in 0..n {
+                    black_box(generate_umi(8, &mut rng));
+                }
+            });
+        });
     }
 
     group.finish();

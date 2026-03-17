@@ -11,18 +11,13 @@ use anyhow::{Context, Result};
 use noodles_bam as bam;
 use noodles_sam::{
     self as sam,
-    alignment::{
-        record::data::field::Tag,
-        RecordBuf,
-    },
+    alignment::{record::data::field::Tag, RecordBuf},
 };
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use crate::core::types::{MutationType, Variant};
-use crate::editor::read_modifier::{
-    apply_deletion, apply_insertion, apply_snv, ModifyResult,
-};
+use crate::editor::read_modifier::{apply_deletion, apply_insertion, apply_snv, ModifyResult};
 use crate::variants::vaf::sample_alt_count;
 
 /// Configuration for the BAM editor.
@@ -128,7 +123,7 @@ impl BamEditor {
     /// Spike a single variant into the relevant records.
     fn spike_variant(
         &mut self,
-        records: &mut Vec<RecordBuf>,
+        records: &mut [RecordBuf],
         pos_index: &PositionIndex,
         header: &sam::Header,
         variant: &Variant,
@@ -141,12 +136,7 @@ impl BamEditor {
         let ref_id = header
             .reference_sequences()
             .get_index_of(chrom.as_bytes())
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "chromosome '{}' not found in BAM header",
-                    chrom
-                )
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("chromosome '{}' not found in BAM header", chrom))?;
 
         // Collect indices of records overlapping the variant position.
         let overlapping: Vec<usize> =
@@ -154,11 +144,7 @@ impl BamEditor {
 
         let total_depth = overlapping.len() as u32;
         if total_depth == 0 {
-            tracing::debug!(
-                "variant at {}:{} has zero depth, skipping",
-                chrom,
-                var_pos
-            );
+            tracing::debug!("variant at {}:{} has zero depth, skipping", chrom, var_pos);
             return Ok(None);
         }
 
@@ -174,12 +160,8 @@ impl BamEditor {
         }
 
         // Select which reads to modify, respecting strand balance.
-        let to_modify = select_reads_for_modification(
-            records,
-            &overlapping,
-            alt_count as usize,
-            &mut self.rng,
-        );
+        let to_modify =
+            select_reads_for_modification(records, &overlapping, alt_count as usize, &mut self.rng);
 
         // Apply the modification to selected reads.
         let mut actual_modified: u32 = 0;
@@ -187,7 +169,9 @@ impl BamEditor {
             let record = &mut records[idx];
             let result = match &variant.mutation {
                 MutationType::Snv { .. } => apply_snv(record, &variant.mutation),
-                MutationType::Indel { ref_seq, alt_seq, .. } => {
+                MutationType::Indel {
+                    ref_seq, alt_seq, ..
+                } => {
                     if alt_seq.len() > ref_seq.len() {
                         apply_insertion(record, &variant.mutation)
                     } else {
@@ -287,10 +271,7 @@ fn collect_overlapping_indices(
         let align_end = align_start + read_len;
 
         // Skip MQ=0 reads.
-        let mq = record
-            .mapping_quality()
-            .map(u8::from)
-            .unwrap_or(0);
+        let mq = record.mapping_quality().map(u8::from).unwrap_or(0);
         if mq == 0 {
             continue;
         }
@@ -324,10 +305,7 @@ fn select_reads_for_modification(
     let mut fwd: Vec<usize> = Vec::new();
     let mut rev: Vec<usize> = Vec::new();
     for &idx in overlapping {
-        if records[idx]
-            .flags()
-            .is_reverse_complemented()
-        {
+        if records[idx].flags().is_reverse_complemented() {
             rev.push(idx);
         } else {
             fwd.push(idx);
@@ -343,10 +321,7 @@ fn select_reads_for_modification(
     let selected_fwd = reservoir_sample(&fwd, n_fwd, rng);
     let selected_rev = reservoir_sample(&rev, n_rev, rng);
 
-    let mut selected: Vec<usize> = selected_fwd
-        .into_iter()
-        .chain(selected_rev)
-        .collect();
+    let mut selected: Vec<usize> = selected_fwd.into_iter().chain(selected_rev).collect();
     selected.sort_unstable();
     selected
 }
@@ -493,9 +468,15 @@ fn write_truth_vcf(
 
 fn variant_alleles(v: &Variant) -> (Vec<u8>, Vec<u8>) {
     match &v.mutation {
-        MutationType::Snv { ref_base, alt_base, .. } => (vec![*ref_base], vec![*alt_base]),
-        MutationType::Indel { ref_seq, alt_seq, .. } => (ref_seq.clone(), alt_seq.clone()),
-        MutationType::Mnv { ref_seq, alt_seq, .. } => (ref_seq.clone(), alt_seq.clone()),
+        MutationType::Snv {
+            ref_base, alt_base, ..
+        } => (vec![*ref_base], vec![*alt_base]),
+        MutationType::Indel {
+            ref_seq, alt_seq, ..
+        } => (ref_seq.clone(), alt_seq.clone()),
+        MutationType::Mnv {
+            ref_seq, alt_seq, ..
+        } => (ref_seq.clone(), alt_seq.clone()),
         MutationType::Sv { .. } => (b"N".to_vec(), b"<SV>".to_vec()),
     }
 }
@@ -531,10 +512,7 @@ mod tests {
         record_buf::{Cigar, Data, QualityScores, Sequence},
         RecordBuf,
     };
-    use noodles_sam::header::record::value::{
-        map::ReferenceSequence,
-        Map,
-    };
+    use noodles_sam::header::record::value::{map::ReferenceSequence, Map};
     use std::num::NonZeroUsize;
     use tempfile::NamedTempFile;
 
@@ -564,9 +542,7 @@ mod tests {
             .set_flags(flags)
             .set_reference_sequence_id(ref_id)
             .set_alignment_start(NoodlesPosition::new(align_start as usize + 1).unwrap())
-            .set_mapping_quality(
-                noodles_sam::alignment::record::MappingQuality::new(60).unwrap(),
-            )
+            .set_mapping_quality(noodles_sam::alignment::record::MappingQuality::new(60).unwrap())
             .set_cigar(cigar_ops.into_iter().collect::<Cigar>())
             .set_sequence(Sequence::from(seq))
             .set_quality_scores(QualityScores::from(qual.to_vec()))
@@ -618,7 +594,11 @@ mod tests {
 
         let variant = Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos: 102, ref_base: b'G', alt_base: b'T' },
+            mutation: MutationType::Snv {
+                pos: 102,
+                ref_base: b'G',
+                alt_base: b'T',
+            },
             expected_vaf: 1.0, // 100% so all reads are modified
             clone_id: None,
         };
@@ -637,7 +617,10 @@ mod tests {
         let spiked = editor.run().unwrap();
 
         assert_eq!(spiked.len(), 1);
-        assert!(spiked[0].alt_count > 0, "at least some reads should be modified");
+        assert!(
+            spiked[0].alt_count > 0,
+            "at least some reads should be modified"
+        );
 
         let (_, out_records) = load_bam(tmp_out.path()).unwrap();
         // At least some reads should have 'T' at offset 2.
@@ -666,7 +649,11 @@ mod tests {
 
         let variant = Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos: 102, ref_base: b'G', alt_base: b'T' },
+            mutation: MutationType::Snv {
+                pos: 102,
+                ref_base: b'G',
+                alt_base: b'T',
+            },
             expected_vaf: 0.5,
             clone_id: None,
         };
@@ -736,9 +723,13 @@ mod tests {
         let (_, out_records) = load_bam(tmp_out.path()).unwrap();
         let has_insertion = out_records.iter().any(|r| {
             let ops: Vec<_> = r.cigar().as_ref().to_vec();
-            ops.iter().any(|op| op.kind() == noodles_sam::alignment::record::cigar::op::Kind::Insertion)
+            ops.iter()
+                .any(|op| op.kind() == noodles_sam::alignment::record::cigar::op::Kind::Insertion)
         });
-        assert!(has_insertion, "at least one record should have an Insertion CIGAR op");
+        assert!(
+            has_insertion,
+            "at least one record should have an Insertion CIGAR op"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -782,9 +773,13 @@ mod tests {
         let (_, out_records) = load_bam(tmp_out.path()).unwrap();
         let has_deletion = out_records.iter().any(|r| {
             let ops: Vec<_> = r.cigar().as_ref().to_vec();
-            ops.iter().any(|op| op.kind() == noodles_sam::alignment::record::cigar::op::Kind::Deletion)
+            ops.iter()
+                .any(|op| op.kind() == noodles_sam::alignment::record::cigar::op::Kind::Deletion)
         });
-        assert!(has_deletion, "at least one record should have a Deletion CIGAR op");
+        assert!(
+            has_deletion,
+            "at least one record should have a Deletion CIGAR op"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -825,7 +820,11 @@ mod tests {
 
         let variant = Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos: 100, ref_base: b'A', alt_base: b'C' },
+            mutation: MutationType::Snv {
+                pos: 100,
+                ref_base: b'A',
+                alt_base: b'C',
+            },
             expected_vaf: 1.0,
             clone_id: None,
         };
@@ -850,9 +849,7 @@ mod tests {
             .filter_map(|r| {
                 let s: Vec<u8> = r.sequence().as_ref().to_vec();
                 if s.first() == Some(&b'C') {
-                    r.data()
-                        .get(&Tag::EDIT_DISTANCE)
-                        .and_then(|v| v.as_int())
+                    r.data().get(&Tag::EDIT_DISTANCE).and_then(|v| v.as_int())
                 } else {
                     None
                 }
@@ -860,7 +857,10 @@ mod tests {
             .collect();
 
         for nm in &modified_nm {
-            assert_eq!(*nm, 1, "NM should be 1 after one SNV modification, got {nm}");
+            assert_eq!(
+                *nm, 1,
+                "NM should be 1 after one SNV modification, got {nm}"
+            );
         }
         assert!(!modified_nm.is_empty(), "some records should be modified");
     }
@@ -876,7 +876,13 @@ mod tests {
 
         // 50 forward, 50 reverse reads at the same position.
         for _ in 0..50 {
-            records.push(make_record(seq, &vec![30u8; seq.len()], 0, 100, Flags::empty()));
+            records.push(make_record(
+                seq,
+                &vec![30u8; seq.len()],
+                0,
+                100,
+                Flags::empty(),
+            ));
         }
         for _ in 0..50 {
             records.push(make_record(
@@ -894,7 +900,11 @@ mod tests {
 
         let variant = Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos: 102, ref_base: b'G', alt_base: b'T' },
+            mutation: MutationType::Snv {
+                pos: 102,
+                ref_base: b'G',
+                alt_base: b'T',
+            },
             expected_vaf: 0.5, // 50 of 100 reads
             clone_id: None,
         };
@@ -969,7 +979,11 @@ mod tests {
 
         let variant = Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos: 102, ref_base: b'G', alt_base: b'T' },
+            mutation: MutationType::Snv {
+                pos: 102,
+                ref_base: b'G',
+                alt_base: b'T',
+            },
             expected_vaf: 1.0,
             clone_id: None,
         };
@@ -989,10 +1003,11 @@ mod tests {
 
         let (_, out_records) = load_bam(tmp_out.path()).unwrap();
         assert_eq!(out_records.len(), 1);
-        let out_quals: Vec<u8> = out_records[0]
-            .quality_scores()
-            .as_ref().to_vec();
-        assert_eq!(out_quals, quals, "quality scores should be identical after SNV");
+        let out_quals: Vec<u8> = out_records[0].quality_scores().as_ref().to_vec();
+        assert_eq!(
+            out_quals, quals,
+            "quality scores should be identical after SNV"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -1013,7 +1028,11 @@ mod tests {
 
         let variant = Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos: 102, ref_base: b'G', alt_base: b'T' },
+            mutation: MutationType::Snv {
+                pos: 102,
+                ref_base: b'G',
+                alt_base: b'T',
+            },
             expected_vaf: 1.0,
             clone_id: None,
         };
@@ -1036,7 +1055,11 @@ mod tests {
 
         // The far read (index 1) should be byte-for-byte identical.
         let out_far_seq: Vec<u8> = out_records[1].sequence().as_ref().to_vec();
-        assert_eq!(out_far_seq, far_seq.to_vec(), "non-overlapping read must be unchanged");
+        assert_eq!(
+            out_far_seq,
+            far_seq.to_vec(),
+            "non-overlapping read must be unchanged"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -1050,7 +1073,11 @@ mod tests {
 
         let variant = Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos: 102, ref_base: b'G', alt_base: b'T' },
+            mutation: MutationType::Snv {
+                pos: 102,
+                ref_base: b'G',
+                alt_base: b'T',
+            },
             expected_vaf: 0.3,
             clone_id: None,
         };
@@ -1081,7 +1108,10 @@ mod tests {
         let run3 = run(99);
 
         assert_eq!(run1, run2, "same seed must produce identical output");
-        assert_ne!(run1, run3, "different seeds should produce different output (usually)");
+        assert_ne!(
+            run1, run3,
+            "different seeds should produce different output (usually)"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -1100,7 +1130,11 @@ mod tests {
 
         let variant = Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos: 102, ref_base: b'G', alt_base: b'T' },
+            mutation: MutationType::Snv {
+                pos: 102,
+                ref_base: b'G',
+                alt_base: b'T',
+            },
             expected_vaf: 0.5,
             clone_id: None,
         };
@@ -1123,8 +1157,14 @@ mod tests {
         assert!(vcf_content.contains("chr1"));
         assert!(vcf_content.contains("VARTYPE=SNV"));
         // Data line with chr1 should exist.
-        let data_lines: Vec<&str> = vcf_content.lines().filter(|l| !l.starts_with('#')).collect();
-        assert!(!data_lines.is_empty(), "truth VCF should have at least one data line");
+        let data_lines: Vec<&str> = vcf_content
+            .lines()
+            .filter(|l| !l.starts_with('#'))
+            .collect();
+        assert!(
+            !data_lines.is_empty(),
+            "truth VCF should have at least one data line"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -1207,7 +1247,11 @@ mod tests {
 
         let variant = Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos: 102, ref_base: b'G', alt_base: b'T' },
+            mutation: MutationType::Snv {
+                pos: 102,
+                ref_base: b'G',
+                alt_base: b'T',
+            },
             expected_vaf: 0.25,
             clone_id: None,
         };
@@ -1271,7 +1315,11 @@ mod tests {
 
         let variant = Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos: 102, ref_base: b'G', alt_base: b'T' },
+            mutation: MutationType::Snv {
+                pos: 102,
+                ref_base: b'G',
+                alt_base: b'T',
+            },
             expected_vaf: 1.0,
             clone_id: None,
         };

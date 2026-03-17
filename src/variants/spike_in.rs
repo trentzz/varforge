@@ -3,9 +3,14 @@ use crate::core::types::{MutationType, Read};
 /// Apply a mutation to a read if it overlaps the mutation position.
 ///
 /// Returns true if the read was modified.
+#[allow(dead_code)]
 pub fn spike_snv(read: &mut Read, read_start: u64, mutation: &MutationType) -> bool {
     match mutation {
-        MutationType::Snv { pos, ref_base, alt_base } => {
+        MutationType::Snv {
+            pos,
+            ref_base,
+            alt_base,
+        } => {
             let read_end = read_start + read.len() as u64;
             if *pos >= read_start && *pos < read_end {
                 let offset = (*pos - read_start) as usize;
@@ -22,9 +27,14 @@ pub fn spike_snv(read: &mut Read, read_start: u64, mutation: &MutationType) -> b
 
 /// Apply an MNV (multi-nucleotide variant) to a read.
 /// All bases must be on the same read — never partially spike.
+#[allow(dead_code)]
 pub fn spike_mnv(read: &mut Read, read_start: u64, mutation: &MutationType) -> bool {
     match mutation {
-        MutationType::Mnv { pos, ref_seq, alt_seq } => {
+        MutationType::Mnv {
+            pos,
+            ref_seq,
+            alt_seq,
+        } => {
             let read_end = read_start + read.len() as u64;
             let mnv_end = *pos + ref_seq.len() as u64;
 
@@ -54,7 +64,11 @@ pub fn spike_indel(
     ref_seq_after: &[u8],
 ) -> bool {
     match mutation {
-        MutationType::Indel { pos, ref_seq, alt_seq } => {
+        MutationType::Indel {
+            pos,
+            ref_seq,
+            alt_seq,
+        } => {
             let read_end = read_start + read.len() as u64;
             if *pos < read_start || *pos >= read_end {
                 return false;
@@ -140,7 +154,11 @@ mod tests {
     #[test]
     fn test_spike_snv_hit() {
         let mut read = make_read(b"ACGTACGT");
-        let mutation = MutationType::Snv { pos: 102, ref_base: b'G', alt_base: b'T' };
+        let mutation = MutationType::Snv {
+            pos: 102,
+            ref_base: b'G',
+            alt_base: b'T',
+        };
         assert!(spike_snv(&mut read, 100, &mutation));
         assert_eq!(&read.seq, b"ACTTACGT");
     }
@@ -148,7 +166,11 @@ mod tests {
     #[test]
     fn test_spike_snv_miss() {
         let mut read = make_read(b"ACGTACGT");
-        let mutation = MutationType::Snv { pos: 200, ref_base: b'G', alt_base: b'T' };
+        let mutation = MutationType::Snv {
+            pos: 200,
+            ref_base: b'G',
+            alt_base: b'T',
+        };
         assert!(!spike_snv(&mut read, 100, &mutation));
         assert_eq!(&read.seq, b"ACGTACGT"); // unchanged
     }
@@ -156,7 +178,11 @@ mod tests {
     #[test]
     fn test_spike_snv_wrong_ref() {
         let mut read = make_read(b"ACGTACGT");
-        let mutation = MutationType::Snv { pos: 100, ref_base: b'T', alt_base: b'G' };
+        let mutation = MutationType::Snv {
+            pos: 100,
+            ref_base: b'T',
+            alt_base: b'G',
+        };
         assert!(!spike_snv(&mut read, 100, &mutation));
         assert_eq!(&read.seq, b"ACGTACGT"); // unchanged, ref didn't match
     }

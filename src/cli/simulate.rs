@@ -10,8 +10,8 @@ use super::SimulateOpts;
 use crate::cli::presets;
 use crate::core::capture::CaptureModel;
 use crate::core::coverage::{partition_regions, read_pairs_for_coverage};
-use crate::core::engine::{AppliedVariant, SimulationEngine, derive_region_seed};
-use crate::core::multi_sample::{MultiSamplePlan, SampleManifestEntry, write_combined_manifest};
+use crate::core::engine::{derive_region_seed, AppliedVariant, SimulationEngine};
+use crate::core::multi_sample::{write_combined_manifest, MultiSamplePlan, SampleManifestEntry};
 use crate::core::types::{MutationType, ReadPair, Region, Variant};
 use crate::io::bam::BamWriter;
 use crate::io::config::{self, Config};
@@ -99,9 +99,10 @@ pub fn apply_overrides(
         // If vaf_range is provided without random_mutations we ignore it
         // (that would be a user error caught later).  Here we only override
         // the random block when random_mutations is set.
-        let existing = config
-            .mutations
-            .get_or_insert(config::MutationConfig { vcf: None, random: None });
+        let existing = config.mutations.get_or_insert(config::MutationConfig {
+            vcf: None,
+            random: None,
+        });
         let rand = existing.random.get_or_insert(config::RandomMutationConfig {
             count: 0,
             vaf_min: 0.001,
@@ -183,7 +184,10 @@ fn run_single_sample(
 ) -> Result<()> {
     // Build the sorted list of chromosomes/lengths we will simulate
     let chrom_lengths: Vec<(String, u64)> = build_chrom_list(&cfg, &reference)?;
-    tracing::info!("reference has {} chromosomes to simulate", chrom_lengths.len());
+    tracing::info!(
+        "reference has {} chromosomes to simulate",
+        chrom_lengths.len()
+    );
 
     // -----------------------------------------------------------------------
     // Partition regions
@@ -225,10 +229,7 @@ fn run_single_sample(
     let out_dir = &cfg.output.directory;
 
     let mut fastq_writer = if cfg.output.fastq {
-        Some(
-            FastqWriter::new(out_dir, sample_name)
-                .context("failed to create FASTQ writers")?,
-        )
+        Some(FastqWriter::new(out_dir, sample_name).context("failed to create FASTQ writers")?)
     } else {
         None
     };
@@ -266,7 +267,10 @@ fn run_single_sample(
     // Run simulation per region in parallel, streaming batches to a dedicated
     // writer thread via a bounded channel.
     // -----------------------------------------------------------------------
-    tracing::info!("starting parallel simulation across {} regions", regions.len());
+    tracing::info!(
+        "starting parallel simulation across {} regions",
+        regions.len()
+    );
     let pb = ProgressBar::new(regions.len() as u64);
     pb.set_style(
         ProgressStyle::with_template(
@@ -328,39 +332,47 @@ fn run_single_sample(
             bam.finish().context("failed to finalize BAM file")?;
         }
 
-        Ok(WriterStats { total_read_pairs, all_applied })
+        Ok(WriterStats {
+            total_read_pairs,
+            all_applied,
+        })
     });
 
     // Worker threads simulate regions in parallel and send batches as they complete.
-    regions.par_iter().enumerate().try_for_each(|(idx, region)| {
-        let ref_arc = Arc::clone(&reference);
-        let mut local_cfg = cfg.clone();
-        // Override seed to per-region value for determinism.
-        local_cfg.seed = master_seed.map(|s| derive_region_seed(s, idx as u64));
-        let mut engine = SimulationEngine::new_with_shared_reference(local_cfg, ref_arc);
+    regions
+        .par_iter()
+        .enumerate()
+        .try_for_each(|(idx, region)| {
+            let ref_arc = Arc::clone(&reference);
+            let mut local_cfg = cfg.clone();
+            // Override seed to per-region value for determinism.
+            local_cfg.seed = master_seed.map(|s| derive_region_seed(s, idx as u64));
+            let mut engine = SimulationEngine::new_with_shared_reference(local_cfg, ref_arc);
 
-        // Wire in capture model.
-        if let Some(ref cap) = capture_model {
-            engine.set_capture_model(Arc::clone(cap));
-        }
+            // Wire in capture model.
+            if let Some(ref cap) = capture_model {
+                engine.set_capture_model(Arc::clone(cap));
+            }
 
-        let output = engine
-            .generate_region(region, &variants)
-            .with_context(|| format!("simulation failed for region {:?}", region))?;
-        tx.send(RegionBatch {
-            region: region.clone(),
-            read_pairs: output.read_pairs,
-            applied_variants: output.applied_variants,
-        }).map_err(|e| anyhow::anyhow!("writer channel closed: {}", e))?;
-        pb_ref.inc(1);
-        Ok::<(), anyhow::Error>(())
-    })?;
+            let output = engine
+                .generate_region(region, &variants)
+                .with_context(|| format!("simulation failed for region {:?}", region))?;
+            tx.send(RegionBatch {
+                region: region.clone(),
+                read_pairs: output.read_pairs,
+                applied_variants: output.applied_variants,
+            })
+            .map_err(|e| anyhow::anyhow!("writer channel closed: {}", e))?;
+            pb_ref.inc(1);
+            Ok::<(), anyhow::Error>(())
+        })?;
 
     // Signal completion by dropping the sender so the writer thread exits its loop.
     drop(tx);
 
     // Wait for the writer thread to finish and collect stats.
-    let stats = writer_handle.join()
+    let stats = writer_handle
+        .join()
         .map_err(|_| anyhow::anyhow!("writer thread panicked"))??;
 
     pb.finish_with_message("simulation complete");
@@ -465,18 +477,36 @@ fn run_single_sample(
         // Serialize the manifest, then inject top-level flat fields that are
         // expected by existing callers (e.g., integration tests and downstream
         // tooling that reads the simpler fields directly).
-        let mut manifest_json = serde_json::to_value(&manifest)
-            .context("failed to serialize manifest")?;
+        let mut manifest_json =
+            serde_json::to_value(&manifest).context("failed to serialize manifest")?;
         if let serde_json::Value::Object(ref mut map) = manifest_json {
-            map.insert("sample_name".into(), serde_json::Value::String(sample_name.to_string()));
-            map.insert("total_read_pairs".into(), serde_json::Value::Number(total_read_pairs.into()));
-            map.insert("total_reads".into(), serde_json::Value::Number((total_read_pairs * 2).into()));
-            map.insert("variants_applied".into(), serde_json::Value::Number(all_applied.len().into()));
+            map.insert(
+                "sample_name".into(),
+                serde_json::Value::String(sample_name.to_string()),
+            );
+            map.insert(
+                "total_read_pairs".into(),
+                serde_json::Value::Number(total_read_pairs.into()),
+            );
+            map.insert(
+                "total_reads".into(),
+                serde_json::Value::Number((total_read_pairs * 2).into()),
+            );
+            map.insert(
+                "variants_applied".into(),
+                serde_json::Value::Number(all_applied.len().into()),
+            );
             if let Some(seed_val) = cfg.seed {
                 map.insert("seed".into(), serde_json::Value::Number(seed_val.into()));
             }
-            map.insert("wall_time_secs".into(), serde_json::json!(elapsed.as_secs_f64()));
-            map.insert("varforge_version".into(), serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string()));
+            map.insert(
+                "wall_time_secs".into(),
+                serde_json::json!(elapsed.as_secs_f64()),
+            );
+            map.insert(
+                "varforge_version".into(),
+                serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string()),
+            );
         }
         let pretty = serde_json::to_string_pretty(&manifest_json)
             .context("failed to pretty-print manifest")?;
@@ -499,19 +529,19 @@ fn run_single_sample(
 /// Run multi-sample simulation: iterate over each sample in `cfg.samples`,
 /// simulate independently with per-sample coverage and tumour fraction, and
 /// write a combined manifest.
-fn run_multi_sample(
-    cfg: Config,
-    reference: ReferenceGenome,
-    start_time: Instant,
-) -> Result<()> {
-    tracing::info!("multi-sample mode: {} samples configured", cfg.samples.as_ref().map(|s| s.len()).unwrap_or(0));
+fn run_multi_sample(cfg: Config, reference: ReferenceGenome, start_time: Instant) -> Result<()> {
+    tracing::info!(
+        "multi-sample mode: {} samples configured",
+        cfg.samples.as_ref().map(|s| s.len()).unwrap_or(0)
+    );
 
     let root_dir = cfg.output.directory.clone();
 
     let plan = MultiSamplePlan::from_config(cfg)
         .ok_or_else(|| anyhow::anyhow!("multi-sample plan is empty"))?;
 
-    let resolved = plan.per_sample_configs()
+    let resolved = plan
+        .per_sample_configs()
         .context("failed to resolve per-sample configs")?;
 
     let mut manifest_entries: Vec<SampleManifestEntry> = Vec::new();
@@ -521,28 +551,39 @@ fn run_multi_sample(
             "simulating sample '{}' (coverage={:.1}x, tumour_fraction={:.4})",
             sample.name,
             sample.config.sample.coverage,
-            sample.config.tumour.as_ref().map(|t| t.purity).unwrap_or(1.0),
+            sample
+                .config
+                .tumour
+                .as_ref()
+                .map(|t| t.purity)
+                .unwrap_or(1.0),
         );
 
         // Create per-sample output directory.
         std::fs::create_dir_all(&sample.output_dir).with_context(|| {
-            format!("failed to create output directory: {}", sample.output_dir.display())
+            format!(
+                "failed to create output directory: {}",
+                sample.output_dir.display()
+            )
         })?;
 
         // Clone the reference (reopens the file handle) for this sample.
         let ref_for_sample = reference.clone();
 
         let sample_start = Instant::now();
-        let (total_pairs, applied_count) = run_sample_simulation(
-            sample.config.clone(),
-            ref_for_sample,
-        )?;
+        let (total_pairs, applied_count) =
+            run_sample_simulation(sample.config.clone(), ref_for_sample)?;
 
         manifest_entries.push(SampleManifestEntry {
             name: sample.name.clone(),
             output_dir: sample.output_dir.to_string_lossy().into_owned(),
             coverage: sample.config.sample.coverage,
-            tumour_fraction: sample.config.tumour.as_ref().map(|t| t.purity).unwrap_or(1.0),
+            tumour_fraction: sample
+                .config
+                .tumour
+                .as_ref()
+                .map(|t| t.purity)
+                .unwrap_or(1.0),
             total_read_pairs: total_pairs,
             variants_applied: applied_count,
         });
@@ -594,8 +635,10 @@ fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64
     let ref_sequences_for_bam: Vec<(String, u64)> = chrom_lengths.clone();
     let mut bam_writer = if cfg.output.bam {
         let bam_path = out_dir.join(format!("{}.bam", sample_name));
-        Some(BamWriter::new(&bam_path, &ref_sequences_for_bam, &cfg.sample)
-            .context("failed to create BAM writer")?)
+        Some(
+            BamWriter::new(&bam_path, &ref_sequences_for_bam, &cfg.sample)
+                .context("failed to create BAM writer")?,
+        )
     } else {
         None
     };
@@ -603,8 +646,10 @@ fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64
     let truth_vcf_path = out_dir.join(format!("{}.truth.vcf", sample_name));
     let mut truth_vcf_writer = if cfg.output.truth_vcf {
         let contigs: Vec<(String, u64)> = chrom_lengths.clone();
-        Some(TruthVcfWriter::new(&truth_vcf_path, sample_name, &contigs)
-            .context("failed to create truth VCF writer")?)
+        Some(
+            TruthVcfWriter::new(&truth_vcf_path, sample_name, &contigs)
+                .context("failed to create truth VCF writer")?,
+        )
     } else {
         None
     };
@@ -659,34 +704,42 @@ fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64
             bam.finish().context("failed to finalize BAM file")?;
         }
 
-        Ok(WriterStats { total_read_pairs, all_applied })
+        Ok(WriterStats {
+            total_read_pairs,
+            all_applied,
+        })
     });
 
     // Worker threads simulate regions in parallel and send batches as they complete.
-    regions.par_iter().enumerate().try_for_each(|(idx, region)| {
-        let ref_arc = Arc::clone(&reference);
-        let mut local_cfg = cfg.clone();
-        local_cfg.seed = master_seed.map(|s| derive_region_seed(s, idx as u64));
-        let mut engine = SimulationEngine::new_with_shared_reference(local_cfg, ref_arc);
-        if let Some(ref cap) = capture_model {
-            engine.set_capture_model(Arc::clone(cap));
-        }
-        let output = engine
-            .generate_region(region, &variants)
-            .with_context(|| format!("simulation failed for region {:?}", region))?;
-        tx.send(RegionBatch {
-            region: region.clone(),
-            read_pairs: output.read_pairs,
-            applied_variants: output.applied_variants,
-        }).map_err(|e| anyhow::anyhow!("writer channel closed: {}", e))?;
-        Ok::<(), anyhow::Error>(())
-    })?;
+    regions
+        .par_iter()
+        .enumerate()
+        .try_for_each(|(idx, region)| {
+            let ref_arc = Arc::clone(&reference);
+            let mut local_cfg = cfg.clone();
+            local_cfg.seed = master_seed.map(|s| derive_region_seed(s, idx as u64));
+            let mut engine = SimulationEngine::new_with_shared_reference(local_cfg, ref_arc);
+            if let Some(ref cap) = capture_model {
+                engine.set_capture_model(Arc::clone(cap));
+            }
+            let output = engine
+                .generate_region(region, &variants)
+                .with_context(|| format!("simulation failed for region {:?}", region))?;
+            tx.send(RegionBatch {
+                region: region.clone(),
+                read_pairs: output.read_pairs,
+                applied_variants: output.applied_variants,
+            })
+            .map_err(|e| anyhow::anyhow!("writer channel closed: {}", e))?;
+            Ok::<(), anyhow::Error>(())
+        })?;
 
     // Signal completion by dropping the sender so the writer thread exits its loop.
     drop(tx);
 
     // Wait for the writer thread to finish and collect stats.
-    let stats = writer_handle.join()
+    let stats = writer_handle
+        .join()
         .map_err(|_| anyhow::anyhow!("writer thread panicked"))??;
 
     let total_read_pairs = stats.total_read_pairs;
@@ -792,10 +845,8 @@ fn build_chrom_list(cfg: &Config, reference: &ReferenceGenome) -> Result<Vec<(St
         out
     } else {
         // All chromosomes from the reference, in deterministic order
-        let mut pairs: Vec<(String, u64)> = all_lengths
-            .iter()
-            .map(|(k, v)| (k.clone(), *v))
-            .collect();
+        let mut pairs: Vec<(String, u64)> =
+            all_lengths.iter().map(|(k, v)| (k.clone(), *v)).collect();
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
         pairs
     };
@@ -811,8 +862,8 @@ fn build_variant_list(
     reference: &ReferenceGenome,
     seed: u64,
 ) -> Result<Vec<Variant>> {
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     let mutations_cfg = match &cfg.mutations {
         Some(m) => m,
@@ -837,7 +888,10 @@ fn build_variant_list(
         let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
         let lookup = |chrom: &str, pos: u64| -> Option<u8> {
             let region = Region::new(chrom, pos, pos + 1);
-            reference.sequence(&region).ok().and_then(|seq| seq.into_iter().next())
+            reference
+                .sequence(&region)
+                .ok()
+                .and_then(|seq| seq.into_iter().next())
         };
         let variants = generate_random_mutations(
             regions,
@@ -918,7 +972,11 @@ fn parse_bed_file(path: &std::path::Path) -> Result<Vec<Region>> {
         let line = line.trim();
 
         // Skip comments and track lines.
-        if line.is_empty() || line.starts_with('#') || line.starts_with("track") || line.starts_with("browser") {
+        if line.is_empty()
+            || line.starts_with('#')
+            || line.starts_with("track")
+            || line.starts_with("browser")
+        {
             continue;
         }
 
@@ -927,20 +985,28 @@ fn parse_bed_file(path: &std::path::Path) -> Result<Vec<Region>> {
             // Try space-separated as fallback.
             let fields: Vec<&str> = line.splitn(4, ' ').collect();
             if fields.len() < 3 {
-                tracing::warn!("BED line {} has fewer than 3 fields, skipping: {}", line_no + 1, line);
+                tracing::warn!(
+                    "BED line {} has fewer than 3 fields, skipping: {}",
+                    line_no + 1,
+                    line
+                );
                 continue;
             }
-            let start: u64 = fields[1].parse()
-                .with_context(|| format!("invalid BED start at line {}: {}", line_no + 1, fields[1]))?;
-            let end: u64 = fields[2].parse()
-                .with_context(|| format!("invalid BED end at line {}: {}", line_no + 1, fields[2]))?;
+            let start: u64 = fields[1].parse().with_context(|| {
+                format!("invalid BED start at line {}: {}", line_no + 1, fields[1])
+            })?;
+            let end: u64 = fields[2].parse().with_context(|| {
+                format!("invalid BED end at line {}: {}", line_no + 1, fields[2])
+            })?;
             regions.push(Region::new(fields[0], start, end));
             continue;
         }
 
-        let start: u64 = fields[1].parse()
+        let start: u64 = fields[1]
+            .parse()
             .with_context(|| format!("invalid BED start at line {}: {}", line_no + 1, fields[1]))?;
-        let end: u64 = fields[2].parse()
+        let end: u64 = fields[2]
+            .parse()
             .with_context(|| format!("invalid BED end at line {}: {}", line_no + 1, fields[2]))?;
         regions.push(Region::new(fields[0], start, end));
     }
@@ -972,10 +1038,21 @@ fn parse_vaf_range(s: Option<&str>) -> Result<(f64, f64)> {
 /// Produce a stable string key for deduplicating applied variants.
 fn variant_key(v: &Variant) -> String {
     match &v.mutation {
-        MutationType::Snv { pos, ref_base, alt_base } => {
-            format!("SNV:{}:{}:{}:{}", v.chrom, pos, *ref_base as char, *alt_base as char)
+        MutationType::Snv {
+            pos,
+            ref_base,
+            alt_base,
+        } => {
+            format!(
+                "SNV:{}:{}:{}:{}",
+                v.chrom, pos, *ref_base as char, *alt_base as char
+            )
         }
-        MutationType::Indel { pos, ref_seq, alt_seq } => {
+        MutationType::Indel {
+            pos,
+            ref_seq,
+            alt_seq,
+        } => {
             format!(
                 "INDEL:{}:{}:{}:{}",
                 v.chrom,
@@ -984,7 +1061,11 @@ fn variant_key(v: &Variant) -> String {
                 String::from_utf8_lossy(alt_seq)
             )
         }
-        MutationType::Mnv { pos, ref_seq, alt_seq } => {
+        MutationType::Mnv {
+            pos,
+            ref_seq,
+            alt_seq,
+        } => {
             format!(
                 "MNV:{}:{}:{}:{}",
                 v.chrom,
@@ -993,7 +1074,12 @@ fn variant_key(v: &Variant) -> String {
                 String::from_utf8_lossy(alt_seq)
             )
         }
-        MutationType::Sv { sv_type, start, end, .. } => {
+        MutationType::Sv {
+            sv_type,
+            start,
+            end,
+            ..
+        } => {
             format!("SV:{}:{:?}:{}:{}", v.chrom, sv_type, start, end)
         }
     }
@@ -1002,15 +1088,15 @@ fn variant_key(v: &Variant) -> String {
 /// Extract (ref_allele, alt_allele) byte vectors from a variant.
 fn variant_alleles(v: &Variant) -> (Vec<u8>, Vec<u8>) {
     match &v.mutation {
-        MutationType::Snv { ref_base, alt_base, .. } => {
-            (vec![*ref_base], vec![*alt_base])
-        }
-        MutationType::Indel { ref_seq, alt_seq, .. } => {
-            (ref_seq.clone(), alt_seq.clone())
-        }
-        MutationType::Mnv { ref_seq, alt_seq, .. } => {
-            (ref_seq.clone(), alt_seq.clone())
-        }
+        MutationType::Snv {
+            ref_base, alt_base, ..
+        } => (vec![*ref_base], vec![*alt_base]),
+        MutationType::Indel {
+            ref_seq, alt_seq, ..
+        } => (ref_seq.clone(), alt_seq.clone()),
+        MutationType::Mnv {
+            ref_seq, alt_seq, ..
+        } => (ref_seq.clone(), alt_seq.clone()),
         MutationType::Sv { .. } => {
             // SVs use symbolic alleles; emit placeholder representation.
             (b"N".to_vec(), b"<SV>".to_vec())
@@ -1050,7 +1136,11 @@ mod tests {
     fn test_variant_key_snv() {
         let v = Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos: 100, ref_base: b'A', alt_base: b'T' },
+            mutation: MutationType::Snv {
+                pos: 100,
+                ref_base: b'A',
+                alt_base: b'T',
+            },
             expected_vaf: 0.3,
             clone_id: None,
         };
@@ -1064,7 +1154,11 @@ mod tests {
     fn test_variant_alleles_snv() {
         let v = Variant {
             chrom: "chr1".to_string(),
-            mutation: MutationType::Snv { pos: 0, ref_base: b'G', alt_base: b'C' },
+            mutation: MutationType::Snv {
+                pos: 0,
+                ref_base: b'G',
+                alt_base: b'C',
+            },
             expected_vaf: 0.5,
             clone_id: None,
         };
@@ -1158,9 +1252,11 @@ mod tests {
     /// with the same per-region seed produce identical read pairs.
     #[test]
     fn test_deterministic_parallel() {
-        use crate::io::config::{Config, FragmentConfig, FragmentModel, OutputConfig, QualityConfig, SampleConfig};
         use crate::core::engine::SimulationEngine;
         use crate::core::types::Region;
+        use crate::io::config::{
+            Config, FragmentConfig, FragmentModel, OutputConfig, QualityConfig, SampleConfig,
+        };
         use crate::io::reference::ReferenceGenome;
         use tempfile::TempDir;
 
@@ -1239,7 +1335,12 @@ mod tests {
                 "region {} pair counts differ",
                 region_idx
             );
-            for (i, (p1, p2)) in out1.read_pairs.iter().zip(out2.read_pairs.iter()).enumerate() {
+            for (i, (p1, p2)) in out1
+                .read_pairs
+                .iter()
+                .zip(out2.read_pairs.iter())
+                .enumerate()
+            {
                 assert_eq!(
                     p1.read1.seq, p2.read1.seq,
                     "region {} pair {} read1 sequences differ",
@@ -1261,24 +1362,34 @@ mod tests {
         let master = 99u64;
         let n = 8usize;
 
-        let run1: Vec<u64> = (0..n as u64).map(|i| derive_region_seed(master, i)).collect();
-        let run2: Vec<u64> = (0..n as u64).map(|i| derive_region_seed(master, i)).collect();
+        let run1: Vec<u64> = (0..n as u64)
+            .map(|i| derive_region_seed(master, i))
+            .collect();
+        let run2: Vec<u64> = (0..n as u64)
+            .map(|i| derive_region_seed(master, i))
+            .collect();
 
-        assert_eq!(run1, run2, "region seed sequence must be identical across runs");
+        assert_eq!(
+            run1, run2,
+            "region seed sequence must be identical across runs"
+        );
 
         let mut shuffled = run1.iter().cloned().enumerate().collect::<Vec<_>>();
         shuffled.sort_by_key(|(i, _)| n - 1 - i);
         shuffled.sort_by_key(|(i, _)| *i);
         let restored: Vec<u64> = shuffled.into_iter().map(|(_, s)| s).collect();
-        assert_eq!(run1, restored, "sorting by index must restore original order");
+        assert_eq!(
+            run1, restored,
+            "sorting by index must restore original order"
+        );
     }
 
     // -----------------------------------------------------------------------
     // Task 13: CLI overrides & presets tests
     // -----------------------------------------------------------------------
 
-    use std::path::PathBuf;
     use crate::io::config::{Config, FragmentConfig, OutputConfig, QualityConfig, SampleConfig};
+    use std::path::PathBuf;
 
     fn base_config() -> Config {
         Config {
@@ -1332,7 +1443,10 @@ mod tests {
         let mut cfg = base_config();
         cfg.sample.coverage = 30.0;
 
-        let opts = SimulateOpts { coverage: Some(100.0), ..empty_opts() };
+        let opts = SimulateOpts {
+            coverage: Some(100.0),
+            ..empty_opts()
+        };
         apply_overrides(&mut cfg, &opts, None).unwrap();
 
         assert!(
@@ -1347,7 +1461,10 @@ mod tests {
         let mut cfg = base_config();
         cfg.seed = Some(1);
 
-        let opts = SimulateOpts { seed: Some(42), ..empty_opts() };
+        let opts = SimulateOpts {
+            seed: Some(42),
+            ..empty_opts()
+        };
         apply_overrides(&mut cfg, &opts, None).unwrap();
 
         assert_eq!(cfg.seed, Some(42));
@@ -1362,18 +1479,16 @@ mod tests {
         let mut cfg = base_config();
         presets::apply_preset_to_config(&mut cfg, &overlay);
 
-        assert!((cfg.sample.coverage - 1.0).abs() < 1e-9, "small preset: 1x coverage");
+        assert!(
+            (cfg.sample.coverage - 1.0).abs() < 1e-9,
+            "small preset: 1x coverage"
+        );
         assert_eq!(
             cfg.chromosomes.as_deref(),
             Some(vec!["chr22".to_string()].as_slice()),
             "small preset: chr22 only"
         );
-        let count = cfg
-            .mutations
-            .unwrap()
-            .random
-            .unwrap()
-            .count;
+        let count = cfg.mutations.unwrap().random.unwrap().count;
         assert_eq!(count, 100, "small preset: 100 random mutations");
     }
 
@@ -1391,7 +1506,10 @@ mod tests {
             matches!(cfg.fragment.model, FragmentModel::Cfda),
             "cfdna preset should use Cfda fragment model"
         );
-        assert!((cfg.sample.coverage - 200.0).abs() < 1e-9, "cfdna preset: 200x coverage");
+        assert!(
+            (cfg.sample.coverage - 200.0).abs() < 1e-9,
+            "cfdna preset: 200x coverage"
+        );
     }
 
     /// 5. CLI flag > YAML > preset > default precedence.
@@ -1403,11 +1521,17 @@ mod tests {
 
         let overlay = presets::get("small").unwrap();
         presets::apply_preset_to_config(&mut cfg, &overlay);
-        assert!((cfg.sample.coverage - 1.0).abs() < 1e-9, "preset should set 1x");
+        assert!(
+            (cfg.sample.coverage - 1.0).abs() < 1e-9,
+            "preset should set 1x"
+        );
 
         cfg.sample.coverage = 60.0;
 
-        let opts = SimulateOpts { coverage: Some(150.0), ..empty_opts() };
+        let opts = SimulateOpts {
+            coverage: Some(150.0),
+            ..empty_opts()
+        };
         apply_overrides(&mut cfg, &opts, None).unwrap();
 
         assert!(
@@ -1453,8 +1577,8 @@ mod tests {
 
     #[test]
     fn test_parse_bed_file() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let mut f = NamedTempFile::new().unwrap();
         writeln!(f, "# comment line").unwrap();

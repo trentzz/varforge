@@ -1,5 +1,5 @@
-use rand::Rng;
 use crate::core::types::ReadPair;
+use rand::Rng;
 
 /// Select reads to duplicate based on a target duplication rate.
 ///
@@ -28,8 +28,8 @@ pub fn duplicate_read_pair(original: &ReadPair, dup_index: usize) -> ReadPair {
 mod tests {
     use super::*;
     use crate::core::types::Read;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn test_select_duplicates_count() {

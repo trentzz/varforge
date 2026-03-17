@@ -51,8 +51,8 @@ impl CaptureModel {
             return 1.0;
         }
         // LogNormal(μ=0, σ=uniformity) has median 1.0.
-        let dist = LogNormal::new(0.0, self.coverage_uniformity)
-            .expect("invalid LogNormal parameters");
+        let dist =
+            LogNormal::new(0.0, self.coverage_uniformity).expect("invalid LogNormal parameters");
         dist.sample(rng)
     }
 
@@ -148,8 +148,8 @@ impl CaptureModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     fn make_regions() -> Vec<Region> {
         vec![
@@ -171,10 +171,7 @@ mod tests {
         // Draw many multipliers – they must all be exactly 1.0.
         for _ in 0..200 {
             let m = model.sample_target_multiplier(&mut rng);
-            assert_eq!(
-                m, 1.0,
-                "uniformity=0 should give multiplier 1.0, got {m}"
-            );
+            assert_eq!(m, 1.0, "uniformity=0 should give multiplier 1.0, got {m}");
         }
     }
 
@@ -192,7 +189,10 @@ mod tests {
             .collect();
 
         let min = multipliers.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = multipliers.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let max = multipliers
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max);
 
         // With σ=0.5, the distribution has a coefficient of variation > 50%.
         // The range across 500 samples should be substantial (at least 2×).
@@ -202,7 +202,8 @@ mod tests {
         );
 
         // The geometric mean should be close to 1.0 (since μ=0 in log-space).
-        let log_mean: f64 = multipliers.iter().map(|x| x.ln()).sum::<f64>() / multipliers.len() as f64;
+        let log_mean: f64 =
+            multipliers.iter().map(|x| x.ln()).sum::<f64>() / multipliers.len() as f64;
         assert!(
             log_mean.abs() < 0.15,
             "geometric mean should be near 1.0 (log mean near 0), got {log_mean:.4}"
@@ -321,7 +322,10 @@ mod tests {
 
         // Off-target positions should also get multiplier 1.0.
         let off = model.coverage_multiplier_at("chr99", 0, &multipliers);
-        assert_eq!(off, 1.0, "no-capture off-target should also be 1.0, got {off}");
+        assert_eq!(
+            off, 1.0,
+            "no-capture off-target should also be 1.0, got {off}"
+        );
 
         // All on-target positions (interior) should be 1.0.
         let on = model.coverage_multiplier_at("chr1", 250, &multipliers);

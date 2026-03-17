@@ -84,25 +84,18 @@ impl TruthVcfWriter {
         alt_allele: &[u8],
     ) -> Result<()> {
         let pos_1based = variant.pos() + 1;
-        let ref_str =
-            std::str::from_utf8(ref_allele).context("REF allele is not valid UTF-8")?;
-        let alt_str =
-            std::str::from_utf8(alt_allele).context("ALT allele is not valid UTF-8")?;
+        let ref_str = std::str::from_utf8(ref_allele).context("REF allele is not valid UTF-8")?;
+        let alt_str = std::str::from_utf8(alt_allele).context("ALT allele is not valid UTF-8")?;
 
         let vartype = variant.vartype();
-        let clone_id = variant
-            .clone_id
-            .as_deref()
-            .unwrap_or(".");
+        let clone_id = variant.clone_id.as_deref().unwrap_or(".");
         let vaf = variant.expected_vaf;
         // CCF is not stored directly on Variant; use expected_vaf as a proxy when
         // no richer tumour model is present.  Callers that have a full ClonalTree
         // should populate a CCF field on Variant in a future iteration.
         let ccf = vaf;
 
-        let info = format!(
-            "EXPECTED_VAF={vaf:.6};CLONE={clone_id};VARTYPE={vartype};CCF={ccf:.6}"
-        );
+        let info = format!("EXPECTED_VAF={vaf:.6};CLONE={clone_id};VARTYPE={vartype};CCF={ccf:.6}");
 
         writeln!(
             self.writer,
@@ -245,10 +238,7 @@ mod tests {
         assert!(vcf.contains("##INFO=<ID=CLONE"), "missing CLONE INFO");
         assert!(vcf.contains("##INFO=<ID=VARTYPE"), "missing VARTYPE INFO");
         assert!(vcf.contains("##INFO=<ID=CCF"), "missing CCF INFO");
-        assert!(
-            vcf.contains("##FORMAT=<ID=GT"),
-            "missing GT FORMAT"
-        );
+        assert!(vcf.contains("##FORMAT=<ID=GT"), "missing GT FORMAT");
         // Column header must contain sample name
         assert!(
             vcf.contains("SAMPLE01"),

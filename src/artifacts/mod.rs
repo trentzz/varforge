@@ -1,2 +1,2 @@
-pub mod ffpe;
 pub mod duplicates;
+pub mod ffpe;

@@ -70,8 +70,8 @@ pub fn sample_family_size(mean: f64, sd: f64, rng: &mut impl Rng) -> usize {
 mod tests {
     use super::*;
     use crate::core::types::Read;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     fn make_family(family_size: usize) -> UmiFamily {
         UmiFamily {
@@ -113,10 +113,17 @@ mod tests {
         let family = make_family(100);
         let copies = generate_pcr_copies(&family, 0.01, 10, &mut rng);
 
-        let total_errors: usize = copies.iter().map(|c| {
-            c.read1.seq.iter().zip(family.original.read1.seq.iter())
-                .filter(|(a, b)| a != b).count()
-        }).sum();
+        let total_errors: usize = copies
+            .iter()
+            .map(|c| {
+                c.read1
+                    .seq
+                    .iter()
+                    .zip(family.original.read1.seq.iter())
+                    .filter(|(a, b)| a != b)
+                    .count()
+            })
+            .sum();
 
         // With 100 copies * 100 bases * 0.01 rate ≈ 100 errors
         assert!(total_errors > 0, "should have some PCR errors");
@@ -136,7 +143,9 @@ mod tests {
     #[test]
     fn test_sample_family_size() {
         let mut rng = StdRng::seed_from_u64(42);
-        let sizes: Vec<usize> = (0..10000).map(|_| sample_family_size(3.0, 1.5, &mut rng)).collect();
+        let sizes: Vec<usize> = (0..10000)
+            .map(|_| sample_family_size(3.0, 1.5, &mut rng))
+            .collect();
 
         assert!(sizes.iter().all(|&s| s >= 1));
         let mean = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;

@@ -22,7 +22,13 @@ pub struct CopyNumberRegion {
 
 impl CopyNumberRegion {
     /// Create a new CNV region without allele-specific copy numbers.
-    pub fn new(chrom: impl Into<String>, start: u64, end: u64, tumor_cn: u32, normal_cn: u32) -> Self {
+    pub fn new(
+        chrom: impl Into<String>,
+        start: u64,
+        end: u64,
+        tumor_cn: u32,
+        normal_cn: u32,
+    ) -> Self {
         Self {
             chrom: chrom.into(),
             start,
@@ -73,7 +79,13 @@ impl CopyNumberRegion {
 /// adjusted_coverage = base_coverage × (purity × tumor_cn + (1 - purity) × normal_cn) / ploidy
 ///
 /// Returns 0.0 for homozygous tumour deletions with pure tumours (tumor_cn=0, purity=1).
-pub fn adjusted_coverage(base_coverage: f64, purity: f64, tumor_cn: u32, normal_cn: u32, ploidy: u32) -> f64 {
+pub fn adjusted_coverage(
+    base_coverage: f64,
+    purity: f64,
+    tumor_cn: u32,
+    normal_cn: u32,
+    ploidy: u32,
+) -> f64 {
     if ploidy == 0 {
         return 0.0;
     }
@@ -110,7 +122,12 @@ pub fn loh_vaf(purity: f64, major_cn: u32, minor_cn: u32, normal_cn: u32) -> f64
 ///
 /// With CCF=1.0 (clonal) and provided multiplicity.
 #[allow(dead_code)]
-pub fn vaf_in_amplified_region(purity: f64, multiplicity: u32, tumor_cn: u32, normal_cn: u32) -> f64 {
+pub fn vaf_in_amplified_region(
+    purity: f64,
+    multiplicity: u32,
+    tumor_cn: u32,
+    normal_cn: u32,
+) -> f64 {
     crate::variants::vaf::expected_vaf(1.0, multiplicity, purity, tumor_cn, normal_cn)
 }
 
@@ -140,9 +157,15 @@ mod tests {
         let amplified = adjusted_coverage(base, purity, 4, 2, ploidy);
 
         // diploid: 30 × (1.0 × 2) / 2 = 30
-        assert!((diploid - 30.0).abs() < 1e-10, "diploid coverage should be 30, got {diploid}");
+        assert!(
+            (diploid - 30.0).abs() < 1e-10,
+            "diploid coverage should be 30, got {diploid}"
+        );
         // amplified: 30 × (1.0 × 4) / 2 = 60 → ~2x diploid
-        assert!((amplified - 60.0).abs() < 1e-10, "CN=4 coverage should be 60, got {amplified}");
+        assert!(
+            (amplified - 60.0).abs() < 1e-10,
+            "CN=4 coverage should be 60, got {amplified}"
+        );
         assert!(
             (amplified / diploid - 2.0).abs() < 1e-10,
             "CN=4 should be ~2x CN=2, ratio was {}",
@@ -163,7 +186,10 @@ mod tests {
         let deleted = adjusted_coverage(base, purity, 1, 2, ploidy);
 
         // deleted: 30 × (1.0 × 1) / 2 = 15
-        assert!((deleted - 15.0).abs() < 1e-10, "CN=1 coverage should be 15, got {deleted}");
+        assert!(
+            (deleted - 15.0).abs() < 1e-10,
+            "CN=1 coverage should be 15, got {deleted}"
+        );
         assert!(
             (deleted / diploid - 0.5).abs() < 1e-10,
             "CN=1 should be ~0.5x CN=2, ratio was {}",
@@ -282,8 +308,8 @@ mod tests {
     #[test]
     fn test_cn_config_parsing() {
         use crate::io::config::load;
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let yaml = r#"
 reference: /tmp/ref.fa
@@ -305,7 +331,10 @@ copy_number:
         f.write_all(yaml.as_bytes()).unwrap();
         let cfg = load(f.path()).unwrap();
 
-        let cn = cfg.copy_number.as_ref().expect("copy_number should be present");
+        let cn = cfg
+            .copy_number
+            .as_ref()
+            .expect("copy_number should be present");
         assert_eq!(cn.len(), 3);
 
         assert_eq!(cn[0].region, "chr7:55000000-55200000");
