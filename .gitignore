@@ -11,6 +11,15 @@
 *.fasta
 *.fai
 *.csi
+# Reference index files (bwa-mem2, GATK, RTG)
+*.dict
+*.0123
+*.amb
+*.ann
+*.bwt.2bit.64
+*.pac
+*.sdf/
+**/*.sdf/
 
 # Old benchmark output (superseded by benchmarking/)
 benchmark_output/

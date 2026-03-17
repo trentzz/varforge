@@ -1,7 +1,7 @@
 # Scenario 1: SNV baseline (30x, chr22)
 # Clean reads, no artefacts. Establishes baseline sensitivity and precision.
 # Expected: >90% sensitivity at VAF >0.20, >95% precision.
-reference: ../../chr22.fa
+reference: REF_PATH
 output:
   directory: OUTPUT_DIR/01_snv_baseline
   fastq: true

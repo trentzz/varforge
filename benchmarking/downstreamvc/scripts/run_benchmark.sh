@@ -48,7 +48,7 @@ done
 
 # ── Checks ─────────────────────────────────────────────────────────────────────
 check_tool() { command -v "$1" &>/dev/null || { echo "ERROR: $1 not found. See setup.md."; exit 1; }; }
-check_tool bwa-mem2
+check_tool bwa-mem2.avx2
 check_tool samtools
 check_tool gatk
 check_tool rtg
@@ -56,7 +56,7 @@ check_tool python3
 
 [[ -f "$VARFORGE" ]] || { echo "ERROR: varforge binary not found at $VARFORGE"; exit 1; }
 [[ -f "$REF" ]]      || { echo "ERROR: reference not found at $REF"; exit 1; }
-[[ -f "${REF}.bwt.2bit.64" ]] || { echo "ERROR: bwa-mem2 index missing. Run: bwa-mem2 index $REF"; exit 1; }
+[[ -f "${REF}.bwt.2bit.64" ]] || { echo "ERROR: bwa-mem2 index missing. Run: bwa-mem2.avx2 index $REF"; exit 1; }
 [[ -d "$SDF" ]] || { echo "ERROR: RTG SDF not found at $SDF. Run: rtg format -o $SDF $REF"; exit 1; }
 
 mkdir -p "$OUTDIR"
@@ -64,7 +64,7 @@ mkdir -p "$OUTDIR"
 # Record tool versions
 {
     echo "varforge: $($VARFORGE --version 2>&1 | head -1)"
-    echo "bwa-mem2: $(bwa-mem2 version 2>&1 | head -1)"
+    echo "bwa-mem2: $(bwa-mem2.avx2 version 2>&1 | head -1)"
     echo "samtools: $(samtools --version | head -1)"
     echo "gatk:     $(gatk --version 2>&1 | head -1)"
     echo "rtg:      $(rtg version 2>&1 | grep Version | head -1)"
@@ -106,11 +106,16 @@ for SNUM in "${SELECTED[@]}"; do
     mkdir -p "$SDIR"/{generate,align,call,eval}
 
     CFGFILE="$SDIR/config.yaml"
-    # Patch OUTPUT_DIR placeholder in config
-    sed "s|OUTPUT_DIR|$SDIR/generate|g" "$CONFIG_DIR/$CONFIG" > "$CFGFILE"
+    BED_PATH="$ROOT/benchmarking/scripts/configs_hg38/panel_chr22_1mbp.bed"
+    # Patch placeholders with absolute paths so the config works from any location
+    sed -e "s|OUTPUT_DIR|$SDIR/generate|g" \
+        -e "s|REF_PATH|$REF|g" \
+        -e "s|BED_PATH|$BED_PATH|g" \
+        "$CONFIG_DIR/$CONFIG" > "$CFGFILE"
 
     # ── Step 1: Generate reads ────────────────────────────────────────────────
-    if [[ "$SKIP_GENERATE" == "true" ]] && [[ -f "$SDIR/generate/R1.fastq.gz" ]]; then
+    EXISTING_R1=$(find "$SDIR/generate" -name "*_R1.fastq.gz" 2>/dev/null | head -1)
+    if [[ "$SKIP_GENERATE" == "true" ]] && [[ -n "$EXISTING_R1" ]]; then
         echo "  [1/4] Skipping generation (reusing existing FASTQs)"
     else
         echo "  [1/4] Generating reads..."
@@ -121,23 +126,25 @@ for SNUM in "${SELECTED[@]}"; do
         echo "        Done."
     fi
 
-    # Locate output files (VarForge names them based on sample name)
-    R1=$(ls "$SDIR"/generate/*.R1.fastq.gz 2>/dev/null | head -1)
-    R2=$(ls "$SDIR"/generate/*.R2.fastq.gz 2>/dev/null | head -1)
-    TRUTH=$(ls "$SDIR"/generate/*.truth.vcf.gz 2>/dev/null | head -1)
-    [[ -z "$R1" ]]    && { echo "ERROR: R1 FASTQ not found in $SDIR/generate/"; exit 1; }
-    [[ -z "$TRUTH" ]] && { echo "ERROR: truth VCF not found in $SDIR/generate/"; exit 1; }
+    # Locate output files (VarForge nests outputs in a subdirectory named after
+    # the config, using _R1/_R2 suffix and uncompressed .truth.vcf)
+    R1=$(find "$SDIR/generate" -name "*_R1.fastq.gz" | head -1)
+    R2=$(find "$SDIR/generate" -name "*_R2.fastq.gz" | head -1)
+    TRUTH=$(find "$SDIR/generate" -name "*.truth.vcf" -o -name "*.truth.vcf.gz" | head -1)
+    [[ -z "$R1" ]]    && { echo "ERROR: R1 FASTQ not found under $SDIR/generate/"; exit 1; }
+    [[ -z "$TRUTH" ]] && { echo "ERROR: truth VCF not found under $SDIR/generate/"; exit 1; }
 
     # ── Step 2: Align ─────────────────────────────────────────────────────────
     echo "  [2/4] Aligning with bwa-mem2..."
     BAM="$SDIR/align/aligned.bam"
-    bwa-mem2 mem -t "$THREADS" \
+    # Pipeline: align → name-sort → fixmate (adds ms tag) → coord-sort → markdup
+    bwa-mem2.avx2 mem -t "$THREADS" \
         -R "@RG\tID:1\tSM:SAMPLE\tPL:ILLUMINA\tLB:lib1\tPU:unit1" \
         "$REF" "$R1" "$R2" 2>"$SDIR/align/bwa.log" \
-    | samtools sort -@ "$THREADS" -o "$SDIR/align/sorted.bam"
-
-    samtools markdup -@ "$THREADS" \
-        "$SDIR/align/sorted.bam" "$BAM" \
+    | samtools sort -n -@ "$THREADS" \
+    | samtools fixmate -m -@ "$THREADS" - - \
+    | samtools sort -@ "$THREADS" \
+    | samtools markdup -@ "$THREADS" - "$BAM" \
         2>"$SDIR/align/markdup.log"
 
     samtools index -@ "$THREADS" "$BAM"
@@ -166,8 +173,23 @@ for SNUM in "${SELECTED[@]}"; do
 
     # ── Step 4: Evaluate ──────────────────────────────────────────────────────
     echo "  [4/4] Evaluating against truth VCF..."
+
+    # rtg vcfeval requires the truth VCF sorted, bgzipped, and tabix-indexed.
+    # Use GATK SortVcf which handles sorting, bgzip, and index creation in one step.
+    TRUTH_GZ="$SDIR/eval/truth.vcf.gz"
+    if [[ "$TRUTH" == *.vcf.gz ]]; then
+        cp "$TRUTH" "$TRUTH_GZ"
+        rtg index -f vcf "$TRUTH_GZ"
+    else
+        gatk SortVcf \
+            -I "$TRUTH" \
+            -O "$TRUTH_GZ" \
+            --CREATE_INDEX true \
+            2>"$SDIR/eval/sort_truth.log"
+    fi
+
     rtg vcfeval \
-        -b "$TRUTH" \
+        -b "$TRUTH_GZ" \
         -c "$FILT_VCF" \
         -t "$SDF" \
         -o "$SDIR/eval/rtg" \
@@ -175,7 +197,7 @@ for SNUM in "${SELECTED[@]}"; do
         2>"$SDIR/eval/rtg.log" || true  # rtg exits non-zero even on partial success
 
     python3 "$SCRIPT_DIR/evaluate.py" \
-        --truth "$TRUTH" \
+        --truth "$TRUTH_GZ" \
         --calls "$FILT_VCF" \
         --rtg-eval "$SDIR/eval/rtg" \
         --scenario "$NAME" \

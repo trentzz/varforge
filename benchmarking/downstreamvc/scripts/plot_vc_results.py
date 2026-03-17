@@ -145,9 +145,14 @@ def fig_precision_recall(rows: list[dict], outdir: str):
         prec = float(row["precision"])
         sens = float(row["sensitivity"])
         ax.plot(sens, prec, marker=marker, color=color, markersize=7, zorder=3)
+        # Put label above for low-precision points to avoid overlap
+        if prec < 0.1:
+            xytext = (5, 12)
+        else:
+            xytext = (5, 3)
         ax.annotate(row["scenario"],
                     xy=(sens, prec),
-                    xytext=(5, 3),
+                    xytext=xytext,
                     textcoords="offset points",
                     fontsize=6.5,
                     color="#444444")
@@ -164,9 +169,9 @@ def fig_precision_recall(rows: list[dict], outdir: str):
 
 
 def fig_fp_by_scenario(rows: list[dict], outdir: str):
-    """Horizontal dot chart: false positive counts per scenario.
+    """Horizontal dot chart: false positive counts per scenario (log scale).
 
-    Takeaway: FFPE scenario should show more FPs than baseline.
+    Takeaway: FFPE artefacts overwhelm stock Mutect2 with >100k FPs; baseline and panel are clean.
     """
     summary = [r for r in rows if r.get("tier") == "all" and r.get("type") == "ALL"]
     if not summary:
@@ -175,22 +180,24 @@ def fig_fp_by_scenario(rows: list[dict], outdir: str):
 
     scenarios = [r["scenario"] for r in summary]
     fps       = [int(r["fp"]) for r in summary]
+    # Replace 0 with 0.5 for log scale display
+    fps_plot  = [max(fp, 0.5) for fp in fps]
     colors    = [PALETTE[i % len(PALETTE)] for i in range(len(scenarios))]
 
     fig, ax = plt.subplots(figsize=(COL_W, COL_W * 0.65))
     y = np.arange(len(scenarios))
-    max_fp = max(fps) if fps else 1
 
-    ax.set_xlim(0, max_fp * 1.35)
-    for yy, fp, c in zip(y, fps, colors):
-        ax.plot([0, fp], [yy, yy], "-", color="#DDDDDD", linewidth=1.5, zorder=1)
-        ax.plot(fp, yy, "o", color=c, markersize=6, zorder=3)
-        ax.text(fp + max_fp * 0.04, yy, str(fp),
-                va="center", fontsize=6.5, color="#444444")
+    for yy, fp, fp_p, c in zip(y, fps, fps_plot, colors):
+        ax.plot([0.5, fp_p], [yy, yy], "-", color="#DDDDDD", linewidth=1.5, zorder=1)
+        ax.plot(fp_p, yy, "o", color=c, markersize=6, zorder=3)
+        label = str(fp) if fp > 0 else "0"
+        ax.text(fp_p * 1.8, yy, label, va="center", fontsize=6.5, color="#444444")
 
+    ax.set_xscale("log")
+    ax.set_xlim(0.4, max(fps_plot) * 12)
     ax.set_yticks(y)
     ax.set_yticklabels(scenarios, fontsize=7)
-    ax.set_xlabel("False positives")
+    ax.set_xlabel("False positives (log scale)")
     ax.invert_yaxis()
     ax.grid(axis="x", color="#E8E8E8", linewidth=0.6)
     ax.grid(axis="y", visible=False)
