@@ -12,10 +12,10 @@ VarForge generates realistic synthetic sequencing data (FASTQ/BAM) with controll
 varforge/
 ├── src/                    # Implementation
 ├── tests/                  # Integration tests
-├── benches/                # Criterion micro-benchmarks
 ├── examples/               # Runnable YAML configs
 ├── benchmarking/           # Performance evaluation
 │   ├── design/             # What is measured and why
+│   ├── micro/              # Criterion micro-benchmarks (cargo bench)
 │   ├── results/
 │   │   ├── graphs/         # Publication figures (PDF/PNG)
 │   │   └── tables/         # Raw data (JSON/CSV)

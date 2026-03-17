@@ -1462,3 +1462,65 @@ performance:
         "streaming variants run should produce reads, got 0"
     );
 }
+
+/// BED region filtering: only regions overlapping targets should be simulated.
+#[test]
+fn test_bed_region_filter() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = TempDir::new().unwrap();
+
+    let fa = write_minimal_fasta(dir.path());
+
+    // Write a BED file covering only the first 200 bp of chr1.
+    let bed_path = dir.path().join("targets.bed");
+    std::fs::write(&bed_path, "chr1\t0\t200\n").unwrap();
+
+    let cfg = write_config(
+        dir.path(),
+        &fa,
+        out_dir.path(),
+        &format!("regions_bed: {}", bed_path.display()),
+    );
+    let opts = default_opts(cfg);
+
+    simulate::run(opts, None).expect("BED-filtered simulation should succeed");
+
+    let r1 = out_dir.path().join("TEST_R1.fastq.gz");
+    assert!(r1.exists(), "R1 FASTQ not found for BED filter test");
+
+    let n_reads = count_fastq_records(&r1);
+    assert!(n_reads > 0, "BED-filtered run should produce reads");
+}
+
+/// BED region filter with no overlap should return an error.
+#[test]
+fn test_bed_region_filter_no_overlap() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = TempDir::new().unwrap();
+
+    let fa = write_minimal_fasta(dir.path());
+
+    // BED targets are on chr2 which does not exist in the reference.
+    let bed_path = dir.path().join("targets_wrong.bed");
+    std::fs::write(&bed_path, "chr2\t0\t200\n").unwrap();
+
+    let cfg = write_config(
+        dir.path(),
+        &fa,
+        out_dir.path(),
+        &format!("regions_bed: {}", bed_path.display()),
+    );
+    let opts = default_opts(cfg);
+
+    let result = simulate::run(opts, None);
+    assert!(
+        result.is_err(),
+        "simulation with zero BED overlaps should fail"
+    );
+    let msg = format!("{:#}", result.unwrap_err());
+    assert!(
+        msg.contains("zero overlapping regions"),
+        "error should mention zero overlapping regions, got: {}",
+        msg
+    );
+}

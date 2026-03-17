@@ -80,6 +80,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]
 name = "varforge_benchmarks"
+path = "benchmarking/micro/varforge_benchmarks.rs"
 harness = false
 
 [profile.release]

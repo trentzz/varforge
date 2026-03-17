@@ -11,12 +11,23 @@ This closes the gap between synthetic benchmarks and what users will actually en
 Chromosome 22 from hg38 (~51 Mbp).
 Chosen because it is the smallest autosome, large enough to be realistic, and small enough to complete benchmarks in reasonable time on a 12 GiB system.
 
-## Coverage note
+## Coverage tiers
 
-All configs run at 5x coverage.
-The purpose of these benchmarks is to confirm that each feature (UMI, duplex, cfDNA, FFPE) runs without error on a real reference and produces plausible output.
-Throughput and scaling data are derived from the synthetic benchmarks.
-Higher clinical depths (500x for panels, 200x for cfDNA) require BED-based region filtering, which is not yet implemented.
+**Tier 1 (feature validation, 5x)**: Confirms each feature runs without error on a real reference. Low coverage completes quickly and uses minimal RAM.
+
+**Tier 2 (realistic WGS, 30x)**: Full chr22 at clinical WGS depth. ~5M read pairs, ~4 GB peak RAM, ~10 min. Validates throughput at real scale and confirms bounded memory holds at realistic pair counts.
+
+**Tier 3 (targeted panel with BED, 200x)**: Restricted to a synthetic 1 Mbp target region using BED filtering. High coverage on a small footprint is now feasible since BED filtering was implemented in v0.1.0. Simulates a realistic panel run without simulating non-target regions.
+
+The synthetic benchmarks (1 MB, 10 MB) remain the primary throughput and scaling evidence. The hg38 benchmarks confirm correct behaviour on real sequence and add a realistic RAM data point at WGS scale.
+
+## Memory guidance for constrained systems
+
+VarForge's peak RAM scales with the number of in-flight read pairs in the streaming channel, not with total pairs generated.
+For systems with limited RAM, two settings reduce memory:
+- `performance.output_buffer_regions`: reduce from the default of 64 to 8 or 16.
+- `regions_bed`: restrict simulation to a target region, reducing the total work and the steady-state buffer occupancy.
+- Fewer threads: each rayon worker holds a batch of reads; fewer workers means fewer concurrent batches.
 
 ## Experiments
 
