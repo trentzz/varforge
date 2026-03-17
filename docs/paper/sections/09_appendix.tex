@@ -56,6 +56,7 @@ Table~\ref{tab:cov-detail} reports the full coverage scaling results.
 \caption{Coverage scaling (1\,MB reference, 100 mutations, 12 threads, mean of 3 runs). Throughput plateaus at ${\sim}6{,}700$ pairs/s; lower than the 10\,MB benchmark because the smaller reference provides fewer parallel chunks.}
 \label{tab:cov-detail}
 \small
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{@{}rrrrrr@{}}
 \toprule
 Coverage & Read pairs & Wall (s) & Peak RAM (MB) & Pairs/s \\
@@ -68,5 +69,6 @@ Coverage & Read pairs & Wall (s) & Peak RAM (MB) & Pairs/s \\
 100x &   333,333 &  53.73 & 285 & 6,203 \\
 200x &   666,666 &  97.89 & 563 & 6,810 \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}

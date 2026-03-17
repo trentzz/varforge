@@ -32,7 +32,14 @@ On chr22 at 30x (Table~\ref{tab:hg38}), per-pair memory rises to ${\sim}0.85$\,K
 The claim holds in the sense that memory is bounded by channel depth, not dataset size.
 The bound itself grows with chromosome length and coverage; the \texttt{output\_buffer\_regions} setting provides a lever to reduce it on memory-constrained systems.
 
+\textbf{Memory limitations.}
+Peak RAM for the most demanding configuration tested (chr22, 30x WGS) is 4.21\,GB.
+A full human genome at 30x is projected at ${\sim}17$\,GB, which exceeds the 12\,GB benchmark machine and requires either a higher-memory workstation or reducing \texttt{output\_buffer\_regions}.
+This is a real constraint for users on budget hardware.
+The \texttt{output\_buffer\_regions} knob provides control, but the tradeoff between memory and throughput is not yet characterised across its full range.
+
 \textbf{Thread scaling limitation.}
-Adding threads degrades wall time for the 10\,MB / 30x I/O-bound workload (1 thread = 140\,s; 12 threads = 160\,s).
-This is an honest result: FASTQ compression saturates the single writer thread, and coordination overhead exceeds compute savings.
-Compute-bound workloads (UMI simulation, high feature density) would scale better, but this was not benchmarked across thread counts.
+Adding threads degrades wall time for I/O-bound workloads (1 thread = 140\,s; 12 threads = 160\,s on the 10\,MB / 30x baseline).
+FASTQ compression saturates the single writer thread; coordination overhead exceeds compute savings.
+For I/O-bound runs, reducing the thread count to 1--2 is the correct setting.
+Compute-bound workloads (UMI simulation) benefit from parallelism but were not benchmarked across thread counts.
