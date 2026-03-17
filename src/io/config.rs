@@ -432,7 +432,11 @@ pub fn validate(config: &Config) -> Result<()> {
     );
 
     if let Some(ref bed) = config.regions_bed {
-        anyhow::ensure!(bed.exists(), "regions_bed file not found: {}", bed.display());
+        anyhow::ensure!(
+            bed.exists(),
+            "regions_bed file not found: {}",
+            bed.display()
+        );
     }
 
     anyhow::ensure!(
