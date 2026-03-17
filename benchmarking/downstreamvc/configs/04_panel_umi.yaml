@@ -4,7 +4,7 @@
 # Note: UMI deduplication (fgbio/HUMID) is not applied in this benchmark;
 # Mutect2 runs on raw aligned reads. Results are a lower bound for what a
 # full UMI-aware pipeline would achieve.
-reference: ../../chr22.fa
+reference: REF_PATH
 output:
   directory: OUTPUT_DIR/04_panel_umi
   fastq: true
@@ -33,7 +33,7 @@ umi:
   enabled: true
   length: 8
   duplex: false
-regions_bed: ../../benchmarking/scripts/configs_hg38/panel_chr22_1mbp.bed
+regions_bed: BED_PATH
 chromosomes:
   - chr22
 seed: 45

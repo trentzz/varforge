@@ -2,7 +2,7 @@
 # FFPE damage and oxidative artefacts enabled.
 # Tests whether Mutect2 artefact filters handle VarForge-generated FFPE noise.
 # Compare FP rate against scenario 1 to measure artefact impact.
-reference: ../../chr22.fa
+reference: REF_PATH
 output:
   directory: OUTPUT_DIR/03_ffpe_artefacts
   fastq: true

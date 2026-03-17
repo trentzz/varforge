@@ -144,3 +144,53 @@ Users on memory-constrained systems should reduce \texttt{performance.output\_bu
   \caption{Memory per read pair across coverage depths. The constant ${\sim}0.45$\,KB/pair confirms the streaming architecture bounds memory by batch size, not dataset size.}
   \label{fig:mem}
 \end{figure}
+
+\subsection{Downstream variant calling}
+\label{sec:vc}
+
+To confirm that VarForge-generated data exposes real caller behaviour, we ran a four-scenario benchmark using bwa-mem2 \citep{bwamem2} for alignment and Mutect2 \citep{mutect2} for somatic variant calling, evaluated against the VarForge truth VCF using rtg-tools vcfeval.
+Stock Mutect2 settings were used throughout; no panel of normals, no ctDNA mode, no artefact filtering.
+
+Figure~\ref{fig:pr-vc} shows where each scenario falls in precision-recall space.
+Table~\ref{tab:vc} summarises sensitivity, precision, and F1.
+The SNV baseline (30x, 80\% purity) achieves F1\,=\,0.857, consistent with published Mutect2 performance on high-purity tumours.
+The panel scenario (200x, 10\% purity) achieves perfect sensitivity (1.000) and precision 0.877 despite no UMI deduplication, illustrating that depth compensates for missing UMI-aware filtering.
+
+The low-VAF ctDNA scenario (30x, 5\% purity) yields precision 0.045 and 1,377 false positives: without ctDNA-specific settings the caller cannot distinguish true low-VAF signal from noise at this tumour fraction.
+The FFPE scenario produces 113,764 false positives (Figure~\ref{fig:fp-vc}): FFPE deamination artefacts at a 2\% damage rate overwhelm stock Mutect2 without a panel of normals or OxoG filtering.
+These failures are expected and match the published literature \citep{mutect2}.
+They demonstrate that VarForge generates data that is realistic enough to expose the sensitivity and specificity limits of a production-grade caller under controlled conditions.
+
+\begin{table}[t]
+\centering
+\caption{Downstream Mutect2 results across four VarForge scenarios. No panel of normals or artefact mode applied.}
+\label{tab:vc}
+\small
+\setlength{\tabcolsep}{3.5pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+Scenario & Sens. & Prec. & F1 & TP & FP & FN \\
+\midrule
+SNV baseline (30x, pur.~0.80)   & 0.791 & 0.936 & 0.857 &  306 &     21 &  81 \\
+Low-VAF ctDNA (30x, pur.~0.05)  & 0.439 & 0.045 & 0.082 &   65 &  1{,}377 &  83 \\
+FFPE artefacts (30x, pur.~0.70) & 0.569 & 0.001 & 0.002 &  132 & 113{,}764 & 100 \\
+Panel + UMI (200x, pur.~0.10)   & 1.000 & 0.877 & 0.935 &   50 &      7 &   0 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{../../benchmarking/results/graphs/precision_recall.pdf}
+  \caption{Precision-recall by scenario. SNV baseline and Panel+UMI achieve strong performance. Low-VAF ctDNA and FFPE scenarios fall near zero precision under stock Mutect2 settings, exposing caller limitations that VarForge data reveals.}
+  \label{fig:pr-vc}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{../../benchmarking/results/graphs/fp_by_scenario.pdf}
+  \caption{False positive counts per scenario (log scale). FFPE artefacts produce 113,764 FPs, five orders of magnitude above the Panel+UMI baseline (7 FPs), demonstrating that stock Mutect2 is not designed for unfiltered FFPE data.}
+  \label{fig:fp-vc}
+\end{figure}

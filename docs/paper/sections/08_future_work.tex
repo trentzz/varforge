@@ -12,10 +12,8 @@ The cfDNA mode uses a four-component Gaussian mixture.
 Extracting insert sizes from the BAM output and comparing to the configured parameters would confirm that the fragment model is applied correctly.
 
 \textbf{Downstream variant caller benchmarking.}
-The benchmark infrastructure is complete (\texttt{benchmarking/downstreamvc/}).
-Four scenarios are defined: SNV baseline (30x), low-VAF ctDNA (30x, 5\% purity), FFPE artefacts (30x), and a targeted panel at 200x.
-Execution requires bwa-mem2, GATK Mutect2, and rtg-tools, which are not yet installed on the benchmark machine.
-Results, once obtained, will directly validate whether VarForge output passes through a standard somatic calling pipeline with the expected sensitivity and precision.
+The downstream variant calling benchmark described in Section~\ref{sec:vc} validates VarForge data against a real four-stage pipeline (bwa-mem2, Mutect2, rtg-tools).
+Extending this to additional callers (VarDict, Strelka2) and UMI-aware deduplication pipelines (fgbio, HUMID) would provide a more complete sensitivity-precision landscape across tools.
 
 \textbf{Compute-bound thread scaling.}
 Current thread scaling data covers only the I/O-bound 10\,MB, 30x workload where threading degrades performance.

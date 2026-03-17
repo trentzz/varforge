@@ -25,10 +25,31 @@ mamba create -n varforge-vc -c conda-forge -c bioconda -c defaults \
     && conda activate varforge-vc
 ```
 
+## Prerequisites after environment activation
+
+### Python symlink
+
+The GATK wrapper script calls `python` directly. If only `python3` is available, create a symlink:
+
+```bash
+mkdir -p ~/.local/bin && ln -sf $(which python3) ~/.local/bin/python && echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### GATK sequence dictionary
+
+Run once before benchmarking. Replace the path with your actual reference location:
+
+```bash
+gatk CreateSequenceDictionary -R /path/to/chr22.fa
+```
+
+This creates `chr22.dict` alongside the FASTA file. GATK requires it for all pipeline steps.
+
 ## Verify installation
 
 ```bash
-bwa-mem2 version
+bwa-mem2.avx2 version
 samtools --version | head -1
 gatk --version
 rtg version
@@ -42,7 +63,7 @@ Run once before benchmarking:
 cd benchmarking
 
 # BWA-MEM2 index
-bwa-mem2 index chr22.fa
+bwa-mem2.avx2 index chr22.fa
 
 # GATK sequence dictionary
 gatk CreateSequenceDictionary -R chr22.fa
