@@ -12,7 +12,7 @@ Mean values are reported.
 
 Figure~\ref{fig:cov-scaling} shows wall time and peak memory as a function of coverage depth on the 1\,MB reference with 100 mutations.
 Both scale linearly ($R^2 > 0.999$).
-Throughput stabilises at ${\sim}28{,}000$ read pairs/s above 10x.
+Throughput stabilises at ${\sim}13{,}000$ read pairs/s above 10x.
 The lower rate at 1x reflects startup overhead.
 
 \begin{figure}[t]
@@ -25,10 +25,10 @@ The lower rate at 1x reflects startup overhead.
 \subsection{Feature overhead}
 
 Figure~\ref{fig:features} shows the incremental cost of each feature at 30x on the 1\,MB reference (${\sim}200$K read pairs).
-Variant injection (+3\%) and GC bias (+2\%) are within noise.
-FFPE/oxoG artefacts add 16\% via a per-base damage pass.
-UMI simulation dominates at +64\% due to PCR family tracking.
-The combined overhead of 125\% is slightly super-additive because UMI families must carry variant and artefact state through each PCR cycle.
+Variant injection and GC bias are within measurement noise ($<1$\%).
+FFPE/oxoG artefacts add 15\% via a per-base damage pass.
+UMI simulation dominates at +143\% due to PCR family tracking across cycles.
+The combined overhead of +198\% is super-additive: UMI families must carry variant and artefact state through each PCR cycle, compounding the individual costs.
 
 \begin{figure}[t]
   \centering
@@ -40,8 +40,8 @@ The combined overhead of 125\% is slightly super-additive because UMI families m
 \subsection{Throughput}
 
 Table~\ref{tab:scenarios} summarises the main scenarios.
-At baseline (10\,MB, 30x, 12 threads), \varforge{} produces ${\sim}1.26$M read pairs in 75\,s (${\sim}13{,}400$ pairs/s, ${\sim}4.0$\,Gbp/min).
-Adding 500 mutations increases wall time by $<1\%$.
+At baseline (10\,MB, 30x, 12 threads), \varforge{} produces ${\sim}2.0$M read pairs in 139.6\,s (${\sim}14{,}300$ pairs/s, ${\sim}4.3$\,Gbp/min).
+Adding 500 mutations increases wall time by $<0.1\%$.
 Figure~\ref{fig:throughput} compares throughput across scenarios.
 
 \begin{table}[t]
@@ -54,13 +54,12 @@ Figure~\ref{fig:throughput} compares throughput across scenarios.
 \toprule
 Config & Ref & Cov & Var. & Features & Wall (s) & \makecell{Peak\\RAM (GB)} \\
 \midrule
-Baseline         & 10\,MB & 30x  & ---  & ---             & 75.4  & 3.4 \\
-+Variants        & 10\,MB & 30x  & 500  & ---             & 75.9  & 3.4 \\
-High coverage    & 10\,MB & 100x & 500  & ---             & 251.1 & 11.1 \\
-High cov (1\,MB) & 1\,MB  & 200x & 100  & ---             & 47.8  & 2.2 \\
-cfDNA            & 1\,MB  & 200x & 200  & cfDNA, 2\% pur. & 47.5  & 2.3 \\
-FFPE + oxoG      & 10\,MB & 30x  & 500  & artefacts       & 87.5  & 4.4 \\
-Panel + UMI      & 1\,MB  & 200x & 50   & UMI simplex     & 76.8  & 7.0 \\
+Baseline         & 10\,MB & 30x  & ---  & ---             & 139.6 & 0.87 \\
++Variants        & 10\,MB & 30x  & 500  & ---             & 139.7 & 0.87 \\
+High cov (1\,MB) & 1\,MB  & 200x & 100  & ---             &  92.7 & 0.58 \\
+cfDNA            & 1\,MB  & 200x & 200  & cfDNA, 2\% pur. &  92.5 & 0.68 \\
+FFPE + oxoG      & 10\,MB & 30x  & 500  & artefacts       & 170.5 & 1.17 \\
+Panel + UMI      & 1\,MB  & 200x & 50   & UMI simplex     & 195.1 & 1.80 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -68,29 +67,58 @@ Panel + UMI      & 1\,MB  & 200x & 50   & UMI simplex     & 76.8  & 7.0 \\
 \begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{../../benchmarking/results/graphs/throughput_scenarios.pdf}
-  \caption{Throughput across scenarios. Compute-bound configs (1\,MB reference) reach ${\sim}28$K pairs/s. I/O-bound configs (10\,MB) converge to ${\sim}13$--$14$K pairs/s.}
+  \caption{Throughput across scenarios. All I/O-bound configs converge to ${\sim}13$--$14$K pairs/s. Panel+UMI is lower (${\sim}6{,}800$ pairs/s) due to PCR family tracking overhead.}
   \label{fig:throughput}
 \end{figure}
 
 \subsection{Thread scaling}
 
 Figure~\ref{fig:threads} shows scaling on the 10\,MB, 30x configuration.
-Speedup plateaus at 1.16x above 2 threads, indicating I/O saturation from writing ${\sim}280$\,MB compressed FASTQ.
-Compute-bound workloads (higher coverage, more features) would scale better.
+Adding threads does not improve wall time at this scale.
+Single-threaded execution takes 140\,s; 12 threads takes 160\,s, a 13\% regression.
+The workload is fully I/O-bound: workers complete their compute work quickly, then contend on the single writer thread draining the channel.
+The coordination overhead from Rayon and crossbeam-channel dominates any compute saving.
+Compute-heavy workloads (UMI simulation, high coverage) would scale better because each worker thread is occupied longer before sending to the channel.
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.75\linewidth]{../../benchmarking/results/graphs/thread_scaling.pdf}
-  \caption{Thread scaling (10\,MB, 30x, 500 variants). The plateau at ${\sim}1.16$x reflects FASTQ compression saturating the storage pipeline.}
+  \caption{Thread scaling (10\,MB, 30x, 500 variants). Performance degrades with additional threads because the workload is I/O-bound and thread coordination overhead exceeds compute savings.}
   \label{fig:threads}
 \end{figure}
 
+\subsection{hg38 (chr22) benchmarks}
+
+Table~\ref{tab:hg38} reports performance on chromosome~22 from hg38 (${\sim}51$\,Mbp) at 5x coverage.
+All six configurations completed.
+The coverage was set to 5x rather than clinical depths (500x for panels, 200x for cfDNA) because \varforge{} does not yet support BED-based region filtering; the purpose of these benchmarks is to confirm correct operation on a real reference, not to generate high-coverage datasets (see Section~\ref{sec:future}).
+UMI configs (3--4) produce more output read pairs than the baseline because PCR family expansion is included in the output.
+
+\begin{table}[t]
+\centering
+\caption{hg38 chr22 benchmarks (5x, 1 run each, 12 threads). UMI/duplex configs show higher read counts due to PCR family expansion and higher RAM from family tracking.}
+\label{tab:hg38}
+\small
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+\# & Config & Wall (s) & Peak RAM (GB) & Read pairs & Pairs/s \\
+\midrule
+1 & WGS baseline      &  96.6 & 0.72 &   847K & 8,772 \\
+2 & WGS + variants    &  96.6 & 0.72 &   847K & 8,772 \\
+3 & Panel UMI simplex & 233.1 & 2.26 & 2,540K & 10,894 \\
+4 & Twist duplex      & 298.6 & 3.00 & 3,389K & 11,349 \\
+5 & cfDNA liq.~biopsy &  96.6 & 0.85 &   847K & 8,772 \\
+6 & FFPE tumour       & 121.1 & 0.91 & 1,059K & 8,746 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \subsection{Memory efficiency}
 
-Figure~\ref{fig:mem} shows per-pair memory is constant at ${\sim}1.7$\,KB across coverage depths.
-The streaming architecture bounds peak memory to $\text{buffer\_depth} \times \text{batch\_size}$ regardless of dataset size.
-With 64 channel slots, the theoretical ceiling is ${\sim}10.5$\,GiB.
-A full human genome 30x WGS run (${\sim}600$M pairs) is feasible on a standard workstation.
+Figure~\ref{fig:mem} shows per-pair memory is constant at ${\sim}0.45$\,KB across coverage depths above 10x.
+The streaming architecture bounds peak memory by channel depth and concurrent batch state rather than dataset size.
+A full human genome 30x WGS run produces ${\sim}600$M pairs, but only the in-flight batches must reside in memory at any one time, making it feasible on a standard workstation.
 
 \begin{figure}[t]
   \centering

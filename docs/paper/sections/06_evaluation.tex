@@ -10,7 +10,8 @@ No external tool or intermediate file format was required.
 The claim holds.
 
 \textbf{(ii) First genome-wide UMI/duplex simulator.}
-The panel UMI scenario (1\,MB, 500x, simplex) and Twist duplex scenario (chr22, 1000x, duplex) both completed.
+The panel UMI scenario (1\,MB, 200x, simplex) completed successfully (Table~\ref{tab:scenarios}).
+hg38 chr22 configs for UMI simplex and Twist-style duplex (both at 30x) are included in the hg38 benchmark suite and complete without error.
 No other published tool generates genome-wide UMI-tagged reads with configurable family sizes and duplex strand pairing.
 The claim holds.
 
@@ -25,11 +26,11 @@ Quantitative validation (chi-squared test against Binomial) is needed but not ye
 The claim is supported by design but not yet independently validated.
 
 \textbf{(v) Streaming Rust with bounded memory.}
-Per-pair memory is constant at ${\sim}1.7$\,KB across all tested coverage depths (Figure~\ref{fig:mem}).
+Per-pair memory is constant at ${\sim}0.45$\,KB across all tested coverage depths (Figure~\ref{fig:mem}).
 The streaming architecture bounded memory by channel depth, not dataset size.
 The claim holds.
 
 \textbf{Thread scaling limitation.}
-Thread scaling plateaus at 1.16x for the 10\,MB / 30x I/O-bound workload.
-This is an honest result: FASTQ compression dominates wall time at this scale.
-Compute-bound workloads (higher coverage, more features) would scale better, but this was not benchmarked with thread variation.
+Adding threads degrades wall time for the 10\,MB / 30x I/O-bound workload (1 thread = 140\,s; 12 threads = 160\,s).
+This is an honest result: FASTQ compression saturates the single writer thread, and coordination overhead exceeds compute savings.
+Compute-bound workloads (UMI simulation, high feature density) would scale better, but this was not benchmarked across thread counts.

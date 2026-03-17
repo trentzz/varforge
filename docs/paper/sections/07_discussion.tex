@@ -15,9 +15,9 @@ By replacing deterministic spike-in with Bernoulli sampling, \varforge{} elimina
 
 \textbf{Performance for CI/CD.}
 The streaming Rust architecture enables integration into automated testing pipelines.
-The \texttt{small} preset completes in ${\sim}30$\,s.
-Panel simulations finish in minutes.
-Full WGS is feasible overnight on a laptop.
+A 1\,MB, 30x simulation completes in ${\sim}15$\,s.
+Panel simulations (1\,MB, 200x, UMI) complete in ${\sim}3$\,min.
+Full WGS requires extrapolation, but the linear scaling and bounded memory make it feasible on a standard workstation.
 
 Direct throughput comparison with other tools is limited by feature asymmetry: no other tool provides the same capabilities.
 BAMSurgeon injects variants at ${\sim}1$ variant per 4--5\,s (${\sim}40$\,min for 500 variants).

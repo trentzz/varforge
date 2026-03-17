@@ -8,7 +8,7 @@ output:
 sample:
   name: WGS_VARIANTS
   read_length: 150
-  coverage: 30.0
+  coverage: 5.0
 fragment:
   model: normal
   mean: 300.0

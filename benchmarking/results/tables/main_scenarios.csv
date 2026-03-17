@@ -14,3 +14,6 @@ config,iteration,wall_secs,peak_mem_kb
 08_ffpe_artifacts,1,171.14,1170252
 08_ffpe_artifacts,2,169.904,1170344
 08_ffpe_artifacts,3,170.551,1168340
+11_panel_umi,1,195.098,1802632
+11_panel_umi,2,194.597,1801920
+11_panel_umi,3,195.599,1803776

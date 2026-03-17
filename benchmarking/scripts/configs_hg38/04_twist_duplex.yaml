@@ -10,7 +10,7 @@ output:
 sample:
   name: TWIST_DUPLEX
   read_length: 150
-  coverage: 1000.0
+  coverage: 5.0
 fragment:
   model: normal
   mean: 200.0

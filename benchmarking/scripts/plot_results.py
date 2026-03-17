@@ -158,31 +158,30 @@ def fig_feature_overhead(data):
 
 
 def fig_thread_scaling(data):
-    """Thread scaling with ideal line."""
+    """Thread scaling: shows I/O-bound slowdown with more threads."""
     threads = [1, 2, 4, 6, 8, 12]
     walls = [data['thread_scaling'][f'threads_{t}']['avg_wall_secs']
              for t in threads]
     base = walls[0]
-    speedups = [base / w for w in walls]
+    rel = [base / w for w in walls]  # values <1 mean slower than 1 thread
 
     fig, ax = plt.subplots(figsize=(70/25.4, 55/25.4))
 
-    ideal = list(range(1, 13))
-    ax.plot(ideal, ideal, '--', color='#CCCCCC', linewidth=0.8, label='Ideal')
-    ax.plot(threads, speedups, 'o-', color=BLUE, markersize=5,
+    ax.axhline(y=1.0, color='#CCCCCC', linestyle='--', linewidth=0.8, label='1-thread baseline')
+    ax.plot(threads, rel, 'o-', color=BLUE, markersize=5,
             label='VarForge (10 MB, 30x)')
 
     ax.set_xlabel('Thread count')
-    ax.set_ylabel('Speedup (x)')
+    ax.set_ylabel('Relative speed (1T = 1.0)')
     ax.set_xlim(0.5, 12.5)
-    ax.set_ylim(0.5, 3.0)
+    ax.set_ylim(0.6, 1.2)
     ax.set_xticks(threads)
 
-    ax.annotate('I/O-bound plateau', xy=(6, speedups[3]),
-                xytext=(8, 1.7), fontsize=7, color='#888888',
+    ax.annotate('I/O-bound:\nmore threads = slower', xy=(12, rel[-1]),
+                xytext=(7, 0.72), fontsize=7, color='#888888',
                 arrowprops=dict(arrowstyle='->', color='#AAAAAA', lw=0.8))
 
-    ax.legend(loc='upper left')
+    ax.legend(loc='upper right', fontsize=8)
     save(fig, 'thread_scaling')
 
 
@@ -220,6 +219,7 @@ def fig_throughput_scenarios(data):
         ('High cov\n(1 MB, 200x)', '04_very_high_coverage', 1e6, 200),
         ('cfDNA\n(1 MB, 200x)', '07_cfdna', 1e6, 200),
         ('FFPE\n(10 MB, 30x)', '08_ffpe_artifacts', 10e6, 30),
+        ('Panel+UMI\n(1 MB, 200x)', '11_panel_umi', 1e6, 200),
     ]
 
     names, throughputs = [], []
@@ -230,8 +230,8 @@ def fig_throughput_scenarios(data):
         names.append(name)
         throughputs.append(rps)
 
-    fig, ax = plt.subplots(figsize=(84/25.4, 50/25.4))
-    colors = [BLUE, ORANGE, GREEN, PINK, VERMILLION]
+    fig, ax = plt.subplots(figsize=(84/25.4, 60/25.4))
+    colors = [BLUE, ORANGE, GREEN, PINK, VERMILLION, SKY]
     bars = ax.barh(range(len(names)), [t/1000 for t in throughputs],
                    color=colors, height=0.55, edgecolor='white')
 

@@ -3,7 +3,7 @@
 ## Purpose
 
 The synthetic reference benchmarks (1 MB, 10 MB) measure scaling behaviour in a controlled environment.
-The hg38 benchmarks measure performance on a real genome with realistic GC content, repeat structure, and chromosome length.
+The hg38 benchmarks measure correctness and feature coverage on a real genome with realistic GC content, repeat structure, and chromosome length.
 This closes the gap between synthetic benchmarks and what users will actually encounter.
 
 ## Reference
@@ -11,46 +11,48 @@ This closes the gap between synthetic benchmarks and what users will actually en
 Chromosome 22 from hg38 (~51 Mbp).
 Chosen because it is the smallest autosome, large enough to be realistic, and small enough to complete benchmarks in reasonable time on a 12 GiB system.
 
+## Coverage note
+
+All configs run at 5x coverage.
+The purpose of these benchmarks is to confirm that each feature (UMI, duplex, cfDNA, FFPE) runs without error on a real reference and produces plausible output.
+Throughput and scaling data are derived from the synthetic benchmarks.
+Higher clinical depths (500x for panels, 200x for cfDNA) require BED-based region filtering, which is not yet implemented.
+
 ## Experiments
 
-### 1. WGS baseline (30x)
+### 1. WGS baseline (5x)
 
 Standard whole-genome simulation on chr22.
 No optional features.
-Measures baseline throughput on a real reference.
+Measures baseline behaviour on a real reference.
 
-### 2. WGS with variants (30x, 500 mutations)
+### 2. WGS with variants (5x, 500 mutations)
 
 Same as baseline but with 500 random somatic mutations.
-Measures variant injection overhead on a real reference.
+Confirms variant injection works on real sequence with realistic GC content.
 
-### 3. Targeted panel (500x, 50 mutations, UMI simplex)
+### 3. Targeted panel (5x, 50 mutations, UMI simplex)
 
 Simulates a targeted panel sequencing run.
 UMI simplex, 8-mer, inline, 10 PCR cycles.
-Restricted to a subset of chr22 via regions.
+Confirms UMI family generation and tagging work on chr22.
 
-### 4. Twist-style UMI duplex (1000x, 50 mutations)
+### 4. Twist-style UMI duplex (5x, 50 mutations)
 
 Simulates Twist Biosciences UMI duplex protocol.
 5-mer UMI (matching Twist read structure), duplex mode.
-High depth to test UMI family generation at scale.
+Confirms dual-strand tagging works on a real reference.
 
-### 5. cfDNA liquid biopsy (200x, 200 mutations, 2% purity)
+### 5. cfDNA liquid biopsy (5x, 200 mutations, 2% purity)
 
 cfDNA fragment model on a real reference.
-Low tumour fraction to test sensitivity use case.
+Low tumour fraction to test the sensitivity use case.
+Confirms nucleosomal fragment length distribution is applied to real sequence.
 
-### 6. FFPE tumour (60x, 500 mutations, FFPE + oxoG)
+### 6. FFPE tumour (5x, 500 mutations, FFPE + oxoG)
 
 Simulates a formalin-fixed tumour sample.
-Typical clinical coverage depth.
-Tests artefact injection on real sequence.
-
-### 7. Tumour-normal pair (60x tumour, 30x normal, 1000 mutations)
-
-Multi-sample mode producing matched pair.
-Tests the longitudinal/multi-sample pipeline.
+Confirms FFPE deamination and oxidative damage are applied to real sequence.
 
 ## Metrics
 

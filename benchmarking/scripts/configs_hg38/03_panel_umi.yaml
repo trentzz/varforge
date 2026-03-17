@@ -8,7 +8,7 @@ output:
 sample:
   name: PANEL_UMI
   read_length: 150
-  coverage: 500.0
+  coverage: 5.0
 fragment:
   model: normal
   mean: 250.0
