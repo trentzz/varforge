@@ -9,9 +9,9 @@ output:
 sample:
   name: CFDNA
   read_length: 150
-  coverage: 200.0
+  coverage: 5.0
 fragment:
-  model: cfdna
+  model: cfda
   mean: 167.0
   sd: 20.0
 mutations:

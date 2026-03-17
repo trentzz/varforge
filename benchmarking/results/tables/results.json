@@ -16,856 +16,185 @@
   },
   "main_benchmarks": {
     "01_baseline": {
-      "iterations": [
-        {
-          "wall_secs": 75.53,
-          "peak_mem_kb": 3503120,
-          "cpu_pct": 111,
-          "user_time_secs": 80.84,
-          "system_time_secs": 3.42
-        },
-        {
-          "wall_secs": 74.74,
-          "peak_mem_kb": 3502656,
-          "cpu_pct": 112,
-          "user_time_secs": 80.53,
-          "system_time_secs": 3.24
-        },
-        {
-          "wall_secs": 76.03,
-          "peak_mem_kb": 3502592,
-          "cpu_pct": 111,
-          "user_time_secs": 81.21,
-          "system_time_secs": 3.43
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 75.4333,
-      "avg_peak_mem_kb": 3502789.3333,
-      "min_wall_secs": 74.74,
-      "max_wall_secs": 76.03
+      "avg_wall_secs": 139.5563,
+      "avg_peak_mem_kb": 867884.0,
+      "min_wall_secs": 139.441,
+      "max_wall_secs": 139.785
     },
     "02_with_variants": {
-      "iterations": [
-        {
-          "wall_secs": 76.1,
-          "peak_mem_kb": 3504640,
-          "cpu_pct": 113,
-          "user_time_secs": 82.65,
-          "system_time_secs": 3.49
-        },
-        {
-          "wall_secs": 76.38,
-          "peak_mem_kb": 3505056,
-          "cpu_pct": 112,
-          "user_time_secs": 82.56,
-          "system_time_secs": 3.43
-        },
-        {
-          "wall_secs": 75.22,
-          "peak_mem_kb": 3504400,
-          "cpu_pct": 112,
-          "user_time_secs": 81.42,
-          "system_time_secs": 3.43
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 75.9,
-      "avg_peak_mem_kb": 3504698.6667,
-      "min_wall_secs": 75.22,
-      "max_wall_secs": 76.38
-    },
-    "03_high_coverage": {
-      "iterations": [
-        {
-          "wall_secs": 251.05,
-          "peak_mem_kb": 11624720,
-          "cpu_pct": 112,
-          "user_time_secs": 271.53,
-          "system_time_secs": 11.49
-        }
-      ],
-      "n_iterations": 1,
-      "avg_wall_secs": 251.05,
-      "avg_peak_mem_kb": 11624720.0,
-      "min_wall_secs": 251.05,
-      "max_wall_secs": 251.05
+      "avg_wall_secs": 139.671,
+      "avg_peak_mem_kb": 868897.3333,
+      "min_wall_secs": 139.216,
+      "max_wall_secs": 139.967
     },
     "04_very_high_coverage": {
-      "iterations": [
-        {
-          "wall_secs": 47.54,
-          "peak_mem_kb": 2325264,
-          "cpu_pct": 112,
-          "user_time_secs": 51.97,
-          "system_time_secs": 1.57
-        },
-        {
-          "wall_secs": 47.98,
-          "peak_mem_kb": 2325744,
-          "cpu_pct": 112,
-          "user_time_secs": 52.25,
-          "system_time_secs": 1.55
-        },
-        {
-          "wall_secs": 47.98,
-          "peak_mem_kb": 2324960,
-          "cpu_pct": 112,
-          "user_time_secs": 52.25,
-          "system_time_secs": 1.75
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 47.8333,
-      "avg_peak_mem_kb": 2325322.6667,
-      "min_wall_secs": 47.54,
-      "max_wall_secs": 47.98
-    },
-    "05_umi_simplex": {
-      "iterations": [
-        {
-          "wall_secs": 376.11,
-          "peak_mem_kb": 36405504,
-          "cpu_pct": 109,
-          "user_time_secs": 395.25,
-          "system_time_secs": 17.37
-        }
-      ],
-      "n_iterations": 1,
-      "avg_wall_secs": 376.11,
-      "avg_peak_mem_kb": 36405504.0,
-      "min_wall_secs": 376.11,
-      "max_wall_secs": 376.11
-    },
-    "06_umi_duplex": {
-      "iterations": [
-        {
-          "wall_secs": 373.59,
-          "peak_mem_kb": 36405952,
-          "cpu_pct": 109,
-          "user_time_secs": 393.08,
-          "system_time_secs": 15.98
-        }
-      ],
-      "n_iterations": 1,
-      "avg_wall_secs": 373.59,
-      "avg_peak_mem_kb": 36405952.0,
-      "min_wall_secs": 373.59,
-      "max_wall_secs": 373.59
+      "avg_wall_secs": 92.7493,
+      "avg_peak_mem_kb": 576300.0,
+      "min_wall_secs": 92.491,
+      "max_wall_secs": 93.022
     },
     "07_cfdna": {
-      "iterations": [
-        {
-          "wall_secs": 47.93,
-          "peak_mem_kb": 2438848,
-          "cpu_pct": 113,
-          "user_time_secs": 52.59,
-          "system_time_secs": 1.66
-        },
-        {
-          "wall_secs": 47.11,
-          "peak_mem_kb": 2439232,
-          "cpu_pct": 112,
-          "user_time_secs": 51.63,
-          "system_time_secs": 1.55
-        },
-        {
-          "wall_secs": 47.51,
-          "peak_mem_kb": 2438848,
-          "cpu_pct": 112,
-          "user_time_secs": 52.07,
-          "system_time_secs": 1.61
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 47.5167,
-      "avg_peak_mem_kb": 2438976.0,
-      "min_wall_secs": 47.11,
-      "max_wall_secs": 47.93
+      "avg_wall_secs": 92.4833,
+      "avg_peak_mem_kb": 684986.6667,
+      "min_wall_secs": 92.104,
+      "max_wall_secs": 92.731
     },
     "08_ffpe_artifacts": {
-      "iterations": [
-        {
-          "wall_secs": 86.12,
-          "peak_mem_kb": 4657712,
-          "cpu_pct": 115,
-          "user_time_secs": 96.27,
-          "system_time_secs": 3.57
-        },
-        {
-          "wall_secs": 88.01,
-          "peak_mem_kb": 4681920,
-          "cpu_pct": 115,
-          "user_time_secs": 97.75,
-          "system_time_secs": 3.86
-        },
-        {
-          "wall_secs": 88.41,
-          "peak_mem_kb": 4627280,
-          "cpu_pct": 115,
-          "user_time_secs": 98.55,
-          "system_time_secs": 3.63
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 87.5133,
-      "avg_peak_mem_kb": 4655637.3333,
-      "min_wall_secs": 86.12,
-      "max_wall_secs": 88.41
+      "avg_wall_secs": 170.5317,
+      "avg_peak_mem_kb": 1169645.3333,
+      "min_wall_secs": 169.904,
+      "max_wall_secs": 171.14
     },
-    "09_all_features": {
-      "iterations": [
-        {
-          "wall_secs": 471.02,
-          "peak_mem_kb": 40469776,
-          "cpu_pct": 114,
-          "user_time_secs": 523.16,
-          "system_time_secs": 18.16
-        }
-      ],
-      "n_iterations": 1,
-      "avg_wall_secs": 471.02,
-      "avg_peak_mem_kb": 40469776.0,
-      "min_wall_secs": 471.02,
-      "max_wall_secs": 471.02
-    },
-    "10_large_genome": {
-      "iterations": [
-        {
-          "wall_secs": 374.54,
-          "peak_mem_kb": 17250480,
-          "cpu_pct": 112,
-          "user_time_secs": 405.54,
-          "system_time_secs": 16.97
-        }
-      ],
-      "n_iterations": 1,
-      "avg_wall_secs": 374.54,
-      "avg_peak_mem_kb": 17250480.0,
-      "min_wall_secs": 374.54,
-      "max_wall_secs": 374.54
-    },
-    "11_panel_simulation": {
-      "iterations": [
-        {
-          "wall_secs": 77.28,
-          "peak_mem_kb": 7331984,
-          "cpu_pct": 108,
-          "user_time_secs": 81.27,
-          "system_time_secs": 2.61
-        },
-        {
-          "wall_secs": 74.68,
-          "peak_mem_kb": 7330256,
-          "cpu_pct": 108,
-          "user_time_secs": 78.7,
-          "system_time_secs": 2.38
-        },
-        {
-          "wall_secs": 78.38,
-          "peak_mem_kb": 7336464,
-          "cpu_pct": 108,
-          "user_time_secs": 82.52,
-          "system_time_secs": 2.4
-        }
-      ],
+    "11_panel_umi": {
       "n_iterations": 3,
-      "avg_wall_secs": 76.78,
-      "avg_peak_mem_kb": 7332901.3333,
-      "min_wall_secs": 74.68,
-      "max_wall_secs": 78.38
-    },
-    "12_ultra_deep": {
-      "iterations": [
-        {
-          "wall_secs": 190.48,
-          "peak_mem_kb": 18330288,
-          "cpu_pct": 109,
-          "user_time_secs": 201.47,
-          "system_time_secs": 6.16
-        }
-      ],
-      "n_iterations": 1,
-      "avg_wall_secs": 190.48,
-      "avg_peak_mem_kb": 18330288.0,
-      "min_wall_secs": 190.48,
-      "max_wall_secs": 190.48
+      "avg_wall_secs": 195.098,
+      "avg_peak_mem_kb": 1802776.0,
+      "min_wall_secs": 194.597,
+      "max_wall_secs": 195.599
     }
   },
   "thread_scaling": {
     "threads_1": {
-      "iterations": [
-        {
-          "wall_secs": 87.0,
-          "peak_mem_kb": 3498624,
-          "cpu_pct": 99,
-          "user_time_secs": 84.25,
-          "system_time_secs": 2.71
-        },
-        {
-          "wall_secs": 85.46,
-          "peak_mem_kb": 3497232,
-          "cpu_pct": 99,
-          "user_time_secs": 82.8,
-          "system_time_secs": 2.64
-        },
-        {
-          "wall_secs": 85.46,
-          "peak_mem_kb": 3497680,
-          "cpu_pct": 99,
-          "user_time_secs": 82.68,
-          "system_time_secs": 2.73
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 85.9733,
-      "avg_peak_mem_kb": 3497845.3333,
-      "min_wall_secs": 85.46,
-      "max_wall_secs": 87.0
+      "avg_wall_secs": 140.054,
+      "avg_peak_mem_kb": 859773.3333,
+      "min_wall_secs": 139.551,
+      "max_wall_secs": 140.466
     },
     "threads_2": {
-      "iterations": [
-        {
-          "wall_secs": 77.05,
-          "peak_mem_kb": 3498384,
-          "cpu_pct": 110,
-          "user_time_secs": 82.05,
-          "system_time_secs": 2.81
-        },
-        {
-          "wall_secs": 75.66,
-          "peak_mem_kb": 3496624,
-          "cpu_pct": 110,
-          "user_time_secs": 80.56,
-          "system_time_secs": 2.71
-        },
-        {
-          "wall_secs": 74.8,
-          "peak_mem_kb": 3497008,
-          "cpu_pct": 110,
-          "user_time_secs": 79.95,
-          "system_time_secs": 2.68
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 75.8367,
-      "avg_peak_mem_kb": 3497338.6667,
-      "min_wall_secs": 74.8,
-      "max_wall_secs": 77.05
+      "avg_wall_secs": 143.7383,
+      "avg_peak_mem_kb": 860749.3333,
+      "min_wall_secs": 141.892,
+      "max_wall_secs": 146.75
     },
     "threads_4": {
-      "iterations": [
-        {
-          "wall_secs": 73.58,
-          "peak_mem_kb": 3498288,
-          "cpu_pct": 112,
-          "user_time_secs": 80.33,
-          "system_time_secs": 2.43
-        },
-        {
-          "wall_secs": 74.01,
-          "peak_mem_kb": 3497072,
-          "cpu_pct": 112,
-          "user_time_secs": 80.91,
-          "system_time_secs": 2.23
-        },
-        {
-          "wall_secs": 74.42,
-          "peak_mem_kb": 3498208,
-          "cpu_pct": 112,
-          "user_time_secs": 81.31,
-          "system_time_secs": 2.44
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 74.0033,
-      "avg_peak_mem_kb": 3497856.0,
-      "min_wall_secs": 73.58,
-      "max_wall_secs": 74.42
+      "avg_wall_secs": 158.7907,
+      "avg_peak_mem_kb": 862480.0,
+      "min_wall_secs": 146.275,
+      "max_wall_secs": 167.601
     },
     "threads_6": {
-      "iterations": [
-        {
-          "wall_secs": 75.26,
-          "peak_mem_kb": 3499680,
-          "cpu_pct": 113,
-          "user_time_secs": 82.5,
-          "system_time_secs": 2.87
-        },
-        {
-          "wall_secs": 72.97,
-          "peak_mem_kb": 3499024,
-          "cpu_pct": 113,
-          "user_time_secs": 80.26,
-          "system_time_secs": 2.76
-        },
-        {
-          "wall_secs": 74.6,
-          "peak_mem_kb": 3498496,
-          "cpu_pct": 113,
-          "user_time_secs": 81.88,
-          "system_time_secs": 2.97
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 74.2767,
-      "avg_peak_mem_kb": 3499066.6667,
-      "min_wall_secs": 72.97,
-      "max_wall_secs": 75.26
+      "avg_wall_secs": 144.9537,
+      "avg_peak_mem_kb": 864598.6667,
+      "min_wall_secs": 144.439,
+      "max_wall_secs": 145.529
     },
     "threads_8": {
-      "iterations": [
-        {
-          "wall_secs": 75.89,
-          "peak_mem_kb": 3501104,
-          "cpu_pct": 113,
-          "user_time_secs": 82.72,
-          "system_time_secs": 3.14
-        },
-        {
-          "wall_secs": 73.21,
-          "peak_mem_kb": 3500560,
-          "cpu_pct": 113,
-          "user_time_secs": 80.08,
-          "system_time_secs": 2.95
-        },
-        {
-          "wall_secs": 76.34,
-          "peak_mem_kb": 3501200,
-          "cpu_pct": 112,
-          "user_time_secs": 82.85,
-          "system_time_secs": 3.23
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 75.1467,
-      "avg_peak_mem_kb": 3500954.6667,
-      "min_wall_secs": 73.21,
-      "max_wall_secs": 76.34
+      "avg_wall_secs": 145.9413,
+      "avg_peak_mem_kb": 866608.0,
+      "min_wall_secs": 144.324,
+      "max_wall_secs": 147.407
     },
     "threads_12": {
-      "iterations": [
-        {
-          "wall_secs": 77.59,
-          "peak_mem_kb": 3505776,
-          "cpu_pct": 112,
-          "user_time_secs": 83.82,
-          "system_time_secs": 3.33
-        },
-        {
-          "wall_secs": 73.84,
-          "peak_mem_kb": 3503456,
-          "cpu_pct": 113,
-          "user_time_secs": 80.26,
-          "system_time_secs": 3.39
-        },
-        {
-          "wall_secs": 75.67,
-          "peak_mem_kb": 3505808,
-          "cpu_pct": 113,
-          "user_time_secs": 82.4,
-          "system_time_secs": 3.25
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 75.7,
-      "avg_peak_mem_kb": 3505013.3333,
-      "min_wall_secs": 73.84,
-      "max_wall_secs": 77.59
+      "avg_wall_secs": 159.6967,
+      "avg_peak_mem_kb": 869054.6667,
+      "min_wall_secs": 157.583,
+      "max_wall_secs": 162.604
     }
   },
   "coverage_scaling": {
     "cov_1x": {
-      "iterations": [
-        {
-          "wall_secs": 0.26,
-          "peak_mem_kb": 37296,
-          "cpu_pct": 107,
-          "user_time_secs": 0.28,
-          "system_time_secs": 0.0
-        },
-        {
-          "wall_secs": 0.27,
-          "peak_mem_kb": 37696,
-          "cpu_pct": 108,
-          "user_time_secs": 0.28,
-          "system_time_secs": 0.0
-        },
-        {
-          "wall_secs": 0.23,
-          "peak_mem_kb": 37648,
-          "cpu_pct": 109,
-          "user_time_secs": 0.23,
-          "system_time_secs": 0.02
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 0.2533,
-      "avg_peak_mem_kb": 37546.6667,
-      "min_wall_secs": 0.23,
-      "max_wall_secs": 0.27
+      "avg_wall_secs": 0.5537,
+      "avg_peak_mem_kb": 10321.3333,
+      "min_wall_secs": 0.531,
+      "max_wall_secs": 0.596
     },
     "cov_5x": {
-      "iterations": [
-        {
-          "wall_secs": 1.29,
-          "peak_mem_kb": 82816,
-          "cpu_pct": 111,
-          "user_time_secs": 1.4,
-          "system_time_secs": 0.04
-        },
-        {
-          "wall_secs": 1.32,
-          "peak_mem_kb": 84064,
-          "cpu_pct": 109,
-          "user_time_secs": 1.43,
-          "system_time_secs": 0.02
-        },
-        {
-          "wall_secs": 1.3,
-          "peak_mem_kb": 83360,
-          "cpu_pct": 110,
-          "user_time_secs": 1.39,
-          "system_time_secs": 0.04
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 1.3033,
-      "avg_peak_mem_kb": 83413.3333,
-      "min_wall_secs": 1.29,
-      "max_wall_secs": 1.32
+      "avg_wall_secs": 2.577,
+      "avg_peak_mem_kb": 21714.6667,
+      "min_wall_secs": 2.451,
+      "max_wall_secs": 2.717
     },
     "cov_10x": {
-      "iterations": [
-        {
-          "wall_secs": 2.58,
-          "peak_mem_kb": 140576,
-          "cpu_pct": 111,
-          "user_time_secs": 2.83,
-          "system_time_secs": 0.06
-        },
-        {
-          "wall_secs": 2.5,
-          "peak_mem_kb": 140064,
-          "cpu_pct": 111,
-          "user_time_secs": 2.68,
-          "system_time_secs": 0.09
-        },
-        {
-          "wall_secs": 2.54,
-          "peak_mem_kb": 140112,
-          "cpu_pct": 110,
-          "user_time_secs": 2.73,
-          "system_time_secs": 0.09
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 2.54,
-      "avg_peak_mem_kb": 140250.6667,
-      "min_wall_secs": 2.5,
-      "max_wall_secs": 2.58
+      "avg_wall_secs": 5.0067,
+      "avg_peak_mem_kb": 35957.3333,
+      "min_wall_secs": 4.944,
+      "max_wall_secs": 5.05
     },
     "cov_30x": {
-      "iterations": [
-        {
-          "wall_secs": 6.96,
-          "peak_mem_kb": 370928,
-          "cpu_pct": 112,
-          "user_time_secs": 7.61,
-          "system_time_secs": 0.22
-        },
-        {
-          "wall_secs": 7.22,
-          "peak_mem_kb": 370112,
-          "cpu_pct": 111,
-          "user_time_secs": 7.83,
-          "system_time_secs": 0.22
-        },
-        {
-          "wall_secs": 7.37,
-          "peak_mem_kb": 369840,
-          "cpu_pct": 111,
-          "user_time_secs": 7.99,
-          "system_time_secs": 0.24
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 7.1833,
-      "avg_peak_mem_kb": 370293.3333,
-      "min_wall_secs": 6.96,
-      "max_wall_secs": 7.37
+      "avg_wall_secs": 14.986,
+      "avg_peak_mem_kb": 92853.3333,
+      "min_wall_secs": 14.857,
+      "max_wall_secs": 15.208
     },
     "cov_50x": {
-      "iterations": [
-        {
-          "wall_secs": 11.86,
-          "peak_mem_kb": 600864,
-          "cpu_pct": 112,
-          "user_time_secs": 12.89,
-          "system_time_secs": 0.42
-        },
-        {
-          "wall_secs": 12.16,
-          "peak_mem_kb": 600448,
-          "cpu_pct": 111,
-          "user_time_secs": 13.2,
-          "system_time_secs": 0.41
-        },
-        {
-          "wall_secs": 11.63,
-          "peak_mem_kb": 599776,
-          "cpu_pct": 113,
-          "user_time_secs": 12.84,
-          "system_time_secs": 0.3
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 11.8833,
-      "avg_peak_mem_kb": 600362.6667,
-      "min_wall_secs": 11.63,
-      "max_wall_secs": 12.16
+      "avg_wall_secs": 27.1657,
+      "avg_peak_mem_kb": 149852.0,
+      "min_wall_secs": 24.541,
+      "max_wall_secs": 28.84
     },
     "cov_100x": {
-      "iterations": [
-        {
-          "wall_secs": 23.81,
-          "peak_mem_kb": 1173664,
-          "cpu_pct": 112,
-          "user_time_secs": 26.02,
-          "system_time_secs": 0.78
-        },
-        {
-          "wall_secs": 23.79,
-          "peak_mem_kb": 1173792,
-          "cpu_pct": 112,
-          "user_time_secs": 25.93,
-          "system_time_secs": 0.83
-        },
-        {
-          "wall_secs": 23.84,
-          "peak_mem_kb": 1173408,
-          "cpu_pct": 112,
-          "user_time_secs": 25.94,
-          "system_time_secs": 0.87
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 23.8133,
-      "avg_peak_mem_kb": 1173621.3333,
-      "min_wall_secs": 23.79,
-      "max_wall_secs": 23.84
+      "avg_wall_secs": 53.7333,
+      "avg_peak_mem_kb": 292006.6667,
+      "min_wall_secs": 50.634,
+      "max_wall_secs": 56.502
     },
     "cov_200x": {
-      "iterations": [
-        {
-          "wall_secs": 47.06,
-          "peak_mem_kb": 2325888,
-          "cpu_pct": 112,
-          "user_time_secs": 51.44,
-          "system_time_secs": 1.56
-        },
-        {
-          "wall_secs": 47.62,
-          "peak_mem_kb": 2326096,
-          "cpu_pct": 112,
-          "user_time_secs": 51.98,
-          "system_time_secs": 1.6
-        },
-        {
-          "wall_secs": 48.53,
-          "peak_mem_kb": 2326000,
-          "cpu_pct": 112,
-          "user_time_secs": 52.83,
-          "system_time_secs": 1.56
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 47.7367,
-      "avg_peak_mem_kb": 2325994.6667,
-      "min_wall_secs": 47.06,
-      "max_wall_secs": 48.53
+      "avg_wall_secs": 97.8903,
+      "avg_peak_mem_kb": 576238.6667,
+      "min_wall_secs": 95.228,
+      "max_wall_secs": 102.696
     }
   },
   "feature_overhead": {
     "feat_base": {
-      "iterations": [
-        {
-          "wall_secs": 7.34,
-          "peak_mem_kb": 371136,
-          "cpu_pct": 112,
-          "user_time_secs": 7.97,
-          "system_time_secs": 0.26
-        },
-        {
-          "wall_secs": 7.35,
-          "peak_mem_kb": 370464,
-          "cpu_pct": 111,
-          "user_time_secs": 7.95,
-          "system_time_secs": 0.26
-        },
-        {
-          "wall_secs": 7.03,
-          "peak_mem_kb": 369904,
-          "cpu_pct": 111,
-          "user_time_secs": 7.59,
-          "system_time_secs": 0.25
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 7.24,
-      "avg_peak_mem_kb": 370501.3333,
-      "min_wall_secs": 7.03,
-      "max_wall_secs": 7.35
+      "avg_wall_secs": 14.4233,
+      "avg_peak_mem_kb": 92592.0,
+      "min_wall_secs": 14.387,
+      "max_wall_secs": 14.457
     },
     "feat_variants": {
-      "iterations": [
-        {
-          "wall_secs": 7.52,
-          "peak_mem_kb": 371056,
-          "cpu_pct": 112,
-          "user_time_secs": 8.17,
-          "system_time_secs": 0.29
-        },
-        {
-          "wall_secs": 7.54,
-          "peak_mem_kb": 372656,
-          "cpu_pct": 112,
-          "user_time_secs": 8.2,
-          "system_time_secs": 0.3
-        },
-        {
-          "wall_secs": 7.41,
-          "peak_mem_kb": 371936,
-          "cpu_pct": 112,
-          "user_time_secs": 8.08,
-          "system_time_secs": 0.23
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 7.49,
-      "avg_peak_mem_kb": 371882.6667,
-      "min_wall_secs": 7.41,
-      "max_wall_secs": 7.54
-    },
-    "feat_umi": {
-      "iterations": [
-        {
-          "wall_secs": 11.85,
-          "peak_mem_kb": 1119568,
-          "cpu_pct": 108,
-          "user_time_secs": 12.45,
-          "system_time_secs": 0.41
-        },
-        {
-          "wall_secs": 11.86,
-          "peak_mem_kb": 1115888,
-          "cpu_pct": 108,
-          "user_time_secs": 12.49,
-          "system_time_secs": 0.36
-        },
-        {
-          "wall_secs": 11.92,
-          "peak_mem_kb": 1119872,
-          "cpu_pct": 108,
-          "user_time_secs": 12.5,
-          "system_time_secs": 0.41
-        }
-      ],
-      "n_iterations": 3,
-      "avg_wall_secs": 11.8767,
-      "avg_peak_mem_kb": 1118442.6667,
-      "min_wall_secs": 11.85,
-      "max_wall_secs": 11.92
-    },
-    "feat_artifacts": {
-      "iterations": [
-        {
-          "wall_secs": 8.44,
-          "peak_mem_kb": 426960,
-          "cpu_pct": 111,
-          "user_time_secs": 9.19,
-          "system_time_secs": 0.23
-        },
-        {
-          "wall_secs": 8.2,
-          "peak_mem_kb": 424896,
-          "cpu_pct": 112,
-          "user_time_secs": 8.93,
-          "system_time_secs": 0.27
-        },
-        {
-          "wall_secs": 8.5,
-          "peak_mem_kb": 425264,
-          "cpu_pct": 111,
-          "user_time_secs": 9.16,
-          "system_time_secs": 0.29
-        }
-      ],
-      "n_iterations": 3,
-      "avg_wall_secs": 8.38,
-      "avg_peak_mem_kb": 425706.6667,
-      "min_wall_secs": 8.2,
-      "max_wall_secs": 8.5
+      "avg_wall_secs": 14.2947,
+      "avg_peak_mem_kb": 93560.0,
+      "min_wall_secs": 14.21,
+      "max_wall_secs": 14.408
     },
     "feat_gc_bias": {
-      "iterations": [
-        {
-          "wall_secs": 7.1,
-          "peak_mem_kb": 370672,
-          "cpu_pct": 113,
-          "user_time_secs": 7.8,
-          "system_time_secs": 0.28
-        },
-        {
-          "wall_secs": 7.38,
-          "peak_mem_kb": 371072,
-          "cpu_pct": 113,
-          "user_time_secs": 8.07,
-          "system_time_secs": 0.27
-        },
-        {
-          "wall_secs": 7.61,
-          "peak_mem_kb": 370080,
-          "cpu_pct": 113,
-          "user_time_secs": 8.36,
-          "system_time_secs": 0.29
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 7.3633,
-      "avg_peak_mem_kb": 370608.0,
-      "min_wall_secs": 7.1,
-      "max_wall_secs": 7.61
+      "avg_wall_secs": 14.5367,
+      "avg_peak_mem_kb": 92580.0,
+      "min_wall_secs": 14.337,
+      "max_wall_secs": 14.785
+    },
+    "feat_artifacts": {
+      "n_iterations": 3,
+      "avg_wall_secs": 16.6403,
+      "avg_peak_mem_kb": 107444.0,
+      "min_wall_secs": 16.563,
+      "max_wall_secs": 16.769
+    },
+    "feat_umi": {
+      "n_iterations": 3,
+      "avg_wall_secs": 35.039,
+      "avg_peak_mem_kb": 275641.3333,
+      "min_wall_secs": 34.676,
+      "max_wall_secs": 35.387
     },
     "feat_all": {
-      "iterations": [
-        {
-          "wall_secs": 15.96,
-          "peak_mem_kb": 1292304,
-          "cpu_pct": 111,
-          "user_time_secs": 17.33,
-          "system_time_secs": 0.46
-        },
-        {
-          "wall_secs": 16.63,
-          "peak_mem_kb": 1294144,
-          "cpu_pct": 111,
-          "user_time_secs": 17.92,
-          "system_time_secs": 0.57
-        },
-        {
-          "wall_secs": 16.36,
-          "peak_mem_kb": 1293584,
-          "cpu_pct": 111,
-          "user_time_secs": 17.71,
-          "system_time_secs": 0.5
-        }
-      ],
       "n_iterations": 3,
-      "avg_wall_secs": 16.3167,
-      "avg_peak_mem_kb": 1293344.0,
-      "min_wall_secs": 15.96,
-      "max_wall_secs": 16.63
+      "avg_wall_secs": 42.9527,
+      "avg_peak_mem_kb": 323794.6667,
+      "min_wall_secs": 42.488,
+      "max_wall_secs": 43.234
     }
   }
 }

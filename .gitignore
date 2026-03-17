@@ -15,6 +15,9 @@
 # Old benchmark output (superseded by benchmarking/)
 benchmark_output/
 
+# LaTeX build artifact (distribution copy uses naming convention: varforge_vX.Y_type.pdf)
+docs/paper/main.pdf
+
 # LaTeX auxiliary files
 docs/paper/*.aux
 docs/paper/*.bbl

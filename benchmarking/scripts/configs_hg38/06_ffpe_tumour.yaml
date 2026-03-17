@@ -9,7 +9,7 @@ output:
 sample:
   name: FFPE_TUMOUR
   read_length: 150
-  coverage: 60.0
+  coverage: 5.0
 fragment:
   model: normal
   mean: 280.0
