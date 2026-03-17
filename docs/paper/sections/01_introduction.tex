@@ -1,0 +1,25 @@
+\section{Introduction}
+\label{sec:intro}
+
+Variant callers, UMI deduplication tools, copy number estimators, and liquid-biopsy algorithms must be benchmarked against datasets with complete ground truth.
+Real patient data cannot provide this.
+Synthetic simulation fills the gap.
+
+Cancer sequencing introduces challenges that generic read simulators do not address: tumour-normal cell mixtures parametrised by purity and clonal architecture, allele-frequency heterogeneity from sub-clonal evolution, copy number alterations affecting both coverage and effective VAF, a spectrum of variant types (SNV, indel, MNV, SV, CNV), library artefacts such as FFPE deamination and oxidative damage, and cfDNA fragmentation profiles for liquid biopsy.
+
+No single existing tool covers this space.
+BAMSurgeon\autocite{ewing2015bamsurgeon} spikes variants into existing BAMs but uses deterministic VAF assignment.
+ART\autocite{huang2012art} and NEAT\autocite{stephens2016neat} generate reads de novo but lack tumour models and variant injection.
+ReSeq\autocite{schmeing2021reseq} achieves high read-level realism but supports no variant or cancer features.
+No genome-wide UMI or duplex simulator exists.
+No tool combines cfDNA fragmentation with somatic variant spike-in.
+
+\varforge{} addresses these gaps in a single binary.
+The contributions are:
+\begin{enumerate}[leftmargin=*, label=(\roman*), nosep]
+  \item A unified pipeline covering de-novo reads, variant injection, tumour modelling, UMI/duplex simulation, cfDNA fragmentation, and library artefacts, all via YAML configuration.
+  \item The first genome-wide UMI and duplex sequencing simulator.
+  \item The first in-silico cfDNA generator with somatic variant support.
+  \item Stochastic VAF sampling via per-read Bernoulli trials.
+  \item A streaming Rust implementation with bounded memory.
+\end{enumerate}

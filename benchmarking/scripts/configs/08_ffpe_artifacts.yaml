@@ -1,0 +1,44 @@
+# Benchmark 08: FFPE artifacts - 10MB ref, 30x, FFPE + oxoG damage
+reference: /home/trent/tfiles/code/varforge/benchmark_output/ref_10mb.fa
+
+output:
+  directory: /home/trent/tfiles/code/varforge/benchmark_output/runs/08_ffpe_artifacts
+  fastq: true
+  bam: false
+  truth_vcf: true
+  manifest: true
+
+sample:
+  name: FFPE
+  read_length: 150
+  coverage: 30.0
+
+fragment:
+  model: normal
+  mean: 180.0
+  sd: 60.0
+
+quality:
+  mean_quality: 33
+  tail_decay: 0.005
+
+tumour:
+  purity: 0.40
+  ploidy: 2
+
+mutations:
+  random:
+    count: 500
+    vaf_min: 0.05
+    vaf_max: 0.40
+    snv_fraction: 0.80
+    indel_fraction: 0.15
+    mnv_fraction: 0.05
+
+artifacts:
+  ffpe_damage_rate: 0.02
+  oxog_rate: 0.01
+  duplicate_rate: 0.25
+  pcr_error_rate: 0.001
+
+seed: 1

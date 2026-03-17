@@ -1,0 +1,38 @@
+# Benchmark 02: With variants - 10MB ref, 30x, 500 random SNVs/indels
+reference: /home/trent/tfiles/code/varforge/benchmark_output/ref_10mb.fa
+
+output:
+  directory: /home/trent/tfiles/code/varforge/benchmark_output/runs/02_with_variants
+  fastq: true
+  bam: false
+  truth_vcf: true
+  manifest: true
+
+sample:
+  name: WITH_VARIANTS
+  read_length: 150
+  coverage: 30.0
+
+fragment:
+  model: normal
+  mean: 300.0
+  sd: 50.0
+
+quality:
+  mean_quality: 36
+  tail_decay: 0.003
+
+tumour:
+  purity: 0.70
+  ploidy: 2
+
+mutations:
+  random:
+    count: 500
+    vaf_min: 0.05
+    vaf_max: 0.50
+    snv_fraction: 0.80
+    indel_fraction: 0.15
+    mnv_fraction: 0.05
+
+seed: 1

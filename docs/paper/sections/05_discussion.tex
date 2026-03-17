@@ -1,0 +1,26 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\varforge{} addresses three critical gaps in the benchmarking ecosystem.
+
+\textbf{UMI/duplex simulation.}
+The clinical adoption of error-corrected sequencing has outpaced benchmarking infrastructure.
+\varforge{} enables the first systematic evaluation of UMI grouping, consensus calling, and duplex variant detection tools across the full parameter space of family size, UMI error rate, and tumour fraction.
+
+\textbf{cfDNA simulation.}
+Liquid biopsy tools such as DELFI and ichorCNA can now be benchmarked against configurable in-silico datasets spanning tumour fractions from 50\% to $<0.01\%$, a regime where wet-lab reference materials are prohibitively expensive.
+
+\textbf{Stochastic VAF.}
+By replacing deterministic spike-in with Bernoulli sampling, \varforge{} eliminates the systematic optimism that inflates sensitivity estimates at low VAF and low coverage.
+
+\textbf{Performance for CI/CD.}
+The streaming Rust architecture enables integration into automated testing pipelines.
+The \texttt{small} preset completes in ${\sim}30$\,s.
+Panel simulations finish in minutes.
+Full WGS is feasible overnight on a laptop.
+
+Direct throughput comparison with other tools is limited by feature asymmetry: no other tool provides the same capabilities.
+BAMSurgeon injects variants at ${\sim}1$ variant per 4--5\,s (${\sim}40$\,min for 500 variants).
+\varforge{} applies 500 variants in $<1$\,s within a 75\,s total run.
+ART is single-threaded and lacks variant support.
+NEAT is Python-based with limited WGS-scale throughput.

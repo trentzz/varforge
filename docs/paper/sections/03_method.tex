@@ -1,0 +1,125 @@
+\section{Method}
+\label{sec:method}
+
+\subsection{Architecture}
+
+Figure~\ref{fig:pipeline} shows the pipeline.
+A YAML configuration drives all parameters.
+The reference genome is loaded and shared via \texttt{Arc}.
+Variants come from VCF or stochastic generation.
+The genome is partitioned into regions (one per chromosome by default), each processed by a Rayon\autocite{rayon} worker thread.
+Workers send completed batches through a bounded \texttt{crossbeam-channel} (default depth 64) to a dedicated writer thread that produces FASTQ, BAM, and truth VCF output.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+    node distance = 1.2cm and 1.8cm,
+    box/.style    = {draw, rounded corners=3pt, minimum width=2.6cm,
+                     minimum height=0.7cm, align=center, font=\small},
+    io/.style     = {draw, trapezium, trapezium left angle=70,
+                     trapezium right angle=110, minimum width=2.2cm,
+                     minimum height=0.6cm, align=center, font=\small},
+    worker/.style = {draw, dashed, rounded corners=5pt, inner sep=6pt},
+    arr/.style    = {-Stealth, thick},
+  ]
+  \node[io, fill=blue!10] (cfg) {YAML Config};
+  \node[io, fill=blue!10, right=1.5cm of cfg] (ref) {Reference};
+  \node[io, fill=blue!10, right=1.5cm of ref] (vcf) {VCF};
+  \node[box, fill=blue!5, below=1.0cm of ref] (parse) {Config + Reference\\Loading};
+  \draw[arr] (cfg) -- (parse);
+  \draw[arr] (ref) -- (parse);
+  \draw[arr] (vcf) -- (parse);
+  \node[box, fill=orange!15, below=0.9cm of parse] (part) {Region Partitioning};
+  \draw[arr] (parse) -- (part);
+  \node[box, fill=green!10, below left=1.0cm and -0.3cm of part, minimum width=1.9cm] (frag) {Fragment\\Sampling};
+  \node[box, fill=green!10, right=0.4cm of frag, minimum width=1.9cm] (spike) {Variant\\Spike-In};
+  \node[box, fill=green!10, right=0.4cm of spike, minimum width=1.9cm] (qual) {Quality\\Model};
+  \node[box, fill=green!10, right=0.4cm of qual, minimum width=1.9cm] (art) {UMI \&\\Artefacts};
+  \begin{scope}[on background layer]
+    \node[worker, fill=green!3, fit=(frag)(spike)(qual)(art),
+          label={[font=\footnotesize\itshape]above:Rayon workers (one per region)}] {};
+  \end{scope}
+  \draw[arr] (part) -- (frag);
+  \draw[arr] (frag) -- (spike);
+  \draw[arr] (spike) -- (qual);
+  \draw[arr] (qual) -- (art);
+  \node[box, fill=orange!25, below=1.2cm of spike, minimum width=3.0cm] (chan) {Bounded Channel\\(depth=64)};
+  \draw[arr] (art) -- (chan);
+  \node[box, fill=red!10, below=0.8cm of chan, minimum width=2.5cm] (writer) {Writer Thread};
+  \draw[arr] (chan) -- (writer);
+  \node[io, fill=yellow!20, below left=1.0cm and 1.2cm of writer] (fq) {FASTQ.gz};
+  \node[io, fill=yellow!20, below=1.0cm of writer] (bam) {BAM};
+  \node[io, fill=yellow!20, below right=1.0cm and 1.2cm of writer] (truth) {Truth VCF};
+  \draw[arr] (writer) -- (fq);
+  \draw[arr] (writer) -- (bam);
+  \draw[arr] (writer) -- (truth);
+\end{tikzpicture}
+\caption{VarForge processing pipeline. Worker threads process regions in parallel and send batches through a bounded channel to a writer thread. Memory is bounded by channel depth, not dataset size.}
+\label{fig:pipeline}
+\end{figure}
+
+\subsection{Read generation}
+
+Fragment lengths follow $\mathcal{N}(\mu, \sigma^2)$ for standard libraries or a cfDNA mixture model (Section~\ref{sec:cfdna}).
+Start positions are drawn uniformly within each region.
+Two quality models are supported: a parametric model with per-cycle decay ($\bar{Q}(c) = Q_0 - \lambda c$), and an empirical model learned from a real BAM via \texttt{learn-profile}.
+
+\subsection{Stochastic VAF sampling}
+
+For each read overlapping a variant site, \varforge{} draws independently:
+\begin{equation}
+  X_i \sim \text{Bernoulli}(\text{VAF}_\text{eff})
+  \label{eq:bernoulli}
+\end{equation}
+The alt-read count follows $A \sim \text{Binomial}(D, \text{VAF}_\text{eff})$, matching the natural sampling variance of real sequencing.
+BAMSurgeon uses deterministic $A = \lfloor D \cdot \text{VAF} \rfloor$.
+
+\subsection{Variant spike-in}
+
+SNVs replace reference bases.
+Indels modify sequence and CIGAR with local re-alignment.
+MNVs are applied atomically to preserve cis-phasing.
+Structural variants (deletions, insertions, inversions, tandem duplications, translocations) produce split reads and discordant pairs with correct CIGAR strings, SA tags, and mate coordinates.
+Copy number variants scale read depth by $(p \cdot \text{CN}_\text{tumor} + (1-p) \cdot 2) / 2$ and adjust effective VAF accordingly.
+
+\subsection{Tumour modelling}
+
+Heterogeneity is a directed tree of clones, each with a cancer cell fraction (CCF).
+The effective VAF integrates purity, ploidy, CCF, and copy number:
+\begin{equation}
+  \text{VAF}_\text{eff} = \frac{\text{CCF} \times m \times p}{p \cdot \text{CN}_\text{tumor} + (1-p) \cdot \text{CN}_\text{normal}}
+  \label{eq:vaf}
+\end{equation}
+
+\subsection{UMI and duplex simulation}
+
+Each molecule receives a UMI barcode of configurable length.
+Family sizes follow a log-normal distribution reflecting real PCR kinetics.
+In duplex mode\autocite{schmitt2012duplex}, each double-stranded molecule yields two strand families with swapped UMI pairs $(\alpha,\beta)$ and $(\beta,\alpha)$.
+True mutations appear on both strands.
+Artefacts are strand-specific, reproducing the error suppression that makes duplex sequencing valuable.
+
+\subsection{Cell-free DNA fragmentation}
+\label{sec:cfdna}
+
+Fragment lengths follow a four-component Gaussian mixture:
+\begin{equation}
+  P(L) = \sum_{k=1}^{4} w_k \cdot \mathcal{N}(L;\, \mu_k,\, \sigma_k^2)
+  \label{eq:cfdna}
+\end{equation}
+Components represent sub-nucleosomal (${\sim}143$\,bp), mono-nucleosomal (${\sim}167$\,bp), di-nucleosomal (${\sim}334$\,bp), and tri-nucleosomal (${\sim}500$\,bp) populations.
+Below 167\,bp, a 10\,bp sinusoidal periodicity matching the DNA helical repeat is applied\autocite{snyder2016cfdna_nucleosome}.
+Tumour-derived fragments are shifted shorter (${\sim}143$--147\,bp peak)\autocite{lo2010cfdna}, enabling fragment-based tumour fraction estimation by tools such as DELFI.
+
+\subsection{Library artefacts}
+
+FFPE deamination: C$>$T transitions at a configurable rate, preferentially at fragment ends.
+Oxidative damage: G$>$T transversions with strand-specific bias.
+PCR errors: per-cycle substitution errors propagated through family genealogies.
+GC bias: fragment-level coverage modulation with an empirical U-shaped weighting.
+
+\subsection{Implementation}
+
+\varforge{} uses a pure-Rust dependency stack: noodles\autocite{noodles} for BAM/VCF/FASTA, \texttt{seq\_io} for FASTQ, \texttt{flate2} for compression.
+No C libraries are required, enabling single-binary distribution.
+Deterministic seeding uses $\text{seed}_r = H(\text{seed}_\text{global}, r)$ per region, ensuring reproducibility independent of thread scheduling.

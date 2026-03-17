@@ -1,0 +1,16 @@
+\section{Future Work}
+\label{sec:future}
+
+Three directions follow directly from current limitations.
+
+\textbf{Long-read sequencing.}
+Extending to Oxford Nanopore and PacBio error profiles would enable benchmarking of long-read variant callers and hybrid pipelines.
+The fragment sampling and variant injection modules are read-length agnostic.
+The main work is in quality score modelling.
+
+\textbf{Enhanced error profiles.}
+The current \texttt{learn-profile} captures per-cycle quality distributions but does not reproduce the full correlation structure modelled by ReSeq\autocite{schmeing2021reseq}.
+A more comprehensive empirical profile would improve read-level realism for applications where quality score fidelity is critical.
+
+\textbf{Cloud-native deployment.}
+A Nextflow wrapper distributing regions across a cluster would extend \varforge{} to population-scale benchmarking without changes to the core tool.

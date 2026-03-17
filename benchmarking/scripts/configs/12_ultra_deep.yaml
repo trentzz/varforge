@@ -1,0 +1,48 @@
+# Benchmark 12: Ultra-deep - 1MB ref, 500x, UMI duplex, 20 variants
+# Note: reduced from 2000x to 500x for memory feasibility (12GB RAM)
+# At 500x on 1MB this generates ~5M read pairs
+reference: /home/trent/tfiles/code/varforge/benchmark_output/ref_1mb.fa
+
+output:
+  directory: /home/trent/tfiles/code/varforge/benchmark_output/runs/12_ultra_deep
+  fastq: true
+  bam: false
+  truth_vcf: true
+  manifest: true
+
+sample:
+  name: ULTRA_DEEP
+  read_length: 150
+  coverage: 500.0
+
+fragment:
+  model: normal
+  mean: 300.0
+  sd: 50.0
+
+quality:
+  mean_quality: 36
+  tail_decay: 0.003
+
+tumour:
+  purity: 0.50
+  ploidy: 2
+
+mutations:
+  random:
+    count: 20
+    vaf_min: 0.001
+    vaf_max: 0.10
+    snv_fraction: 0.80
+    indel_fraction: 0.15
+    mnv_fraction: 0.05
+
+umi:
+  length: 8
+  duplex: true
+  pcr_cycles: 10
+  family_size_mean: 3.0
+  family_size_sd: 1.5
+  inline: false
+
+seed: 1

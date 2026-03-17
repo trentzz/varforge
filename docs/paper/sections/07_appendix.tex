@@ -1,0 +1,72 @@
+\appendix
+
+\section{Extended Feature Comparison}
+\label{app:comparison}
+
+Table~\ref{tab:comparison-full} compares all major simulators across 13 capabilities.
+
+\begin{table}[H]
+\centering
+\caption{Extended feature comparison. \checkmark~= supported; $\circ$~= partial; $\times$~= unsupported.}
+\label{tab:comparison-full}
+\small
+\setlength{\tabcolsep}{3pt}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lcccccccccccccc@{}}
+\toprule
+\textbf{Tool} &
+  \rotatebox{70}{\makecell{De-novo\\reads}} &
+  \rotatebox{70}{SNV} &
+  \rotatebox{70}{Indel} &
+  \rotatebox{70}{SV} &
+  \rotatebox{70}{CNV} &
+  \rotatebox{70}{\makecell{Tumour\\model}} &
+  \rotatebox{70}{UMI} &
+  \rotatebox{70}{cfDNA} &
+  \rotatebox{70}{\makecell{Lib.\\artefacts}} &
+  \rotatebox{70}{\makecell{Stoch.\\VAF}} &
+  \rotatebox{70}{\makecell{GC\\bias}} &
+  \rotatebox{70}{Speed} &
+  \rotatebox{70}{\makecell{Active\\(2025)}} \\
+\midrule
+BAMSurgeon      & $\times$ & \checkmark & \checkmark & \checkmark & $\times$ & $\circ$    & $\times$ & $\times$ & $\times$   & $\times$   & $\times$   & Slow & Low  \\
+SomatoSim       & $\times$ & \checkmark & $\times$   & $\times$   & $\times$ & $\times$   & $\times$ & $\times$ & $\times$   & $\times$   & $\times$   & Fast & No   \\
+stochasticSim   & $\times$ & \checkmark & $\times$   & $\times$   & $\times$ & \checkmark & $\times$ & $\times$ & \checkmark & \checkmark & $\times$   & Med  & Low  \\
+ART             & \checkmark & $\times$ & $\times$   & $\times$   & $\times$ & $\times$   & $\times$ & $\times$ & $\times$   & ---        & $\times$   & Fast & No   \\
+NEAT            & \checkmark & \checkmark & \checkmark & $\circ$  & $\times$ & $\times$   & $\times$ & $\times$ & $\times$   & $\times$   & $\times$   & Med  & Yes  \\
+ReSeq           & \checkmark & $\times$ & $\times$   & $\times$   & $\times$ & $\times$   & $\times$ & $\times$ & $\circ$    & ---        & \checkmark & Med  & Yes  \\
+VarSim          & \checkmark & \checkmark & \checkmark & \checkmark & $\times$ & $\circ$  & $\times$ & $\times$ & $\times$   & $\times$   & $\times$   & Med  & No   \\
+MOV\&RSim       & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & $\times$ & $\times$ & $\times$ & $\circ$  & $\times$   & Med  & New  \\
+GENOMICON-Seq   & \checkmark & \checkmark & $\times$ & $\times$   & $\times$ & $\circ$    & $\times$ & $\times$ & \checkmark & $\times$   & $\times$   & Med  & New  \\
+PSiTE           & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & $\times$ & $\times$ & $\times$ & $\times$ & $\times$   & Slow & Low  \\
+\midrule
+\textbf{VarForge} & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \textbf{Fast} & \textbf{Active} \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\section{Coverage Scaling Data}
+\label{app:benchmarks}
+
+Table~\ref{tab:cov-detail} reports the full coverage scaling results.
+
+\begin{table}[H]
+\centering
+\caption{Coverage scaling (1\,MB reference, 100 mutations, 12 threads, mean of 3 runs).}
+\label{tab:cov-detail}
+\small
+\begin{tabular}{@{}rrrrrr@{}}
+\toprule
+Coverage & Read pairs & Wall (s) & Peak RAM (MB) & Pairs/s \\
+\midrule
+ 1x  &    6,735 &  0.25 &    37 & 26,940 \\
+ 5x  &   33,675 &  1.30 &    81 & 25,904 \\
+10x  &   67,350 &  2.54 &   137 & 26,516 \\
+30x  &  202,050 &  7.18 &   362 & 28,140 \\
+50x  &  336,750 & 11.88 &   586 & 28,345 \\
+100x &  673,335 & 23.81 & 1,146 & 28,279 \\
+200x & 1,346,670 & 47.74 & 2,271 & 28,209 \\
+\bottomrule
+\end{tabular}
+\end{table}
