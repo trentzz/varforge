@@ -65,6 +65,19 @@ Confirms nucleosomal fragment length distribution is applied to real sequence.
 Simulates a formalin-fixed tumour sample.
 Confirms FFPE deamination and oxidative damage are applied to real sequence.
 
+### 7. WGS baseline (30x)
+
+Full chr22 at clinical WGS depth.
+~5M read pairs, ~2 GB expected peak RAM.
+Validates throughput and bounded memory at realistic whole-genome scale.
+
+### 8. Targeted panel with BED filter (200x, 1 Mbp target)
+
+Simulates a targeted panel run restricted to a 1 Mbp target region (chr22:30000000-31000000).
+With BED filtering, only 1/51 of chr22 is simulated.
+At 200x, generates ~1.3M read pairs in roughly the same time as the 5x full-chromosome run.
+Demonstrates that high-coverage panel simulation is now feasible without full-chromosome overhead.
+
 ## Metrics
 
 For each experiment:

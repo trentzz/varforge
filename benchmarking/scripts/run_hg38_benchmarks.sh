@@ -58,6 +58,8 @@ configs = [
     "04_twist_duplex",
     "05_cfdna",
     "06_ffpe_tumour",
+    "07_wgs_30x",
+    "08_panel_bed_200x",
 ]
 
 def peak_rss_kb(pid):
@@ -77,11 +79,13 @@ def run_config(name, seed=42):
     tmp_cfg = os.path.join(timing_dir, f"{name}.yaml")
     tmp_out = f"/tmp/hg38_run_{name}"
 
-    # Patch reference path to absolute
+    # Patch paths to absolute (reference and optional regions_bed)
     with open(orig) as f:
         content = f.read()
     content = content.replace("reference: chr22.fa",
                               f"reference: {cwd}/benchmarking/chr22.fa")
+    content = content.replace("regions_bed: panel_chr22_1mbp.bed",
+                              f"regions_bed: {cwd}/benchmarking/scripts/configs_hg38/panel_chr22_1mbp.bed")
     with open(tmp_cfg, "w") as f:
         f.write(content)
 

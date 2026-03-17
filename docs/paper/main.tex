@@ -58,9 +58,10 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-\varforge{} is a unified framework for synthetic cancer sequencing data generation.
-It combines de-novo reads, variant injection, tumour modelling, UMI/duplex simulation, cfDNA fragmentation, and library artefacts in a single Rust binary.
-The streaming architecture bounds memory independently of dataset size, making full human genome simulation feasible on standard workstations.
+\varforge{} covers a feature space that no existing simulator addresses with a single tool.
+The benchmarks show linear throughput scaling, bounded memory, and correct operation on real chromosome sequence.
+The current limitation is the absence of output correctness validation: VAF accuracy, cfDNA fragment distributions, and UMI family structure are not yet independently verified.
+This validation is the most important next step before the tool can be used to benchmark callers with confidence.
 Source code, documentation, and example configurations are available under the MIT licence at \url{https://github.com/trentzz/varforge}.
 
 \printbibliography

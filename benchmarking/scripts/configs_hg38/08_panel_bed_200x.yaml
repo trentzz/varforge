@@ -1,0 +1,24 @@
+reference: chr22.fa
+regions_bed: panel_chr22_1mbp.bed
+output:
+  directory: /tmp/hg38_bench_placeholder
+  fastq: true
+  bam: false
+  truth_vcf: false
+  manifest: true
+sample:
+  name: PANEL_BED_200X
+  read_length: 150
+  coverage: 200.0
+fragment:
+  model: normal
+  mean: 200.0
+  sd: 30.0
+chromosomes:
+  - chr22
+mutations:
+  random:
+    count: 100
+    vaf_min: 0.01
+    vaf_max: 0.3
+seed: 42
