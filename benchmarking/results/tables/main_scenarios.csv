@@ -1,0 +1,16 @@
+config,iteration,wall_secs,peak_mem_kb
+01_baseline,1,139.785,867896
+01_baseline,2,139.443,867912
+01_baseline,3,139.441,867844
+02_with_variants,1,139.83,869196
+02_with_variants,2,139.216,869060
+02_with_variants,3,139.967,868436
+04_very_high_coverage,1,92.735,576428
+04_very_high_coverage,2,93.022,576256
+04_very_high_coverage,3,92.491,576216
+07_cfdna,1,92.731,684936
+07_cfdna,2,92.615,685020
+07_cfdna,3,92.104,685004
+08_ffpe_artifacts,1,171.14,1170252
+08_ffpe_artifacts,2,169.904,1170344
+08_ffpe_artifacts,3,170.551,1168340

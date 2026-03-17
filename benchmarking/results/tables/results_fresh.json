@@ -1,0 +1,425 @@
+{
+  "metadata": {
+    "date": "2026-03-17",
+    "binary": "./target/release/varforge",
+    "iterations_per_config": 3,
+    "timing_method": "proc_vmhwm_polling",
+    "notes": "Skipped 05_umi_simplex, 06_umi_duplex, 09_all_features, 10_large_genome, 12_ultra_deep (>12GB RAM)"
+  },
+  "coverage_scaling": {
+    "1x": {
+      "avg_wall_secs": 0.498,
+      "avg_peak_mem_kb": 10276.0,
+      "min_wall_secs": 0.496,
+      "max_wall_secs": 0.5,
+      "iterations": 3,
+      "raw_wall_secs": [
+        0.498,
+        0.5,
+        0.496
+      ],
+      "raw_peak_mem_kb": [
+        10292,
+        10392,
+        10144
+      ]
+    },
+    "5x": {
+      "avg_wall_secs": 2.458,
+      "avg_peak_mem_kb": 21686.7,
+      "min_wall_secs": 2.438,
+      "max_wall_secs": 2.475,
+      "iterations": 3,
+      "raw_wall_secs": [
+        2.475,
+        2.438,
+        2.462
+      ],
+      "raw_peak_mem_kb": [
+        21784,
+        21572,
+        21704
+      ]
+    },
+    "10x": {
+      "avg_wall_secs": 4.939,
+      "avg_peak_mem_kb": 35945.3,
+      "min_wall_secs": 4.911,
+      "max_wall_secs": 4.956,
+      "iterations": 3,
+      "raw_wall_secs": [
+        4.911,
+        4.956,
+        4.951
+      ],
+      "raw_peak_mem_kb": [
+        35900,
+        36028,
+        35908
+      ]
+    },
+    "30x": {
+      "avg_wall_secs": 14.523,
+      "avg_peak_mem_kb": 92897.3,
+      "min_wall_secs": 14.467,
+      "max_wall_secs": 14.562,
+      "iterations": 3,
+      "raw_wall_secs": [
+        14.467,
+        14.562,
+        14.54
+      ],
+      "raw_peak_mem_kb": [
+        92920,
+        92756,
+        93016
+      ]
+    },
+    "50x": {
+      "avg_wall_secs": 24.026,
+      "avg_peak_mem_kb": 149804.0,
+      "min_wall_secs": 23.978,
+      "max_wall_secs": 24.056,
+      "iterations": 3,
+      "raw_wall_secs": [
+        23.978,
+        24.044,
+        24.056
+      ],
+      "raw_peak_mem_kb": [
+        149780,
+        149744,
+        149888
+      ]
+    },
+    "100x": {
+      "avg_wall_secs": 47.97,
+      "avg_peak_mem_kb": 291960.0,
+      "min_wall_secs": 47.897,
+      "max_wall_secs": 48.045,
+      "iterations": 3,
+      "raw_wall_secs": [
+        47.897,
+        47.968,
+        48.045
+      ],
+      "raw_peak_mem_kb": [
+        292052,
+        291856,
+        291972
+      ]
+    },
+    "200x": {
+      "avg_wall_secs": 98.864,
+      "avg_peak_mem_kb": 576406.7,
+      "min_wall_secs": 95.715,
+      "max_wall_secs": 104.428,
+      "iterations": 3,
+      "raw_wall_secs": [
+        96.448,
+        104.428,
+        95.715
+      ],
+      "raw_peak_mem_kb": [
+        576472,
+        576404,
+        576344
+      ]
+    }
+  },
+  "feature_overhead": {
+    "base": {
+      "avg_wall_secs": 13.905,
+      "avg_peak_mem_kb": 92538.7,
+      "min_wall_secs": 13.847,
+      "max_wall_secs": 13.967,
+      "iterations": 3,
+      "raw_wall_secs": [
+        13.847,
+        13.967,
+        13.902
+      ],
+      "raw_peak_mem_kb": [
+        92572,
+        92532,
+        92512
+      ]
+    },
+    "variants": {
+      "avg_wall_secs": 13.932,
+      "avg_peak_mem_kb": 93608.0,
+      "min_wall_secs": 13.868,
+      "max_wall_secs": 14.014,
+      "iterations": 3,
+      "raw_wall_secs": [
+        14.014,
+        13.915,
+        13.868
+      ],
+      "raw_peak_mem_kb": [
+        93536,
+        93760,
+        93528
+      ]
+    },
+    "umi": {
+      "avg_wall_secs": 33.017,
+      "avg_peak_mem_kb": 279352.0,
+      "min_wall_secs": 33.009,
+      "max_wall_secs": 33.028,
+      "iterations": 3,
+      "raw_wall_secs": [
+        33.028,
+        33.009,
+        33.015
+      ],
+      "raw_peak_mem_kb": [
+        279568,
+        278648,
+        279840
+      ]
+    },
+    "artifacts": {
+      "avg_wall_secs": 15.881,
+      "avg_peak_mem_kb": 107813.3,
+      "min_wall_secs": 15.804,
+      "max_wall_secs": 15.996,
+      "iterations": 3,
+      "raw_wall_secs": [
+        15.996,
+        15.844,
+        15.804
+      ],
+      "raw_peak_mem_kb": [
+        107780,
+        107680,
+        107980
+      ]
+    },
+    "gc_bias": {
+      "avg_wall_secs": 13.92,
+      "avg_peak_mem_kb": 92614.7,
+      "min_wall_secs": 13.88,
+      "max_wall_secs": 13.951,
+      "iterations": 3,
+      "raw_wall_secs": [
+        13.929,
+        13.951,
+        13.88
+      ],
+      "raw_peak_mem_kb": [
+        92612,
+        92568,
+        92664
+      ]
+    },
+    "all": {
+      "avg_wall_secs": 40.67,
+      "avg_peak_mem_kb": 323834.7,
+      "min_wall_secs": 40.642,
+      "max_wall_secs": 40.709,
+      "iterations": 3,
+      "raw_wall_secs": [
+        40.659,
+        40.709,
+        40.642
+      ],
+      "raw_peak_mem_kb": [
+        323480,
+        324092,
+        323932
+      ]
+    }
+  },
+  "main_benchmarks": {
+    "01_baseline": {
+      "avg_wall_secs": 139.556,
+      "avg_peak_mem_kb": 867884.0,
+      "min_wall_secs": 139.441,
+      "max_wall_secs": 139.785,
+      "iterations": 3,
+      "raw_wall_secs": [
+        139.785,
+        139.443,
+        139.441
+      ],
+      "raw_peak_mem_kb": [
+        867896,
+        867912,
+        867844
+      ]
+    },
+    "02_with_variants": {
+      "avg_wall_secs": 139.671,
+      "avg_peak_mem_kb": 868897.3,
+      "min_wall_secs": 139.216,
+      "max_wall_secs": 139.967,
+      "iterations": 3,
+      "raw_wall_secs": [
+        139.83,
+        139.216,
+        139.967
+      ],
+      "raw_peak_mem_kb": [
+        869196,
+        869060,
+        868436
+      ]
+    },
+    "04_very_high_coverage": {
+      "avg_wall_secs": 92.749,
+      "avg_peak_mem_kb": 576300.0,
+      "min_wall_secs": 92.491,
+      "max_wall_secs": 93.022,
+      "iterations": 3,
+      "raw_wall_secs": [
+        92.735,
+        93.022,
+        92.491
+      ],
+      "raw_peak_mem_kb": [
+        576428,
+        576256,
+        576216
+      ]
+    },
+    "07_cfdna": {
+      "avg_wall_secs": 92.483,
+      "avg_peak_mem_kb": 684986.7,
+      "min_wall_secs": 92.104,
+      "max_wall_secs": 92.731,
+      "iterations": 3,
+      "raw_wall_secs": [
+        92.731,
+        92.615,
+        92.104
+      ],
+      "raw_peak_mem_kb": [
+        684936,
+        685020,
+        685004
+      ]
+    },
+    "08_ffpe_artifacts": {
+      "avg_wall_secs": 170.532,
+      "avg_peak_mem_kb": 1169645.3,
+      "min_wall_secs": 169.904,
+      "max_wall_secs": 171.14,
+      "iterations": 3,
+      "raw_wall_secs": [
+        171.14,
+        169.904,
+        170.551
+      ],
+      "raw_peak_mem_kb": [
+        1170252,
+        1170344,
+        1168340
+      ]
+    }
+  },
+  "thread_scaling": {
+    "1": {
+      "avg_wall_secs": 140.054,
+      "avg_peak_mem_kb": 859773.3,
+      "min_wall_secs": 139.551,
+      "max_wall_secs": 140.466,
+      "iterations": 3,
+      "raw_wall_secs": [
+        139.551,
+        140.466,
+        140.145
+      ],
+      "raw_peak_mem_kb": [
+        859772,
+        859780,
+        859768
+      ]
+    },
+    "2": {
+      "avg_wall_secs": 143.738,
+      "avg_peak_mem_kb": 860749.3,
+      "min_wall_secs": 141.892,
+      "max_wall_secs": 146.75,
+      "iterations": 3,
+      "raw_wall_secs": [
+        142.573,
+        141.892,
+        146.75
+      ],
+      "raw_peak_mem_kb": [
+        860856,
+        860928,
+        860464
+      ]
+    },
+    "4": {
+      "avg_wall_secs": 158.791,
+      "avg_peak_mem_kb": 862480.0,
+      "min_wall_secs": 146.275,
+      "max_wall_secs": 167.601,
+      "iterations": 3,
+      "raw_wall_secs": [
+        146.275,
+        162.496,
+        167.601
+      ],
+      "raw_peak_mem_kb": [
+        862644,
+        862924,
+        861872
+      ]
+    },
+    "6": {
+      "avg_wall_secs": 144.954,
+      "avg_peak_mem_kb": 864598.7,
+      "min_wall_secs": 144.439,
+      "max_wall_secs": 145.529,
+      "iterations": 3,
+      "raw_wall_secs": [
+        144.893,
+        144.439,
+        145.529
+      ],
+      "raw_peak_mem_kb": [
+        864544,
+        864576,
+        864676
+      ]
+    },
+    "8": {
+      "avg_wall_secs": 145.941,
+      "avg_peak_mem_kb": 866608.0,
+      "min_wall_secs": 144.324,
+      "max_wall_secs": 147.407,
+      "iterations": 3,
+      "raw_wall_secs": [
+        144.324,
+        146.093,
+        147.407
+      ],
+      "raw_peak_mem_kb": [
+        866068,
+        866752,
+        867004
+      ]
+    },
+    "12": {
+      "avg_wall_secs": 159.697,
+      "avg_peak_mem_kb": 869054.7,
+      "min_wall_secs": 157.583,
+      "max_wall_secs": 162.604,
+      "iterations": 3,
+      "raw_wall_secs": [
+        157.583,
+        158.903,
+        162.604
+      ],
+      "raw_peak_mem_kb": [
+        869076,
+        869032,
+        869056
+      ]
+    }
+  }
+}
