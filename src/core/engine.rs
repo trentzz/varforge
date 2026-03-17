@@ -245,7 +245,20 @@ impl SimulationEngine {
                     ctdna_fraction,
                 ))
             }
-            _ => Sampler::Normal(NormalFragmentSampler::new(
+            FragmentModel::Custom => {
+                tracing::warn!(
+                    "fragment.model = custom is not yet implemented; \
+                     falling back to normal (mean={}, sd={}). \
+                     Use 'normal' to suppress this warning.",
+                    self.config.fragment.mean,
+                    self.config.fragment.sd
+                );
+                Sampler::Normal(NormalFragmentSampler::new(
+                    self.config.fragment.mean,
+                    self.config.fragment.sd,
+                ))
+            }
+            FragmentModel::Normal => Sampler::Normal(NormalFragmentSampler::new(
                 self.config.fragment.mean,
                 self.config.fragment.sd,
             )),
