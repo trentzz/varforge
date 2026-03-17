@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Compile VarForge benchmark timing results into results.json.
-Run from /home/trent/tfiles/code/varforge/
+Run from 
 """
 import json, os, re, glob, subprocess
 

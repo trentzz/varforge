@@ -1,8 +1,8 @@
 # Benchmark 02: With variants - 10MB ref, 30x, 500 random SNVs/indels
-reference: /home/trent/tfiles/code/varforge/benchmark_output/ref_10mb.fa
+reference: benchmarking/ref_10mb.fa
 
 output:
-  directory: /home/trent/tfiles/code/varforge/benchmark_output/runs/02_with_variants
+  directory: benchmarking/runs/02_with_variants
   fastq: true
   bam: false
   truth_vcf: true

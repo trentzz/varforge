@@ -1,0 +1,22 @@
+\section{Background}
+\label{sec:background}
+
+Three concepts are load-bearing for the method sections that follow.
+
+\textbf{Variant allele frequency (VAF).}
+The fraction of sequencing reads at a locus that carry the alternate allele.
+In a tumour sample, VAF depends on tumour purity, ploidy, cancer cell fraction, and copy number.
+A heterozygous SNV in a pure diploid tumour has an expected VAF of 0.50.
+At 60\% purity, the same variant has an expected VAF of 0.30.
+
+\textbf{Unique molecular identifiers (UMIs).}
+Short random sequences (typically 4 to 14 bp) ligated to each DNA molecule before PCR amplification.
+After sequencing, reads sharing the same UMI and alignment position are grouped into families originating from one template molecule.
+Consensus calling across a family suppresses PCR and sequencing errors.
+Duplex sequencing extends this by tagging both strands of a double-stranded molecule independently, requiring agreement between strand-specific consensus reads before reporting a variant.
+
+\textbf{Cell-free DNA (cfDNA).}
+Short DNA fragments circulating in blood plasma, released by apoptosis and necrosis.
+Normal cfDNA has a characteristic fragment length distribution dominated by a mono-nucleosomal peak at ${\sim}167$\,bp (one nucleosome plus linker), with sub-nucleosomal and di-nucleosomal components.
+Tumour-derived cfDNA (ctDNA) fragments are shorter on average, peaking at ${\sim}143$--$147$\,bp.
+This size difference is exploited by fragment-based liquid biopsy tools.

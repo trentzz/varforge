@@ -1,10 +1,10 @@
 # Benchmark 12: Ultra-deep - 1MB ref, 500x, UMI duplex, 20 variants
 # Note: reduced from 2000x to 500x for memory feasibility (12GB RAM)
 # At 500x on 1MB this generates ~5M read pairs
-reference: /home/trent/tfiles/code/varforge/benchmark_output/ref_1mb.fa
+reference: benchmarking/ref_1mb.fa
 
 output:
-  directory: /home/trent/tfiles/code/varforge/benchmark_output/runs/12_ultra_deep
+  directory: benchmarking/runs/12_ultra_deep
   fastq: true
   bam: false
   truth_vcf: true

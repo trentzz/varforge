@@ -1,0 +1,18 @@
+reference: /home/trent/tfiles/code/varforge/benchmarking/chr22.fa
+output:
+  directory: /tmp/hg38_bench_placeholder
+  fastq: true
+  bam: false
+  truth_vcf: false
+  manifest: true
+sample:
+  name: WGS_BASELINE
+  read_length: 150
+  coverage: 30.0
+fragment:
+  model: normal
+  mean: 300.0
+  sd: 50.0
+chromosomes:
+  - chr22
+seed: 42
