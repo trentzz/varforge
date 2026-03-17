@@ -51,6 +51,7 @@ Figure~\ref{fig:throughput} compares throughput across scenarios.
 \label{tab:scenarios}
 \small
 \setlength{\tabcolsep}{3.5pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{@{}llrrlrr@{}}
 \toprule
 Config & Ref & Cov & Var. & Features & Wall (s) & \makecell{Peak\\RAM (GB)} \\
@@ -62,7 +63,8 @@ cfDNA            & 1\,MB  & 200x & 200  & cfDNA, 2\% pur. &  92.5 & 0.68 \\
 FFPE + oxoG      & 10\,MB & 30x  & 500  & artefacts       & 170.5 & 1.17 \\
 Panel + UMI      & 1\,MB  & 200x & 50   & UMI simplex     & 195.1 & 1.80 \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 \begin{figure}[t]
@@ -91,36 +93,44 @@ See Section~\ref{sec:discussion} for a discussion of when threading helps.
 
 \subsection{hg38 (chr22) benchmarks}
 
-Table~\ref{tab:hg38} reports performance on chromosome~22 from hg38 (${\sim}51$\,Mbp) at 5x coverage.
-All six configurations completed.
-The coverage was set to 5x rather than clinical depths (500x for panels, 200x for cfDNA) because \varforge{} does not yet support BED-based region filtering; the purpose of these benchmarks is to confirm correct operation on a real reference, not to generate high-coverage datasets (see Section~\ref{sec:future}).
-UMI configs (3--4) produce more output read pairs than the baseline because PCR family expansion is included in the output.
+Table~\ref{tab:hg38} reports performance on chromosome~22 from hg38 (${\sim}51$\,Mbp).
+Configs~1--6 run at 5x to confirm correct feature operation on real sequence.
+Config~7 runs at 30x to validate throughput and memory at realistic WGS depth.
+Config~8 demonstrates BED region filtering: restricting simulation to a 1\,Mbp target enables 200x panel coverage in 85\,s instead of the ${\sim}10$\,min a full-chromosome run would require.
+UMI configs (3--4) produce more read pairs than the baseline because PCR family expansion is included in the output.
+Peak RAM at 30x (4.21\,GB) exceeds the synthetic benchmark (0.87\,GB for 10\,MB at 30x) because chr22 has more pairs per region chunk, increasing the in-flight buffer state.
+This is consistent with bounded memory: the bound grows with concurrent batch size, not total dataset size.
 
 \begin{table}[t]
 \centering
-\caption{hg38 chr22 benchmarks (5x, 1 run each with fixed seed, 12 threads). A fixed seed produces deterministic output; repeated runs return the same result. UMI/duplex configs show higher read counts due to PCR family expansion and higher RAM from family tracking.}
+\caption{hg38 chr22 benchmarks (1 run each with fixed seed, 12 threads). Fixed seed produces deterministic output. Config~7: 30x WGS; Config~8: 1\,Mbp BED target at 200x.}
 \label{tab:hg38}
 \small
 \setlength{\tabcolsep}{3.5pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{@{}llrrrr@{}}
 \toprule
 \# & Config & Wall (s) & Peak RAM (GB) & Read pairs & Pairs/s \\
 \midrule
-1 & WGS baseline      &  96.6 & 0.72 &   847K & 8,772 \\
-2 & WGS + variants    &  96.6 & 0.72 &   847K & 8,772 \\
-3 & Panel UMI simplex & 233.1 & 2.26 & 2,540K & 10,894 \\
-4 & Twist duplex      & 298.6 & 3.00 & 3,389K & 11,349 \\
-5 & cfDNA liq.~biopsy &  96.6 & 0.85 &   847K & 8,772 \\
-6 & FFPE tumour       & 121.1 & 0.91 & 1,059K & 8,746 \\
+1 & WGS baseline (5x)       &   99.6 & 0.72 &   847K &  8,510 \\
+2 & WGS + variants (5x)     &  103.6 & 0.72 &   847K &  8,178 \\
+3 & Panel UMI simplex (5x)  &  234.1 & 2.26 & 2,540K & 10,851 \\
+4 & Twist duplex (5x)       &  299.2 & 3.00 & 3,389K & 11,328 \\
+5 & cfDNA liq.~biopsy (5x)  &   96.1 & 0.85 &   847K &  8,813 \\
+6 & FFPE tumour (5x)        &  120.6 & 0.91 & 1,059K &  8,782 \\
+7 & WGS baseline (30x)      &  595.3 & 4.21 & 5,082K &  8,537 \\
+8 & Panel BED 200x (1\,Mbp) &   85.5 & 0.56 &   667K &  7,796 \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 \subsection{Memory efficiency}
 
-Figure~\ref{fig:mem} shows per-pair memory is constant at ${\sim}0.45$\,KB across coverage depths above 10x.
-The streaming architecture bounds peak memory by channel depth and concurrent batch state rather than dataset size.
-A full human genome 30x WGS run produces ${\sim}600$M pairs, but only the in-flight batches must reside in memory at any one time, making it feasible on a standard workstation.
+Figure~\ref{fig:mem} shows per-pair memory at ${\sim}0.45$\,KB across coverage depths on the 1\,MB reference, confirming that coverage depth alone does not drive memory growth.
+On chr22 at 30x, the per-pair figure rises to ${\sim}0.85$\,KB because the larger chromosome produces more pairs per region chunk, increasing the in-flight buffer state.
+The bound is on concurrent batches rather than total pairs: a full human genome run at 30x would require roughly $4\times$ chr22's memory, placing it at ${\sim}17$\,GB on this benchmark machine.
+Reducing \texttt{performance.output\_buffer\_regions} from the default of 64 would lower this proportionally.
 
 \begin{figure}[t]
   \centering

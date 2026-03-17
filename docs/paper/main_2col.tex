@@ -1,0 +1,72 @@
+\documentclass[10pt, twocolumn]{article}
+\usepackage[margin=2cm]{geometry}
+\usepackage{times}
+\usepackage[hidelinks]{hyperref}
+\setlength{\columnsep}{0.6cm}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+
+%% Packages
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{makecell}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{xspace}
+\usepackage{url}
+
+%% Vancouver numbered citations
+\usepackage[style=vancouver, backend=biber]{biblatex}
+\addbibresource{references.bib}
+
+%% TikZ for pipeline diagram
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, shapes.geometric, shapes.misc, fit,
+                positioning, calc, backgrounds}
+
+%% Commands
+\newcommand{\varforge}{\textsc{VarForge}\xspace}
+
+%%═════════════════════════════════════════════════════════════════════════
+\begin{document}
+
+\title{\varforge: A Rust Framework for Synthetic Cancer Sequencing Data Generation\\[0.4ex]
+       \normalsize\texttt{v0.1}}
+\author{Trent Zeng}
+\date{March 2026}
+\maketitle
+
+\begin{abstract}
+\input{sections/abstract}
+\end{abstract}
+
+\noindent\textbf{Keywords:} synthetic sequencing data, cancer genomics, variant simulation, UMI, duplex sequencing, cell-free DNA, Rust
+
+\input{sections/01_introduction}
+\input{sections/02_background}
+\input{sections/03_related_work}
+\input{sections/04_method}
+\input{sections/05_results}
+\input{sections/06_evaluation}
+\input{sections/07_discussion}
+\input{sections/08_future_work}
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+\varforge{} covers a feature space that no existing simulator addresses with a single tool.
+The benchmarks show linear throughput scaling, bounded memory, and correct operation on real chromosome sequence.
+The current limitation is the absence of output correctness validation: VAF accuracy, cfDNA fragment distributions, and UMI family structure are not yet independently verified.
+This validation is the most important next step before the tool can be used to benchmark callers with confidence.
+Source code, documentation, and example configurations are available under the MIT licence at \url{https://github.com/trentzz/varforge}.
+
+\printbibliography
+
+\input{sections/09_appendix}
+
+\end{document}

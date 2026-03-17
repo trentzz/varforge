@@ -26,9 +26,11 @@ Quantitative validation (chi-squared test against Binomial) is needed but not ye
 The claim is supported by design but not yet independently validated.
 
 \textbf{(v) Streaming Rust with bounded memory.}
-Per-pair memory is constant at ${\sim}0.45$\,KB across all tested coverage depths (Figure~\ref{fig:mem}).
-The streaming architecture bounded memory by channel depth, not dataset size.
-The claim holds.
+Per-pair memory is constant at ${\sim}0.45$\,KB across coverage depths on the 1\,MB reference (Figure~\ref{fig:mem}).
+The streaming architecture bounds memory by concurrent batch state rather than total dataset size.
+On chr22 at 30x (Table~\ref{tab:hg38}), per-pair memory rises to ${\sim}0.85$\,KB because the larger chromosome produces more pairs per chunk.
+The claim holds in the sense that memory is bounded by channel depth, not dataset size.
+The bound itself grows with chromosome length and coverage; the \texttt{output\_buffer\_regions} setting provides a lever to reduce it on memory-constrained systems.
 
 \textbf{Thread scaling limitation.}
 Adding threads degrades wall time for the 10\,MB / 30x I/O-bound workload (1 thread = 140\,s; 12 threads = 160\,s).

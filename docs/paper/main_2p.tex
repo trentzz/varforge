@@ -1,0 +1,118 @@
+\documentclass[10pt, twocolumn]{article}
+\usepackage[margin=1.5cm]{geometry}
+\usepackage{times}
+\usepackage[hidelinks]{hyperref}
+\setlength{\columnsep}{0.6cm}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{2pt}
+
+%% Packages
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{makecell}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{xspace}
+\usepackage{url}
+
+%% Vancouver numbered citations
+\usepackage[style=vancouver, backend=biber]{biblatex}
+\addbibresource{references.bib}
+
+%% Commands
+\newcommand{\varforge}{\textsc{VarForge}\xspace}
+
+%%═════════════════════════════════════════════════════════════════════════
+\begin{document}
+
+\title{\varforge: Synthetic Cancer Sequencing Data in a Single Rust Binary\\[0.2ex]
+       \small\texttt{v0.1}}
+\author{Trent Zeng}
+\date{}
+\maketitle
+
+\begin{abstract}
+\noindent
+No single tool integrates de-novo read generation, somatic variant spike-in, UMI/duplex simulation, cfDNA fragmentation, and library artefact injection.
+\varforge{} fills this gap in a single Rust binary driven by YAML configuration, achieving ${\sim}14{,}000$ read pairs/s at 30x on a 12-thread workstation.
+No other published tool provides genome-wide UMI simulation or combines cfDNA fragmentation with variant spike-in.
+Variants are assigned by per-read Bernoulli sampling, not deterministic spike-in.
+BED region filtering enables clinical-depth panel simulation (200x, 1\,Mbp target, 86\,s).
+\end{abstract}
+
+%%─────────────────────────────────────────────────────────────────────────
+\section{Introduction}
+
+Benchmarking cancer variant callers, UMI deduplication tools, and liquid biopsy algorithms requires synthetic data with complete ground truth.
+Real patient data cannot provide this.
+Existing tools address parts of the problem: BAMSurgeon\autocite{ewing2015bamsurgeon} spikes variants, ART\autocite{huang2012art} generates reads, but no single tool covers UMI families, cfDNA fragmentation, tumour models, and library artefacts together.
+
+\varforge{} addresses these gaps.
+Contributions: (i) unified pipeline via YAML; (ii) genome-wide UMI and duplex simulation; (iii) cfDNA fragmentation with variant support; (iv) stochastic VAF via per-read Bernoulli sampling; (v) BED region filtering for targeted panel simulation.
+
+%%─────────────────────────────────────────────────────────────────────────
+\section{Related Work}
+
+BAMSurgeon\autocite{ewing2015bamsurgeon}, SomatoSim\autocite{kuhnemund2017somatomsim}, and stochasticSim\autocite{osullivan2023stochasticsim} spike variants into existing BAMs.
+ART\autocite{huang2012art}, NEAT\autocite{stephens2016neat}, and ReSeq\autocite{schmeing2021reseq} generate reads but lack tumour models, UMI simulation, and cfDNA fragmentation.
+No existing tool provides genome-wide UMI or duplex sequencing simulation.
+No tool combines cfDNA fragmentation with somatic variant spike-in.
+
+%%─────────────────────────────────────────────────────────────────────────
+\section{Method}
+
+\varforge{} partitions the reference into chunks processed by Rayon workers.
+Each worker samples fragment lengths, positions reads, injects variants by Bernoulli sampling, applies quality scores, and tags UMI families.
+A bounded channel (default depth 64) decouples workers from the writer thread.
+Memory is bounded by concurrent batch state, not total dataset size.
+If a BED file of targets is provided, chunks are clipped to target boundaries before dispatch.
+
+\textbf{Stochastic VAF.}
+For each read at a variant site: $X_i \sim \text{Bernoulli}(\text{VAF}_\text{eff})$.
+Alt-read count follows $\text{Binomial}(D, \text{VAF}_\text{eff})$, matching real sequencing variance.
+
+\textbf{cfDNA.}
+Fragment lengths follow a four-component Gaussian mixture with sub-nucleosomal (${\sim}143$\,bp), mono-nucleosomal (${\sim}167$\,bp), di-nucleosomal (${\sim}334$\,bp), and tri-nucleosomal (${\sim}500$\,bp) components.
+
+%%─────────────────────────────────────────────────────────────────────────
+\section{Results}
+
+\begin{table}[H]
+\centering
+\caption{Key benchmark results (12 threads, 1 run).}
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Scenario & Wall (s) & RAM (GB) & Pairs/s \\
+\midrule
+WGS 10\,MB, 30x  & 139.6 & 0.87 & 14,300 \\
+Panel+UMI 1\,MB  & 195.1 & 1.80 &  6,800 \\
+chr22, 30x WGS   & 595.3 & 4.21 &  8,537 \\
+Panel BED 200x   &  85.5 & 0.56 &  7,796 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Throughput scales linearly with coverage ($R^2 > 0.999$).
+Peak memory is bounded by concurrent batch count, not dataset size.
+BED filtering restricts simulation to target regions, enabling 200x panel coverage on chr22 in 86\,s.
+All six hg38 chr22 feature configurations (UMI, duplex, cfDNA, FFPE) completed without error.
+
+%%─────────────────────────────────────────────────────────────────────────
+\section{Discussion and Future Work}
+
+\varforge{} covers a feature space unavailable in any single existing tool.
+The main limitation is that output correctness is not yet independently validated: VAF accuracy, cfDNA fragment distributions, and UMI family structure require quantitative comparison against their respective models.
+Thread scaling only helps for compute-heavy workloads (UMI simulation); the I/O-bound WGS workload runs fastest at one thread.
+
+Priority next steps: (1) chi-squared VAF accuracy test; (2) cfDNA fragment distribution validation; (3) downstream variant caller benchmarking (Mutect2 or VarDict against the truth VCF).
+
+%%─────────────────────────────────────────────────────────────────────────
+\printbibliography[heading=bibintoc, title={References}]
+
+\end{document}

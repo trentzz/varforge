@@ -20,6 +20,7 @@ Deterministic data overestimates caller sensitivity\autocite{osullivan2023stocha
 \label{tab:tool-comparison}
 \small
 \setlength{\tabcolsep}{4pt}
+\resizebox{\columnwidth}{!}{%
 \begin{tabular}{@{}lccccccc@{}}
 \toprule
 Tool & \makecell{De-novo\\reads} & \makecell{Stoch.\\VAF} &
@@ -35,5 +36,6 @@ ReSeq        & \checkmark & $\times$   & $\times$   & $\times$   & $\times$   & 
 VarSim       & $\circ$    & $\times$   & $\times$   & $\times$   & $\times$   & \checkmark & $\times$ \\
 MOV\&RSim    & \checkmark & $\times$   & $\times$   & $\times$   & $\circ$    & \checkmark & $\times$ \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}

@@ -79,8 +79,8 @@ Results below (pending completion of 07 and 08):
 | Twist duplex (5x) | 299.2 | 3.00 | 3,389K | 11,328 |
 | cfDNA liq. biopsy (5x) | 96.1 | 0.85 | 847K | 8,813 |
 | FFPE tumour (5x) | 120.6 | 0.91 | 1,059K | 8,782 |
-| WGS baseline (30x) | TBD | TBD | TBD | TBD |
-| Panel BED 200x | TBD | TBD | TBD | TBD |
+| WGS baseline (30x) | 595.3 | 4.21 | 5,082K | 8,537 |
+| Panel BED 200x (1 Mbp) | 85.5 | 0.56 | 667K | 7,796 |
 
 ---
 
