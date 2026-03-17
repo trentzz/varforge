@@ -39,6 +39,16 @@ varforge/
 - **Streaming architecture**: bounded crossbeam-channel between rayon workers and a dedicated writer thread. Memory scales with channel depth, not dataset size.
 - **Stochastic VAF**: per-read Bernoulli sampling, not deterministic spike-in.
 
+## Pre-commit checks
+
+Before committing, run and fix all failures:
+
+```
+cargo fmt -- --check
+cargo clippy -- -D warnings
+cargo test
+```
+
 ## Target consumers
 
 km, samtools, HUMID, fgbio, UMI-tools, Mutect2, VarDict, Strelka2, CNVkit.
