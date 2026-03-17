@@ -15,8 +15,11 @@
 # Old benchmark output (superseded by benchmarking/)
 benchmark_output/
 
-# LaTeX build artifact (distribution copy uses naming convention: varforge_vX.Y_type.pdf)
+# LaTeX build artifacts — intermediate PDFs (named PDFs go in docs/paper/pdfs/)
 docs/paper/main.pdf
+docs/paper/main_big.pdf
+docs/paper/main_2col.pdf
+docs/paper/main_2p.pdf
 
 # LaTeX auxiliary files
 docs/paper/*.aux
@@ -31,3 +34,6 @@ docs/paper/main.bbl-SAVE-ERROR
 
 # Benchmark timing files (raw data, not needed in repo)
 benchmarking/results/tables/*.txt
+
+# Downstream VC benchmark results (large, generated locally)
+benchmarking/downstreamvc/results/*/

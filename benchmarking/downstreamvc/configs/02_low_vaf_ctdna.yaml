@@ -1,0 +1,29 @@
+# Scenario 2: Low-VAF ctDNA (30x, chr22)
+# cfDNA fragmentation + low tumour fraction, simulating circulating tumour DNA.
+# Tests detection at sub-5% VAF — the liquid biopsy regime.
+reference: ../../chr22.fa
+output:
+  directory: OUTPUT_DIR/02_low_vaf_ctdna
+  fastq: true
+  bam: false
+  truth_vcf: true
+  manifest: true
+sample:
+  name: LOW_VAF_CTDNA
+  read_length: 150
+  coverage: 30.0
+fragment:
+  model: cfdna
+tumour:
+  purity: 0.05
+mutations:
+  random:
+    count: 200
+    vaf_min: 0.01
+    vaf_max: 0.10
+    snv_fraction: 0.90
+    indel_fraction: 0.08
+    mnv_fraction: 0.02
+chromosomes:
+  - chr22
+seed: 43
