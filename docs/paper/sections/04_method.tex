@@ -7,11 +7,13 @@ Figure~\ref{fig:pipeline} shows the pipeline.
 A YAML configuration drives all parameters.
 The reference genome is loaded and shared via \texttt{Arc}.
 Variants come from VCF or stochastic generation.
-The genome is partitioned into regions (one per chromosome by default), each processed by a Rayon\autocite{rayon} worker thread.
+The genome is partitioned into fixed-size chunks (default 10\,Mbp), each processed by a Rayon\autocite{rayon} worker thread.
+If a BED file of target intervals is provided, chunks are clipped to the target boundaries, restricting simulation to the specified regions.
 Workers send completed batches through a bounded \texttt{crossbeam-channel} (default depth 64) to a dedicated writer thread that produces FASTQ, BAM, and truth VCF output.
 
 \begin{figure}[t]
 \centering
+\resizebox{\columnwidth}{!}{%
 \begin{tikzpicture}[
     node distance = 1.2cm and 1.8cm,
     box/.style    = {draw, rounded corners=3pt, minimum width=2.6cm,
@@ -53,7 +55,8 @@ Workers send completed batches through a bounded \texttt{crossbeam-channel} (def
   \draw[arr] (writer) -- (fq);
   \draw[arr] (writer) -- (bam);
   \draw[arr] (writer) -- (truth);
-\end{tikzpicture}
+\end{tikzpicture}%
+}% end resizebox
 \caption{VarForge processing pipeline. Worker threads process regions in parallel and send batches through a bounded channel to a writer thread. Memory is bounded by channel depth, not dataset size.}
 \label{fig:pipeline}
 \end{figure}
