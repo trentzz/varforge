@@ -1371,4 +1371,50 @@ fragment:
         assert_eq!(cfg.fragment.mono_sd, Some(15.0));
         assert_eq!(cfg.fragment.di_sd, Some(25.0));
     }
+
+    // T063: Edge-case tests for substitute_vars.
+
+    #[test]
+    fn test_substitute_vars_unknown_key_errors() {
+        let vars = std::collections::HashMap::new();
+        let result = substitute_vars("prefix_${unknown}", &vars);
+        assert!(result.is_err(), "unknown key should return an error");
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("unknown"), "error should name the missing key");
+    }
+
+    #[test]
+    fn test_substitute_vars_empty_value() {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("key".to_string(), String::new());
+        let result = substitute_vars("prefix_${key}_suffix", &vars).unwrap();
+        assert_eq!(result, "prefix__suffix");
+    }
+
+    #[test]
+    fn test_substitute_vars_adjacent_placeholders() {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("a".to_string(), "hello".to_string());
+        vars.insert("b".to_string(), "world".to_string());
+        let result = substitute_vars("${a}${b}", &vars).unwrap();
+        assert_eq!(result, "helloworld");
+    }
+
+    #[test]
+    fn test_substitute_vars_unterminated_passes_through() {
+        // An unterminated placeholder ("${key" with no '}') is skipped over.
+        let vars = std::collections::HashMap::new();
+        let result = substitute_vars("prefix_${key", &vars).unwrap();
+        assert_eq!(
+            result, "prefix_${key",
+            "unterminated placeholder should pass through"
+        );
+    }
+
+    #[test]
+    fn test_substitute_vars_no_placeholders() {
+        let vars = std::collections::HashMap::new();
+        let result = substitute_vars("plain string", &vars).unwrap();
+        assert_eq!(result, "plain string");
+    }
 }
