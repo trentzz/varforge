@@ -25,6 +25,7 @@ use crate::variants::germline::generate_germline_variants;
 use crate::variants::random_gen::{
     generate_msi_indels, generate_random_mutations, resolve_signature,
 };
+use crate::variants::structural::StructuralVariant;
 
 /// A batch of generated reads for one region, sent through the streaming channel.
 struct RegionBatch {
@@ -725,9 +726,15 @@ pub(crate) fn run_single_sample(
                 .then_with(|| a.0.pos().cmp(&b.0.pos()))
         });
         for (variant, n_alt_mol, n_duplex_alt) in &records {
-            let (ref_allele, alt_allele) = variant_alleles(variant);
-            vcf.write_variant(variant, &ref_allele, &alt_allele, *n_alt_mol, *n_duplex_alt)
-                .context("failed to write truth VCF record")?;
+            if let Some(sv) = sv_to_structural(variant) {
+                // SVs use symbolic ALT alleles and SV-specific INFO fields.
+                vcf.write_sv(&sv, variant.expected_vaf, variant.clone_id.as_deref())
+                    .context("failed to write SV truth VCF record")?;
+            } else {
+                let (ref_allele, alt_allele) = variant_alleles(variant);
+                vcf.write_variant(variant, &ref_allele, &alt_allele, *n_alt_mol, *n_duplex_alt)
+                    .context("failed to write truth VCF record")?;
+            }
         }
     }
 
@@ -1061,58 +1068,62 @@ fn run_multi_sample(cfg: Config, reference: ReferenceGenome, start_time: Instant
         .per_sample_configs()
         .context("failed to resolve per-sample configs")?;
 
-    let mut manifest_entries: Vec<SampleManifestEntry> = Vec::new();
-
+    // Create all output directories before starting parallel simulation so that
+    // directory creation errors surface immediately and sequentially.
     for sample in &resolved {
-        tracing::info!(
-            "simulating sample '{}' (coverage={:.1}x, tumour_fraction={:.4})",
-            sample.name,
-            sample.config.sample.coverage,
-            sample
-                .config
-                .tumour
-                .as_ref()
-                .map(|t| t.purity)
-                .unwrap_or(1.0),
-        );
-
-        // Create per-sample output directory.
         std::fs::create_dir_all(&sample.output_dir).with_context(|| {
             format!(
                 "failed to create output directory: {}",
                 sample.output_dir.display()
             )
         })?;
-
-        // Clone the reference (reopens the file handle) for this sample.
-        let ref_for_sample = reference.clone();
-
-        let sample_start = Instant::now();
-        let (total_pairs, applied_count) =
-            run_sample_simulation(sample.config.clone(), ref_for_sample)?;
-
-        manifest_entries.push(SampleManifestEntry {
-            name: sample.name.clone(),
-            output_dir: sample.output_dir.to_string_lossy().into_owned(),
-            coverage: sample.config.sample.coverage,
-            tumour_fraction: sample
-                .config
-                .tumour
-                .as_ref()
-                .map(|t| t.purity)
-                .unwrap_or(1.0),
-            total_read_pairs: total_pairs,
-            variants_applied: applied_count,
-        });
-
-        tracing::info!(
-            "sample '{}' complete: {} read pairs, {} variants, {:.2}s",
-            sample.name,
-            total_pairs,
-            applied_count,
-            sample_start.elapsed().as_secs_f64(),
-        );
     }
+
+    // Simulate each sample in parallel.  rayon's work-stealing scheduler
+    // handles the nested parallelism inside each `run_sample_simulation` call.
+    let manifest_entries: Vec<SampleManifestEntry> = resolved
+        .par_iter()
+        .map(|sample| -> Result<SampleManifestEntry> {
+            tracing::info!(
+                "simulating sample '{}' (coverage={:.1}x, tumour_fraction={:.4})",
+                sample.name,
+                sample.config.sample.coverage,
+                sample
+                    .config
+                    .tumour
+                    .as_ref()
+                    .map(|t| t.purity)
+                    .unwrap_or(1.0),
+            );
+
+            let ref_for_sample = reference.clone();
+            let sample_start = Instant::now();
+            let (total_pairs, applied_count) =
+                run_sample_simulation(sample.config.clone(), ref_for_sample)?;
+
+            tracing::info!(
+                "sample '{}' complete: {} read pairs, {} variants, {:.2}s",
+                sample.name,
+                total_pairs,
+                applied_count,
+                sample_start.elapsed().as_secs_f64(),
+            );
+
+            Ok(SampleManifestEntry {
+                name: sample.name.clone(),
+                output_dir: sample.output_dir.to_string_lossy().into_owned(),
+                coverage: sample.config.sample.coverage,
+                tumour_fraction: sample
+                    .config
+                    .tumour
+                    .as_ref()
+                    .map(|t| t.purity)
+                    .unwrap_or(1.0),
+                total_read_pairs: total_pairs,
+                variants_applied: applied_count,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     // Write combined manifest.
     write_combined_manifest(&root_dir, &manifest_entries, env!("CARGO_PKG_VERSION"))
@@ -1587,9 +1598,14 @@ fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64
                 .then_with(|| a.0.pos().cmp(&b.0.pos()))
         });
         for (variant, n_alt_mol, n_duplex_alt) in &records {
-            let (ref_allele, alt_allele) = variant_alleles(variant);
-            vcf.write_variant(variant, &ref_allele, &alt_allele, *n_alt_mol, *n_duplex_alt)
-                .context("failed to write truth VCF record")?;
+            if let Some(sv) = sv_to_structural(variant) {
+                vcf.write_sv(&sv, variant.expected_vaf, variant.clone_id.as_deref())
+                    .context("failed to write SV truth VCF record")?;
+            } else {
+                let (ref_allele, alt_allele) = variant_alleles(variant);
+                vcf.write_variant(variant, &ref_allele, &alt_allele, *n_alt_mol, *n_duplex_alt)
+                    .context("failed to write truth VCF record")?;
+            }
         }
     }
 
@@ -2216,8 +2232,52 @@ fn variant_alleles(v: &Variant) -> (Vec<u8>, Vec<u8>) {
         } => (ref_seq.clone(), alt_seq.clone()),
         MutationType::Sv { .. } => {
             // SVs use symbolic alleles; emit placeholder representation.
+            // SVs are written via write_sv; this path is unreachable in practice.
             (b"N".to_vec(), b"<SV>".to_vec())
         }
+    }
+}
+
+/// Convert a `MutationType::Sv` variant to the richer `StructuralVariant` type
+/// needed by `TruthVcfWriter::write_sv`.
+fn sv_to_structural(v: &Variant) -> Option<StructuralVariant> {
+    use crate::core::types::SvType;
+    match &v.mutation {
+        MutationType::Sv {
+            sv_type,
+            chrom,
+            start,
+            end,
+        } => Some(match sv_type {
+            SvType::Deletion => StructuralVariant::Deletion {
+                chrom: chrom.clone(),
+                start: *start,
+                end: *end,
+            },
+            SvType::Insertion => StructuralVariant::Insertion {
+                chrom: chrom.clone(),
+                pos: *start,
+                sequence: Vec::new(),
+            },
+            SvType::Inversion => StructuralVariant::Inversion {
+                chrom: chrom.clone(),
+                start: *start,
+                end: *end,
+            },
+            SvType::Duplication => StructuralVariant::Duplication {
+                chrom: chrom.clone(),
+                start: *start,
+                end: *end,
+                copies: 1,
+            },
+            SvType::Translocation => StructuralVariant::Translocation {
+                chrom1: chrom.clone(),
+                pos1: *start,
+                chrom2: chrom.clone(),
+                pos2: *end,
+            },
+        }),
+        _ => None,
     }
 }
 

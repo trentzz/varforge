@@ -82,12 +82,7 @@ pub fn apply_snv(record: &mut RecordBuf, mutation: &MutationType) -> ModifyResul
     }
 
     // Apply the substitution.
-    let mut new_seq: Vec<u8> = record
-        .sequence()
-        .as_ref()
-        .iter()
-        .map(noodles_base_to_u8)
-        .collect();
+    let mut new_seq: Vec<u8> = record.sequence().as_ref().to_vec();
     new_seq[offset] = alt_base;
 
     let new_quals: Vec<u8> = record.quality_scores().as_ref().to_vec();
@@ -147,12 +142,7 @@ pub fn apply_insertion(record: &mut RecordBuf, mutation: &MutationType) -> Modif
 
     let insert_len = alt_seq.len() - ref_seq.len();
 
-    let orig_seq: Vec<u8> = record
-        .sequence()
-        .as_ref()
-        .iter()
-        .map(noodles_base_to_u8)
-        .collect();
+    let orig_seq: Vec<u8> = record.sequence().as_ref().to_vec();
     let orig_qual: Vec<u8> = record.quality_scores().as_ref().to_vec();
 
     // Build new sequence with insertion.
@@ -232,12 +222,7 @@ pub fn apply_deletion(record: &mut RecordBuf, mutation: &MutationType) -> Modify
 
     let del_len = ref_seq.len() - alt_seq.len();
 
-    let orig_seq: Vec<u8> = record
-        .sequence()
-        .as_ref()
-        .iter()
-        .map(noodles_base_to_u8)
-        .collect();
+    let orig_seq: Vec<u8> = record.sequence().as_ref().to_vec();
     let orig_qual: Vec<u8> = record.quality_scores().as_ref().to_vec();
 
     // Build new sequence with deletion (remove del_len bases after the anchor).
@@ -719,15 +704,7 @@ fn clear_md_tag(record: &mut RecordBuf) {
 
 /// Get a base at `offset` from a noodles [`Sequence`] as a `u8`.
 fn sequence_base(seq: &Sequence, offset: usize) -> u8 {
-    seq.as_ref()
-        .get(offset)
-        .map(noodles_base_to_u8)
-        .unwrap_or(b'N')
-}
-
-/// Convert a noodles Base byte (IUPAC-encoded) to a plain ASCII byte.
-pub fn noodles_base_to_u8(b: &u8) -> u8 {
-    *b
+    seq.as_ref().get(offset).copied().unwrap_or(b'N')
 }
 
 // ---------------------------------------------------------------------------
