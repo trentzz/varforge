@@ -143,7 +143,100 @@ pub fn apply_overrides(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Preset listing
+// ---------------------------------------------------------------------------
+
+/// Print all available presets to stdout.
+///
+/// Base presets are listed first, then cancer-type presets (with the
+/// `cancer:` prefix users must supply).
+fn print_preset_list() {
+    println!("Base presets:");
+    println!("  small       Fast smoke-test: 1x coverage, chr22 only, 100 random mutations");
+    println!("  panel       Targeted-sequencing: 500x coverage, UMI enabled, 50 mutations");
+    println!("  wgs         Whole-genome: 30x coverage, 5 000 random mutations");
+    println!("  cfdna       Cell-free DNA / liquid biopsy: 200x, cfDNA fragments, 2% purity");
+    println!("  ffpe        FFPE-damaged sample: 30x with deamination and oxoG artefacts");
+    println!("  umi         High-depth duplex UMI: 1 000x coverage, duplex barcodes");
+    println!();
+    println!("Cancer-type presets (prefix with 'cancer:', e.g. --preset cancer:lung_adeno):");
+    println!("  cancer:lung_adeno     Lung adenocarcinoma — SBS4 smoking signature, high TMB");
+    println!("  cancer:colorectal     Colorectal cancer — SBS1/SBS5 aging, moderate TMB");
+    println!("  cancer:breast_tnbc    Triple-negative breast — SBS3 HRD, elevated indel burden");
+    println!("  cancer:melanoma       Cutaneous melanoma — SBS7 UV signature, very high TMB");
+    println!("  cancer:aml            Acute myeloid leukaemia — SBS1/SBS5, low TMB");
+    println!("  cancer:prostate       Prostate adenocarcinoma — SBS1/SBS5, low-moderate TMB");
+    println!("  cancer:pancreatic     Pancreatic PDAC — SBS1/SBS5, low purity (stromal)");
+    println!("  cancer:glioblastoma   Glioblastoma multiforme — SBS1/SBS5, moderate TMB");
+}
+
+// ---------------------------------------------------------------------------
+// Fuzzy preset suggestion
+// ---------------------------------------------------------------------------
+
+/// Compute Levenshtein edit distance between two strings.
+///
+/// Uses a standard dynamic-programming approach with O(min(a,b)) space.
+pub(crate) fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let m = a.len();
+    let n = b.len();
+
+    // Keep only two rows to reduce memory usage.
+    let mut prev: Vec<usize> = (0..=n).collect();
+    let mut curr = vec![0usize; n + 1];
+
+    for i in 1..=m {
+        curr[0] = i;
+        for j in 1..=n {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (curr[j - 1] + 1).min(prev[j] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[n]
+}
+
+/// Return all known preset names (base and cancer-prefixed) as a flat list.
+fn all_preset_names() -> Vec<String> {
+    use crate::cli::cancer_presets;
+    let mut names: Vec<String> = crate::cli::presets::all_names()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    for cn in cancer_presets::all_names() {
+        names.push(format!("cancer:{}", cn));
+    }
+    names
+}
+
+/// Find the closest preset name to `input`.
+///
+/// Returns `Some(name)` if the closest match has edit distance ≤ 2.
+pub(crate) fn suggest_preset(input: &str) -> Option<String> {
+    let candidates = all_preset_names();
+    let (best_name, best_dist) = candidates
+        .iter()
+        .map(|name| (name.as_str(), levenshtein_distance(input, name)))
+        .min_by_key(|&(_, d)| d)?;
+    if best_dist <= 2 {
+        Some(best_name.to_string())
+    } else {
+        None
+    }
+}
+
 pub fn run(opts: SimulateOpts, cli_threads: Option<usize>) -> Result<()> {
+    // -----------------------------------------------------------------------
+    // 0. Handle informational flags that exit before doing any real work.
+    // -----------------------------------------------------------------------
+    if opts.list_presets {
+        print_preset_list();
+        return Ok(());
+    }
+
     let start_time = Instant::now();
 
     // -----------------------------------------------------------------------
@@ -168,8 +261,14 @@ pub fn run(opts: SimulateOpts, cli_threads: Option<usize>) -> Result<()> {
 
     // Apply preset (lower precedence than YAML).
     if let Some(ref preset_name) = opts.preset {
-        let overlay = presets::get(preset_name)
-            .with_context(|| format!("invalid preset '{}'", preset_name))?;
+        let overlay = presets::get(preset_name).map_err(|e| {
+            // Append a "did you mean?" hint when the typo is close to a known name.
+            if let Some(suggestion) = suggest_preset(preset_name) {
+                anyhow::anyhow!("{e}; did you mean '{suggestion}'")
+            } else {
+                e
+            }
+        })?;
         presets::apply_preset_to_config(&mut cfg, &overlay);
     }
 
@@ -324,7 +423,7 @@ pub(crate) fn run_single_sample(
 
     // We'll open truth VCF after collecting applied variants; use a temp path
     // and rename, or just open now (write header) and stream records.
-    let truth_vcf_path = out_dir.join(format!("{}.truth.vcf", sample_name));
+    let truth_vcf_path = out_dir.join(format!("{}.truth.vcf.gz", sample_name));
     let mut truth_vcf_writer = if cfg.output.truth_vcf {
         let contigs: Vec<(String, u64)> = chrom_lengths.clone();
         Some(
@@ -1237,7 +1336,7 @@ fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64
         None
     };
 
-    let truth_vcf_path = out_dir.join(format!("{}.truth.vcf", sample_name));
+    let truth_vcf_path = out_dir.join(format!("{}.truth.vcf.gz", sample_name));
     let mut truth_vcf_writer = if cfg.output.truth_vcf {
         let contigs: Vec<(String, u64)> = chrom_lengths.clone();
         Some(
@@ -2162,6 +2261,7 @@ mod tests {
             expected_vaf: 0.3,
             clone_id: None,
             haplotype: None,
+            ccf: None,
         };
         let key = variant_key(&v);
         assert!(key.contains("SNV"));
@@ -2181,6 +2281,7 @@ mod tests {
             expected_vaf: 0.5,
             clone_id: None,
             haplotype: None,
+            ccf: None,
         };
         let (r, a) = variant_alleles(&v);
         assert_eq!(r, b"G");
@@ -2199,6 +2300,7 @@ mod tests {
             expected_vaf: 0.1,
             clone_id: None,
             haplotype: None,
+            ccf: None,
         };
         let (r, a) = variant_alleles(&v);
         assert_eq!(r, b"ACG");
@@ -2305,6 +2407,7 @@ mod tests {
                 manifest: false,
                 germline_vcf: false,
                 single_read_bam: false,
+                mapq: 60,
             },
             sample: SampleConfig {
                 name: "TEST".to_string(),
@@ -2318,6 +2421,9 @@ mod tests {
                 sd: 20.0,
                 long_read: None,
                 end_motif_model: None,
+                ctdna_fraction: None,
+                mono_sd: None,
+                di_sd: None,
             },
             quality: QualityConfig {
                 mean_quality: 36,
@@ -2432,6 +2538,7 @@ mod tests {
                 manifest: false,
                 germline_vcf: false,
                 single_read_bam: false,
+                mapq: 60,
             },
             sample: SampleConfig::default(),
             fragment: FragmentConfig::default(),
@@ -2471,6 +2578,7 @@ mod tests {
             vaf_range: None,
             preset: None,
             dry_run: false,
+            list_presets: false,
             set: None,
         }
     }

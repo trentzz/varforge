@@ -54,29 +54,83 @@ impl QualityModel for ParametricQualityModel {
     }
 }
 
-/// Sample per-base qualities for a PacBio HiFi read.
+/// Sample per-base qualities for a PacBio HiFi read with a position-dependent curve.
 ///
-/// Produces a flat profile in the Q20–Q30 range with slight random variation.
-/// HiFi reads have ~99.9% accuracy (Q30), with few systematic error patterns.
+/// Real HiFi reads show highest quality in the interior (~Q35) and somewhat lower
+/// quality near both ends (~Q25) due to subread stitching at the start and end.
+/// Quality transitions linearly over ~50 bp at each end, then holds flat in the middle.
+///
+/// Reference: PacBio SMRT sequencing quality specification (Q20 minimum, median Q35).
 pub fn sample_pacbio_hifi_qualities<R: Rng>(length: usize, rng: &mut R) -> Vec<u8> {
+    const PEAK_Q: f64 = 35.0;
+    const END_Q: f64 = 25.0;
+    const TRANSITION_BP: usize = 50;
+    const NOISE_SD: f64 = 1.5;
+
+    let noise = Normal::new(0.0, NOISE_SD).unwrap();
+
     (0..length)
-        .map(|_| {
-            // Sample from Q20 to Q30 with a mode around Q25.
-            let q: f64 = rng.gen_range(20.0..=30.0_f64);
-            q.round() as u8
+        .map(|pos| {
+            // Distance from the nearer end.
+            let dist_from_end = pos.min(length.saturating_sub(1 + pos));
+            // Linear ramp from END_Q to PEAK_Q over TRANSITION_BP bases.
+            let base_q = if dist_from_end >= TRANSITION_BP {
+                PEAK_Q
+            } else {
+                END_Q + (PEAK_Q - END_Q) * (dist_from_end as f64 / TRANSITION_BP as f64)
+            };
+            let q = base_q + noise.sample(rng);
+            q.round().clamp(2.0, 41.0) as u8
         })
         .collect()
+}
+
+/// Returns true if position `pos` falls inside a homopolymer run of length >= `min_len`.
+///
+/// A homopolymer run is a maximal stretch of the same base. The position is considered
+/// inside such a run if the run that covers `pos` is at least `min_len` bases long.
+pub fn is_homopolymer_run(seq: &[u8], pos: usize, min_len: usize) -> bool {
+    if pos >= seq.len() {
+        return false;
+    }
+    let base = seq[pos];
+    // Find the start of the run.
+    let mut start = pos;
+    while start > 0 && seq[start - 1] == base {
+        start -= 1;
+    }
+    // Find the end of the run.
+    let mut end = pos;
+    while end + 1 < seq.len() && seq[end + 1] == base {
+        end += 1;
+    }
+    (end - start + 1) >= min_len
 }
 
 /// Sample per-base qualities for a Nanopore R10 read.
 ///
 /// Produces a profile centred around Q20 with higher variance than HiFi.
 /// Nanopore R10 achieves approximately Q20–Q25 accuracy.
-pub fn sample_nanopore_r10_qualities<R: Rng>(length: usize, rng: &mut R) -> Vec<u8> {
+///
+/// Positions inside homopolymer runs of length >= 4 receive a penalty of 5–10
+/// Phred units, floored at Q10. This reflects the well-known Nanopore systematic
+/// error mode in homopolymeric contexts.
+pub fn sample_nanopore_r10_qualities<R: Rng>(length: usize, seq: &[u8], rng: &mut R) -> Vec<u8> {
+    const MIN_HOMOPOLYMER_LEN: usize = 4;
+    const HOMOPOLYMER_PENALTY_MIN: f64 = 5.0;
+    const HOMOPOLYMER_PENALTY_MAX: f64 = 10.0;
+    const HOMOPOLYMER_FLOOR: f64 = 10.0;
+
     (0..length)
-        .map(|_| {
+        .map(|pos| {
             // Q15–Q25 range; mode around Q20.
             let q: f64 = rng.gen_range(15.0..=25.0_f64);
+            let q = if pos < seq.len() && is_homopolymer_run(seq, pos, MIN_HOMOPOLYMER_LEN) {
+                let penalty: f64 = rng.gen_range(HOMOPOLYMER_PENALTY_MIN..=HOMOPOLYMER_PENALTY_MAX);
+                (q - penalty).max(HOMOPOLYMER_FLOOR)
+            } else {
+                q
+            };
             q.round() as u8
         })
         .collect()
@@ -154,40 +208,118 @@ mod tests {
     }
 
     #[test]
-    fn test_pacbio_hifi_quality_range() {
+    fn test_pacbio_hifi_quality_length() {
         let mut rng = StdRng::seed_from_u64(42);
         let quals = sample_pacbio_hifi_qualities(1000, &mut rng);
         assert_eq!(quals.len(), 1000);
-        for &q in &quals {
-            assert!(
-                (20..=30).contains(&q),
-                "PacBio HiFi quality {} out of range [20, 30]",
-                q
-            );
+    }
+
+    #[test]
+    fn test_pacbio_hifi_quality_bounds() {
+        let mut rng = StdRng::seed_from_u64(42);
+        for _ in 0..100 {
+            let quals = sample_pacbio_hifi_qualities(200, &mut rng);
+            for &q in &quals {
+                assert!(
+                    (2..=41).contains(&q),
+                    "PacBio HiFi quality {} out of bounds",
+                    q
+                );
+            }
         }
-        let mean = quals.iter().map(|&q| q as f64).sum::<f64>() / quals.len() as f64;
-        // Uniform over [20, 30] gives mean 25; allow ±1 with 1000 samples.
+    }
+
+    #[test]
+    fn test_pacbio_hifi_position_dependent() {
+        // Mean quality at position 0 (near end) should be lower than at the midpoint.
+        let length = 200usize;
+        let n = 10_000;
+        let mut q_at_0: f64 = 0.0;
+        let mut q_at_mid: f64 = 0.0;
+        let mid = length / 2;
+
+        let mut rng = StdRng::seed_from_u64(42);
+        for _ in 0..n {
+            let quals = sample_pacbio_hifi_qualities(length, &mut rng);
+            q_at_0 += quals[0] as f64;
+            q_at_mid += quals[mid] as f64;
+        }
+        let mean_at_0 = q_at_0 / n as f64;
+        let mean_at_mid = q_at_mid / n as f64;
         assert!(
-            (mean - 25.0).abs() < 1.5,
-            "PacBio HiFi mean quality {} not near 25",
-            mean
+            mean_at_0 < mean_at_mid,
+            "mean quality at position 0 ({:.2}) should be less than at mid ({:.2})",
+            mean_at_0,
+            mean_at_mid
+        );
+    }
+
+    #[test]
+    fn test_is_homopolymer_run() {
+        // "AAACGTTTTTAG": 3-bp poly-A at 0-2, 5-bp poly-T at 5-9.
+        let seq = b"AAACGTTTTTAG";
+        // Positions 0,1,2 are in a 3-bp poly-A — not >= 4.
+        assert!(!is_homopolymer_run(seq, 0, 4));
+        assert!(!is_homopolymer_run(seq, 2, 4));
+        // Positions 6,7,8,9 are inside the 5-bp poly-T run.
+        assert!(is_homopolymer_run(seq, 6, 4));
+        assert!(is_homopolymer_run(seq, 9, 4));
+        // G at position 4 is a run of 1.
+        assert!(!is_homopolymer_run(seq, 4, 4));
+        // Out-of-bounds position returns false.
+        assert!(!is_homopolymer_run(seq, 100, 4));
+    }
+
+    #[test]
+    fn test_nanopore_r10_homopolymer_quality_degradation() {
+        // Build a 200-bp sequence: ACGT repeating as background (no homopolymer
+        // runs), with positions 50-59 replaced by poly-A to create a 10-bp run.
+        let mut seq: Vec<u8> = (0..200).map(|i| b"ACGT"[i % 4]).collect();
+        for b in &mut seq[50..60] {
+            *b = b'A';
+        }
+
+        let n = 10_000;
+        let mut q_homo: f64 = 0.0;
+        let mut q_normal: f64 = 0.0;
+
+        let mut rng = StdRng::seed_from_u64(42);
+        for _ in 0..n {
+            let quals = sample_nanopore_r10_qualities(200, &seq, &mut rng);
+            // Mean over the 10-bp homopolymer region.
+            for &q in &quals[50..60] {
+                q_homo += q as f64;
+            }
+            // Mean over a plain region at positions 100-109.
+            for &q in &quals[100..110] {
+                q_normal += q as f64;
+            }
+        }
+        let mean_homo = q_homo / (n * 10) as f64;
+        let mean_normal = q_normal / (n * 10) as f64;
+        assert!(
+            mean_homo < mean_normal,
+            "homopolymer quality ({:.2}) should be lower than normal region ({:.2})",
+            mean_homo,
+            mean_normal
         );
     }
 
     #[test]
     fn test_nanopore_r10_quality_range() {
+        // Use a repeating ACGT sequence so no position is inside a homopolymer
+        // run, isolating the base quality distribution from homopolymer penalties.
+        let seq: Vec<u8> = (0..1000).map(|i| b"ACGT"[i % 4]).collect();
         let mut rng = StdRng::seed_from_u64(42);
-        let quals = sample_nanopore_r10_qualities(1000, &mut rng);
+        let quals = sample_nanopore_r10_qualities(1000, &seq, &mut rng);
         assert_eq!(quals.len(), 1000);
+        // All qualities should be within valid Phred bounds.
         for &q in &quals {
-            assert!(
-                (15..=25).contains(&q),
-                "Nanopore R10 quality {} out of range [15, 25]",
-                q
-            );
+            assert!(q >= 10, "Nanopore R10 quality {} below floor Q10", q);
+            assert!(q <= 25, "Nanopore R10 quality {} above Q25", q);
         }
         let mean = quals.iter().map(|&q| q as f64).sum::<f64>() / quals.len() as f64;
-        // Uniform over [15, 25] gives mean 20; allow ±1 with 1000 samples.
+        // Uniform over [15, 25] gives mean 20; allow ±1.5 with 1000 samples.
         assert!(
             (mean - 20.0).abs() < 1.5,
             "Nanopore R10 mean quality {} not near 20",

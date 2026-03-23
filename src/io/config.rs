@@ -102,6 +102,12 @@ pub struct OutputConfig {
     /// germline variants were simulated.
     #[serde(default = "default_true")]
     pub germline_vcf: bool,
+    /// Mapping quality written to every BAM record.
+    ///
+    /// Default 60 is appropriate for short-read simulated data where
+    /// alignment is perfect. Lower values suit error-prone platforms.
+    #[serde(default = "default_mapq")]
+    pub mapq: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,6 +153,26 @@ pub struct FragmentConfig {
     /// plasma are rejected and resampled.
     #[serde(default)]
     pub end_motif_model: Option<String>,
+    /// Explicit circulating tumour DNA fraction for the cfDNA fragment model.
+    ///
+    /// When set, this overrides the purity-derived ctDNA fraction. Must be in
+    /// [0.0, 1.0]. A value of 0.05 means 5% of fragments are tumour-derived
+    /// and will be drawn from the shorter ctDNA distribution (~143 bp) rather
+    /// than the nucleosomal peaks.
+    #[serde(default)]
+    pub ctdna_fraction: Option<f64>,
+    /// Standard deviation of the mononucleosomal fragment peak (bp).
+    ///
+    /// Defaults to 20 bp. Source: Cristiano et al. 2019 Science (DELFI study)
+    /// fragment size distributions in healthy controls and cancer patients.
+    #[serde(default)]
+    pub mono_sd: Option<f64>,
+    /// Standard deviation of the dinucleosomal fragment peak (bp).
+    ///
+    /// Defaults to 30 bp. Source: Cristiano et al. 2019 Science (DELFI study)
+    /// fragment size distributions in healthy controls and cancer patients.
+    #[serde(default)]
+    pub di_sd: Option<f64>,
 }
 
 impl Default for FragmentConfig {
@@ -157,6 +183,9 @@ impl Default for FragmentConfig {
             sd: default_fragment_sd(),
             long_read: None,
             end_motif_model: None,
+            ctdna_fraction: None,
+            mono_sd: None,
+            di_sd: None,
         }
     }
 }
@@ -428,6 +457,19 @@ pub struct CaptureConfig {
     /// Only applied when `mode == "amplicon"` and `primer_trim > 0`.
     #[serde(default)]
     pub primer_trim: usize,
+    /// Target coefficient of variation for per-target coverage.
+    ///
+    /// When set, the simulation emits a `tracing::warn!` if the achieved CV
+    /// exceeds this value. Used to validate uniformity requirements (e.g.
+    /// Twist recommends CV ≤ 0.25).
+    #[serde(default)]
+    pub coverage_cv_target: Option<f64>,
+    /// Target on-target fraction (0.0–1.0).
+    ///
+    /// When set, the simulation emits a `tracing::warn!` if the achieved
+    /// on-target fraction falls below this value. Twist panels expect > 0.95.
+    #[serde(default)]
+    pub on_target_fraction_target: Option<f64>,
 }
 
 impl Default for CaptureConfig {
@@ -440,6 +482,8 @@ impl Default for CaptureConfig {
             edge_dropoff_bases: default_edge_dropoff_bases(),
             mode: default_capture_mode(),
             primer_trim: 0,
+            coverage_cv_target: None,
+            on_target_fraction_target: None,
         }
     }
 }
@@ -547,6 +591,9 @@ impl Default for ContaminationConfig {
 // Default value functions
 fn default_true() -> bool {
     true
+}
+fn default_mapq() -> u8 {
+    60
 }
 fn default_normal_cn() -> u32 {
     2
@@ -807,7 +854,7 @@ fn fill_umi(config: &mut Config, length: usize, duplex: bool, inline: bool) {
 pub fn load(path: &Path) -> Result<Config> {
     let contents = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config file: {}", path.display()))?;
-    let mut config: Config = serde_yaml::from_str(&contents)
+    let mut config: Config = serde_yml::from_str(&contents)
         .with_context(|| format!("failed to parse config file: {}", path.display()))?;
     if let Some(preset_name) = config.preset.clone() {
         if let Some(preset) = ChemistryPreset::from_name(&preset_name) {
@@ -830,7 +877,7 @@ pub fn load_with_vars(
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config file: {}", path.display()))?;
     let substituted = substitute_vars(&raw, vars)?;
-    let mut config: Config = serde_yaml::from_str(&substituted)
+    let mut config: Config = serde_yml::from_str(&substituted)
         .with_context(|| format!("failed to parse config file: {}", path.display()))?;
     if let Some(preset_name) = config.preset.clone() {
         if let Some(preset) = ChemistryPreset::from_name(&preset_name) {
@@ -872,6 +919,41 @@ fn substitute_vars(text: &str, vars: &std::collections::HashMap<String, String>)
     Ok(result)
 }
 
+/// Parse a region string in `chrom:start-end` format.
+///
+/// Returns `(chrom, start, end)` on success. Returns an error if the string
+/// is missing a colon, missing a dash, or if the coordinates are not valid
+/// integers.
+#[allow(dead_code)]
+pub fn parse_region(s: &str) -> Result<(String, u64, u64)> {
+    let colon = s
+        .find(':')
+        .ok_or_else(|| anyhow::anyhow!("expected 'chrom:start-end' but found no ':' in '{}'", s))?;
+    let chrom = s[..colon].to_string();
+    let coords = &s[colon + 1..];
+    let dash = coords.find('-').ok_or_else(|| {
+        anyhow::anyhow!(
+            "expected 'chrom:start-end' but found no '-' after ':' in '{}'",
+            s
+        )
+    })?;
+    let start: u64 = coords[..dash].parse().map_err(|_| {
+        anyhow::anyhow!(
+            "start coordinate '{}' in '{}' is not a valid integer",
+            &coords[..dash],
+            s
+        )
+    })?;
+    let end: u64 = coords[dash + 1..].parse().map_err(|_| {
+        anyhow::anyhow!(
+            "end coordinate '{}' in '{}' is not a valid integer",
+            &coords[dash + 1..],
+            s
+        )
+    })?;
+    Ok((chrom, start, end))
+}
+
 pub fn validate(config: &Config) -> Result<()> {
     anyhow::ensure!(
         config.reference.exists(),
@@ -907,6 +989,14 @@ pub fn validate(config: &Config) -> Result<()> {
         "fragment sd must be non-negative, got {}",
         config.fragment.sd
     );
+
+    if let Some(ctdna_frac) = config.fragment.ctdna_fraction {
+        anyhow::ensure!(
+            (0.0..=1.0).contains(&ctdna_frac),
+            "fragment.ctdna_fraction must be in [0.0, 1.0], got {}",
+            ctdna_frac
+        );
+    }
 
     if let Some(tumour) = &config.tumour {
         anyhow::ensure!(
@@ -1176,5 +1266,58 @@ umi:
         let umi = cfg.umi.expect("umi should be set");
         // Explicit length 12 overrides the preset default of 8.
         assert_eq!(umi.length, 12);
+    }
+
+    /// Explicit `fragment.ctdna_fraction` is parsed and validated correctly.
+    #[test]
+    fn test_ctdna_fraction_field_parses() {
+        let yaml = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+fragment:
+  model: cfda
+  mean: 167.0
+  sd: 20.0
+  ctdna_fraction: 0.03
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        assert_eq!(cfg.fragment.ctdna_fraction, Some(0.03));
+    }
+
+    /// `fragment.ctdna_fraction` outside [0.0, 1.0] fails validation.
+    #[test]
+    fn test_ctdna_fraction_out_of_range_fails() {
+        let yaml = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+fragment:
+  ctdna_fraction: 1.5
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        assert!(validate(&cfg).is_err());
+    }
+
+    /// `fragment.mono_sd` and `fragment.di_sd` are parsed correctly.
+    #[test]
+    fn test_mono_di_sd_fields_parse() {
+        let yaml = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+fragment:
+  model: cfda
+  mean: 167.0
+  sd: 20.0
+  mono_sd: 15.0
+  di_sd: 25.0
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        assert_eq!(cfg.fragment.mono_sd, Some(15.0));
+        assert_eq!(cfg.fragment.di_sd, Some(25.0));
     }
 }

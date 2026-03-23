@@ -287,6 +287,7 @@ mod tests {
                 manifest: true,
                 germline_vcf: false,
                 single_read_bam: false,
+                mapq: 60,
             },
             sample: SampleConfig {
                 name: "BASE".to_string(),
@@ -300,6 +301,9 @@ mod tests {
                 sd: 50.0,
                 long_read: None,
                 end_motif_model: None,
+                ctdna_fraction: None,
+                mono_sd: None,
+                di_sd: None,
             },
             quality: QualityConfig {
                 mean_quality: 36,

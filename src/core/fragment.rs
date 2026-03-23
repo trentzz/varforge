@@ -46,11 +46,23 @@ impl CfdnaFragmentSampler {
     /// - `mono_peak`: mononucleosomal peak (default ~167)
     /// - `di_peak`: dinucleosomal peak (default ~334)
     /// - `mono_weight`: weight of mono vs di peak (default 0.85)
-    /// - `ctdna_fraction`: fraction of fragments that are tumour-derived (shorter, ~143bp)
-    pub fn new(mono_peak: f64, di_peak: f64, mono_weight: f64, ctdna_fraction: f64) -> Self {
+    /// - `ctdna_fraction`: fraction of fragments that are tumour-derived (shorter, ~143 bp)
+    /// - `mono_sd`: SD of the mononucleosomal peak in bp (default 20.0)
+    /// - `di_sd`: SD of the dinucleosomal peak in bp (default 30.0)
+    ///
+    /// Default SDs are from Cristiano et al. 2019 Science (DELFI study), which
+    /// characterised cfDNA fragment size distributions across cancer types.
+    pub fn new(
+        mono_peak: f64,
+        di_peak: f64,
+        mono_weight: f64,
+        ctdna_fraction: f64,
+        mono_sd: f64,
+        di_sd: f64,
+    ) -> Self {
         Self {
-            mono_dist: Normal::new(mono_peak, 20.0).unwrap(),
-            di_dist: Normal::new(di_peak, 30.0).unwrap(),
+            mono_dist: Normal::new(mono_peak, mono_sd).unwrap(),
+            di_dist: Normal::new(di_peak, di_sd).unwrap(),
             mono_weight,
             ctdna_dist: Normal::new(143.0, 15.0).unwrap(),
             ctdna_fraction,
@@ -150,7 +162,7 @@ mod tests {
 
     #[test]
     fn test_cfdna_fragment_sampler() {
-        let sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.0);
+        let sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.0, 20.0, 30.0);
         let mut rng = StdRng::seed_from_u64(42);
         let sizes: Vec<usize> = (0..10000).map(|_| sampler.sample(&mut rng)).collect();
 
@@ -165,8 +177,8 @@ mod tests {
 
     #[test]
     fn test_cfdna_ctdna_shorter() {
-        let sampler_normal = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.0);
-        let sampler_ctdna = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 1.0);
+        let sampler_normal = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.0, 20.0, 30.0);
+        let sampler_ctdna = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 1.0, 20.0, 30.0);
         let mut rng = StdRng::seed_from_u64(42);
 
         let normal_mean: f64 = (0..5000)
@@ -219,6 +231,47 @@ mod tests {
         assert!(
             mean > 5000.0 && mean < 30000.0,
             "mean {} outside expected range",
+            mean
+        );
+    }
+
+    /// Regression test for T076: ctdna_fraction=0.01 should yield mostly normal-length
+    /// fragments, not short ctDNA fragments. The fraction of samples near the ctDNA
+    /// peak (~143 bp) should be approximately 1%, not ~99%.
+    #[test]
+    fn test_cfdna_low_ctdna_fraction_mostly_normal_lengths() {
+        // 1% ctDNA: almost all fragments should be at nucleosomal peaks (>150 bp)
+        let sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.01, 20.0, 30.0);
+        let mut rng = StdRng::seed_from_u64(99);
+        let n = 10_000usize;
+        // Count fragments that are clearly in the short ctDNA range (<150 bp, well below
+        // the mononucleosomal peak of 167 bp).
+        // Use 130 bp as the threshold: this is well below the mononucleosomal
+        // peak (167 bp ± 20 sd), so the mononucleosomal distribution contributes
+        // only ~3% false positives, keeping the total well under the 10% limit.
+        let short_count = (0..n).filter(|_| sampler.sample(&mut rng) < 130).count();
+        let short_fraction = short_count as f64 / n as f64;
+        // With ctdna_fraction=0.01, short-fragment fraction should be near 0.01, not ~0.99.
+        assert!(
+            short_fraction < 0.10,
+            "expected <10% fragments below 130 bp at ctdna_fraction=0.01, got {:.1}%",
+            short_fraction * 100.0
+        );
+    }
+
+    /// Explicit ctdna_fraction=1.0 should yield entirely short fragments.
+    #[test]
+    fn test_cfdna_full_ctdna_fraction_all_short() {
+        let sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 1.0, 20.0, 30.0);
+        let mut rng = StdRng::seed_from_u64(77);
+        let mean: f64 = (0..5_000)
+            .map(|_| sampler.sample(&mut rng) as f64)
+            .sum::<f64>()
+            / 5_000.0;
+        // ctDNA peak is ~143 bp; mean should be well below the nucleosomal peak of 167 bp.
+        assert!(
+            mean < 160.0,
+            "expected mean <160 bp at ctdna_fraction=1.0, got {:.1}",
             mean
         );
     }

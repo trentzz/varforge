@@ -80,6 +80,7 @@ fn default_opts(config: PathBuf) -> SimulateOpts {
         vaf_range: None,
         preset: None,
         dry_run: false,
+        list_presets: false,
         set: None,
     }
 }
@@ -158,10 +159,10 @@ mutations:
 
     simulate::run(opts, None).expect("simulate with variants should succeed");
 
-    let vcf_path = out_dir.path().join("TEST.truth.vcf");
+    let vcf_path = out_dir.path().join("TEST.truth.vcf.gz");
     assert!(vcf_path.exists(), "truth VCF not found");
 
-    let vcf_content = std::fs::read_to_string(&vcf_path).unwrap();
+    let vcf_content = decompress_gz(&vcf_path);
     assert!(
         vcf_content.contains("##fileformat=VCFv4.3"),
         "VCF should have header"
@@ -195,7 +196,7 @@ fn test_simulate_dry_run() {
 
     // Output directory should be empty — no FASTQ/BAM/VCF files written
     let r1 = out_dir.path().join("TEST_R1.fastq.gz");
-    let vcf = out_dir.path().join("TEST.truth.vcf");
+    let vcf = out_dir.path().join("TEST.truth.vcf.gz");
     assert!(!r1.exists(), "R1 FASTQ should not exist in dry-run");
     assert!(!vcf.exists(), "truth VCF should not exist in dry-run");
 }
@@ -566,11 +567,11 @@ seed: 42
     let r1 = out_dir.path().join("PURITY_R1.fastq.gz");
     assert!(r1.exists(), "R1 FASTQ not found for purity test");
 
-    let vcf_path = out_dir.path().join("PURITY.truth.vcf");
+    let vcf_path = out_dir.path().join("PURITY.truth.vcf.gz");
     assert!(vcf_path.exists(), "truth VCF not found for purity test");
 
     // Verify the truth VCF was produced and has the correct header.
-    let vcf_content = std::fs::read_to_string(&vcf_path).unwrap();
+    let vcf_content = decompress_gz(&vcf_path);
     assert!(
         vcf_content.contains("##fileformat=VCFv4"),
         "VCF should have header"
@@ -653,10 +654,10 @@ seed: 77
     let r1 = out_dir.path().join("SUBCLONE_R1.fastq.gz");
     assert!(r1.exists(), "R1 FASTQ not found for subclonal test");
 
-    let vcf_path = out_dir.path().join("SUBCLONE.truth.vcf");
+    let vcf_path = out_dir.path().join("SUBCLONE.truth.vcf.gz");
     assert!(vcf_path.exists(), "truth VCF not found for subclonal test");
 
-    let vcf_content = std::fs::read_to_string(&vcf_path).unwrap();
+    let vcf_content = decompress_gz(&vcf_path);
     assert!(
         vcf_content.contains("##fileformat=VCFv4"),
         "VCF should have header"
@@ -820,10 +821,10 @@ seed: 55
     let opts = default_opts(cfg_path);
     simulate::run(opts, None).expect("low-VAF simulation should succeed");
 
-    let vcf_path = out_dir.path().join("LOWVAF.truth.vcf");
+    let vcf_path = out_dir.path().join("LOWVAF.truth.vcf.gz");
     assert!(vcf_path.exists(), "truth VCF not found for low-VAF test");
 
-    let vcf_content = std::fs::read_to_string(&vcf_path).unwrap();
+    let vcf_content = decompress_gz(&vcf_path);
     assert!(
         vcf_content.contains("##fileformat=VCFv4"),
         "VCF should have header"
@@ -948,7 +949,7 @@ seed: 33
     for sample in &resolved {
         let sample_cfg_path = dir.path().join(format!("{}_config.yaml", sample.name));
         let sample_cfg_str =
-            serde_yaml::to_string(&sample.config).expect("failed to serialize sample config");
+            serde_yml::to_string(&sample.config).expect("failed to serialize sample config");
         std::fs::write(&sample_cfg_path, sample_cfg_str.as_bytes()).unwrap();
 
         let sample_opts = default_opts(sample_cfg_path);
@@ -1164,7 +1165,7 @@ artifacts:
     simulate::run(opts, None).expect("artifacts+variants simulation should succeed");
 
     let r1 = out_dir.path().join("TEST_R1.fastq.gz");
-    let vcf = out_dir.path().join("TEST.truth.vcf");
+    let vcf = out_dir.path().join("TEST.truth.vcf.gz");
 
     assert!(
         r1.exists(),
@@ -1175,7 +1176,7 @@ artifacts:
         "truth VCF not found for artifacts+variants test"
     );
 
-    let vcf_content = std::fs::read_to_string(&vcf).unwrap();
+    let vcf_content = decompress_gz(&vcf);
     assert!(
         vcf_content.contains("##fileformat=VCFv4"),
         "VCF should have proper header"
@@ -1440,13 +1441,13 @@ performance:
     simulate::run(opts, None).expect("streaming variants+VCF simulation should succeed");
 
     // Truth VCF must exist with the correct header.
-    let vcf_path = out_dir.path().join("TEST.truth.vcf");
+    let vcf_path = out_dir.path().join("TEST.truth.vcf.gz");
     assert!(
         vcf_path.exists(),
         "truth VCF not found for streaming variants test"
     );
 
-    let vcf_content = std::fs::read_to_string(&vcf_path).unwrap();
+    let vcf_content = decompress_gz(&vcf_path);
     assert!(
         vcf_content.contains("##fileformat=VCFv4.3"),
         "streaming truth VCF should have correct header"

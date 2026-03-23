@@ -47,6 +47,7 @@ pub fn generate_germline_variants<R: Rng>(
                     expected_vaf: 0.5,
                     clone_id: Some("germline_het".to_string()),
                     haplotype: None,
+                    ccf: None,
                 });
             }
         }
@@ -71,6 +72,7 @@ pub fn generate_germline_variants<R: Rng>(
                     expected_vaf: 1.0,
                     clone_id: Some("germline_hom".to_string()),
                     haplotype: None,
+                    ccf: None,
                 });
             }
         }
@@ -96,6 +98,7 @@ pub fn generate_germline_variants<R: Rng>(
                         expected_vaf: 0.5,
                         clone_id: Some("germline_het".to_string()),
                         haplotype: None,
+                        ccf: None,
                     });
                 }
             } else {
@@ -119,6 +122,7 @@ pub fn generate_germline_variants<R: Rng>(
                         expected_vaf: 0.5,
                         clone_id: Some("germline_het".to_string()),
                         haplotype: None,
+                        ccf: None,
                     });
                 }
             }

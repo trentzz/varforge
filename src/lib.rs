@@ -3,6 +3,7 @@ pub mod cli;
 pub mod core;
 pub mod editor;
 pub mod io;
+pub mod seq_utils;
 pub mod tumour;
 pub mod umi;
 pub mod variants;

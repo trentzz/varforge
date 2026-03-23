@@ -114,6 +114,10 @@ pub struct SimulateOpts {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// List all available presets and exit
+    #[arg(long)]
+    pub list_presets: bool,
+
     /// Set config variables: --set key=value (repeatable). Replaces ${key} in the YAML.
     #[arg(long = "set", value_name = "KEY=VALUE", action = clap::ArgAction::Append)]
     pub set: Option<Vec<String>>,

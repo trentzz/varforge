@@ -53,6 +53,7 @@ pub fn generate_hrd_deletions<R: Rng>(
             expected_vaf: 0.5,
             clone_id: Some("hrd_loh".to_string()),
             haplotype: None,
+            ccf: None,
         });
     }
 
@@ -100,6 +101,7 @@ pub fn generate_tdp_duplications<R: Rng>(
             expected_vaf: 0.5,
             clone_id: Some("tdp".to_string()),
             haplotype: None,
+            ccf: None,
         });
     }
 
@@ -160,6 +162,7 @@ pub fn generate_chromothripsis<R: Rng>(
             expected_vaf: 0.5,
             clone_id: Some("chromothripsis".to_string()),
             haplotype: None,
+            ccf: None,
         });
     }
 

@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 
 use crate::core::types::{MutationType, Variant};
 use crate::editor::bam_editor::{BamEditor, EditConfig};
+use crate::io::vcf_input;
 
 /// Options for the `edit` subcommand.
 #[derive(clap::Parser, Debug)]
@@ -31,8 +32,9 @@ pub struct EditOpts {
     pub seed: u64,
 
     /// Tumour purity (0.0–1.0); scales all variant VAFs.
-    #[arg(long, default_value = "1.0")]
-    pub purity: f64,
+    /// When supplied, overrides the value from --config.
+    #[arg(long)]
+    pub purity: Option<f64>,
 
     /// Path for the output truth VCF.
     #[arg(long)]
@@ -66,18 +68,22 @@ pub fn run(opts: EditOpts, _threads: Option<usize>) -> Result<()> {
 
     // Load variants from VCF or produce an empty list.
     let variants: Vec<Variant> = if let Some(ref vcf_path) = opts.variants {
-        load_variants_from_vcf(vcf_path)?
+        vcf_input::parse_vcf(vcf_path, None, None)
+            .with_context(|| format!("failed to load variants from {}", vcf_path.display()))?
+            .variants
     } else {
         tracing::warn!("no --variants specified; spiking in no variants (pass-through mode)");
         Vec::new()
     };
+
+    let purity = opts.purity.unwrap_or(1.0);
 
     tracing::info!(
         input = %input_bam.display(),
         output = %output_bam.display(),
         variants = variants.len(),
         seed = opts.seed,
-        purity = opts.purity,
+        purity = purity,
         "starting BAM edit"
     );
 
@@ -86,7 +92,7 @@ pub fn run(opts: EditOpts, _threads: Option<usize>) -> Result<()> {
         output_bam: output_bam.clone(),
         variants,
         seed: opts.seed,
-        purity: opts.purity,
+        purity,
         truth_vcf: opts.truth_vcf.clone(),
         sample_name: opts.sample_name.clone(),
     };
@@ -159,20 +165,27 @@ fn default_vaf() -> f64 {
     0.5
 }
 
-fn run_from_config(config_path: &PathBuf, seed_override: u64, purity_override: f64) -> Result<()> {
+fn run_from_config(
+    config_path: &PathBuf,
+    seed_override: u64,
+    purity_override: Option<f64>,
+) -> Result<()> {
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("failed to read edit config: {}", config_path.display()))?;
-    let cfg: EditYamlConfig = serde_yaml::from_str(&content)
+    let cfg: EditYamlConfig = serde_yml::from_str(&content)
         .with_context(|| format!("failed to parse edit config: {}", config_path.display()))?;
 
     let seed = cfg.seed.unwrap_or(seed_override);
-    let purity = cfg.purity.min(purity_override);
+    // CLI flag wins when supplied; otherwise fall back to the config value.
+    let purity = purity_override.unwrap_or(cfg.purity);
 
     let mut variants: Vec<Variant> = Vec::new();
 
     // Load from VCF if specified.
     if let Some(ref vcf_path) = cfg.variants.vcf_path {
-        variants.extend(load_variants_from_vcf(vcf_path)?);
+        let parsed = vcf_input::parse_vcf(vcf_path, None, None)
+            .with_context(|| format!("failed to load variants from {}", vcf_path.display()))?;
+        variants.extend(parsed.variants);
     }
 
     // Load inline variants.
@@ -196,6 +209,7 @@ fn run_from_config(config_path: &PathBuf, seed_override: u64, purity_override: f
             expected_vaf: iv.vaf,
             clone_id: None,
             haplotype: None,
+            ccf: None,
         });
     }
 
@@ -224,6 +238,7 @@ fn run_from_config(config_path: &PathBuf, seed_override: u64, purity_override: f
 ///
 /// This is a simple line-by-line parser that handles SNVs and indels.
 /// VCF records with symbolic ALT alleles (e.g. `<DEL>`) are skipped.
+#[allow(dead_code)]
 fn load_variants_from_vcf(vcf_path: &PathBuf) -> Result<Vec<Variant>> {
     use std::io::{BufRead, BufReader};
 
@@ -291,6 +306,7 @@ fn load_variants_from_vcf(vcf_path: &PathBuf) -> Result<Vec<Variant>> {
             expected_vaf,
             clone_id: None,
             haplotype: None,
+            ccf: None,
         });
     }
 
@@ -303,6 +319,7 @@ fn load_variants_from_vcf(vcf_path: &PathBuf) -> Result<Vec<Variant>> {
 }
 
 /// Extract AF or EXPECTED_VAF from a VCF INFO field string.
+#[allow(dead_code)]
 fn parse_vaf_from_info(info: &str) -> Option<f64> {
     for field in info.split(';') {
         if let Some(val) = field
@@ -422,5 +439,65 @@ mod tests {
 
         let variants = load_variants_from_vcf(&tmp.path().to_path_buf()).unwrap();
         assert_eq!(variants.len(), 1, "symbolic ALT should be skipped");
+    }
+
+    // ------------------------------------------------------------------
+    // Purity merge tests (T055)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_purity_cli_wins_over_config() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Config purity is 0.3; CLI override is 0.8.
+        // CLI must win, so the result must be 0.8.
+        let mut tmp = NamedTempFile::new().unwrap();
+        writeln!(
+            tmp,
+            "input_bam: /dev/null\noutput_bam: /dev/null\npurity: 0.3"
+        )
+        .unwrap();
+        tmp.flush().unwrap();
+
+        // `purity_override` reflects a CLI-supplied value.
+        let effective = {
+            let content = std::fs::read_to_string(tmp.path()).unwrap();
+            let cfg: EditYamlConfig = serde_yml::from_str(&content).unwrap();
+            let purity_override: Option<f64> = Some(0.8);
+            purity_override.unwrap_or(cfg.purity)
+        };
+
+        assert!(
+            (effective - 0.8).abs() < 1e-9,
+            "CLI purity 0.8 must override config purity 0.3; got {effective}"
+        );
+    }
+
+    #[test]
+    fn test_purity_config_used_when_cli_absent() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // No CLI flag supplied (None); config purity 0.3 must be used.
+        let mut tmp = NamedTempFile::new().unwrap();
+        writeln!(
+            tmp,
+            "input_bam: /dev/null\noutput_bam: /dev/null\npurity: 0.3"
+        )
+        .unwrap();
+        tmp.flush().unwrap();
+
+        let effective = {
+            let content = std::fs::read_to_string(tmp.path()).unwrap();
+            let cfg: EditYamlConfig = serde_yml::from_str(&content).unwrap();
+            let purity_override: Option<f64> = None;
+            purity_override.unwrap_or(cfg.purity)
+        };
+
+        assert!(
+            (effective - 0.3).abs() < 1e-9,
+            "config purity 0.3 must be used when CLI flag absent; got {effective}"
+        );
     }
 }

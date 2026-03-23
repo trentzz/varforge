@@ -337,7 +337,11 @@ fn preset_glioblastoma() -> PresetOverlay {
 // ---------------------------------------------------------------------------
 
 /// A canonical driver mutation associated with a cancer type.
-#[allow(dead_code)]
+///
+/// Genomic coordinates are hg38 (GRCh38). `pos` is 0-based. `ref_allele` and
+/// `alt_allele` are `None` for structural/fusion events (e.g. amplification,
+/// fusion) that cannot be represented as a single-nucleotide or short indel
+/// variant; those entries are skipped during driver injection.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DriverMutation {
     /// HGNC gene symbol, e.g. `"KRAS"`.
@@ -346,6 +350,16 @@ pub struct DriverMutation {
     pub alteration: &'static str,
     /// Approximate prevalence in this cancer type (0.0–1.0).
     pub prevalence: f32,
+    /// Chromosome name in hg38 format, e.g. `"chr12"`. `None` for
+    /// non-positional alterations.
+    pub chrom: Option<&'static str>,
+    /// 0-based position on the chromosome (hg38). `None` when unavailable.
+    pub pos: Option<u64>,
+    /// Reference allele at this position (ASCII bytes). `None` for
+    /// non-SNV/indel events.
+    pub ref_allele: Option<&'static [u8]>,
+    /// Alternate allele (ASCII bytes). `None` for non-SNV/indel events.
+    pub alt_allele: Option<&'static [u8]>,
 }
 
 /// Return the list of canonical driver mutations for a given cancer preset
@@ -371,31 +385,60 @@ static LUNG_ADENO_DRIVERS: &[DriverMutation] = &[
         gene: "KRAS",
         alteration: "G12C",
         prevalence: 0.13,
+        // chr12:25_227_342 hg38; KRAS codon 12, TGT→TGT is G12C (c.34G>T)
+        chrom: Some("chr12"),
+        pos: Some(25_227_342),
+        ref_allele: Some(b"G"),
+        alt_allele: Some(b"T"),
     },
     DriverMutation {
         gene: "EGFR",
         alteration: "L858R",
         prevalence: 0.10,
+        // chr7:55_191_822 hg38; EGFR exon 21 L858R (c.2573T>G)
+        chrom: Some("chr7"),
+        pos: Some(55_191_822),
+        ref_allele: Some(b"T"),
+        alt_allele: Some(b"G"),
     },
     DriverMutation {
         gene: "EGFR",
         alteration: "exon19del",
         prevalence: 0.10,
+        // Representative exon 19 deletion (delE746-A750, most common)
+        // chr7:55_174_772 hg38 (15 bp deletion AATTAAGAGAAGCA)
+        chrom: Some("chr7"),
+        pos: Some(55_174_772),
+        ref_allele: Some(b"AATTAAGAGAAGCAA"),
+        alt_allele: Some(b"A"),
     },
     DriverMutation {
         gene: "TP53",
         alteration: "various",
         prevalence: 0.46,
+        // No single representative hotspot; skip injection.
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "STK11",
         alteration: "various",
         prevalence: 0.17,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "KEAP1",
         alteration: "various",
         prevalence: 0.12,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
 ];
 
@@ -403,28 +446,49 @@ static LUNG_ADENO_DRIVERS: &[DriverMutation] = &[
 static COLORECTAL_DRIVERS: &[DriverMutation] = &[
     DriverMutation {
         gene: "KRAS",
+        // G12D is the most common in CRC (c.35G>A)
         alteration: "G12D/V",
         prevalence: 0.45,
+        chrom: Some("chr12"),
+        pos: Some(25_227_343),
+        ref_allele: Some(b"G"),
+        alt_allele: Some(b"A"),
     },
     DriverMutation {
         gene: "APC",
         alteration: "truncating",
         prevalence: 0.80,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "TP53",
         alteration: "various",
         prevalence: 0.60,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "SMAD4",
         alteration: "various",
         prevalence: 0.15,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "PIK3CA",
         alteration: "various",
         prevalence: 0.20,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
 ];
 
@@ -434,21 +498,38 @@ static BREAST_TNBC_DRIVERS: &[DriverMutation] = &[
         gene: "TP53",
         alteration: "various",
         prevalence: 0.80,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "BRCA1",
         alteration: "germline/somatic",
         prevalence: 0.20,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "RB1",
         alteration: "loss",
         prevalence: 0.20,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "PIK3CA",
+        // PIK3CA H1047R hotspot (c.3140A>G)
         alteration: "various",
         prevalence: 0.10,
+        chrom: Some("chr3"),
+        pos: Some(179_234_296),
+        ref_allele: Some(b"A"),
+        alt_allele: Some(b"G"),
     },
 ];
 
@@ -458,26 +539,49 @@ static MELANOMA_DRIVERS: &[DriverMutation] = &[
         gene: "BRAF",
         alteration: "V600E",
         prevalence: 0.50,
+        // chr7:140_753_335 hg38; BRAF V600E (c.1799T>A)
+        chrom: Some("chr7"),
+        pos: Some(140_753_335),
+        ref_allele: Some(b"A"),
+        alt_allele: Some(b"T"),
     },
     DriverMutation {
         gene: "NRAS",
         alteration: "Q61R/K",
         prevalence: 0.20,
+        // chr1:114_716_126 hg38; NRAS Q61R (c.182A>G)
+        chrom: Some("chr1"),
+        pos: Some(114_716_126),
+        ref_allele: Some(b"A"),
+        alt_allele: Some(b"G"),
     },
     DriverMutation {
         gene: "TERT",
         alteration: "promoter C228T/C250T",
         prevalence: 0.74,
+        // chr5:1_295_228 hg38; TERT promoter C228T (c.-124C>T)
+        chrom: Some("chr5"),
+        pos: Some(1_295_228),
+        ref_allele: Some(b"C"),
+        alt_allele: Some(b"T"),
     },
     DriverMutation {
         gene: "CDKN2A",
         alteration: "various",
         prevalence: 0.40,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "PTEN",
         alteration: "loss",
         prevalence: 0.20,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
 ];
 
@@ -487,31 +591,55 @@ static AML_DRIVERS: &[DriverMutation] = &[
         gene: "FLT3",
         alteration: "ITD",
         prevalence: 0.25,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "NPM1",
         alteration: "W288fs",
         prevalence: 0.30,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "DNMT3A",
         alteration: "R882H",
         prevalence: 0.22,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "IDH1",
         alteration: "R132H",
         prevalence: 0.08,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "IDH2",
         alteration: "R140Q",
         prevalence: 0.12,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "TET2",
         alteration: "various",
         prevalence: 0.10,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
 ];
 
@@ -521,26 +649,46 @@ static PROSTATE_DRIVERS: &[DriverMutation] = &[
         gene: "TMPRSS2-ERG",
         alteration: "fusion",
         prevalence: 0.50,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "AR",
         alteration: "amplification",
         prevalence: 0.30,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "PTEN",
         alteration: "loss",
         prevalence: 0.25,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "TP53",
         alteration: "various",
         prevalence: 0.25,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "BRCA2",
         alteration: "germline/somatic",
         prevalence: 0.12,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
 ];
 
@@ -550,21 +698,37 @@ static PANCREATIC_DRIVERS: &[DriverMutation] = &[
         gene: "KRAS",
         alteration: "G12D",
         prevalence: 0.92,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "TP53",
         alteration: "various",
         prevalence: 0.72,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "SMAD4",
         alteration: "various",
         prevalence: 0.32,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "CDKN2A",
         alteration: "various",
         prevalence: 0.29,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
 ];
 
@@ -574,26 +738,46 @@ static GLIOBLASTOMA_DRIVERS: &[DriverMutation] = &[
         gene: "EGFR",
         alteration: "amplification/EGFRvIII",
         prevalence: 0.57,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "PTEN",
         alteration: "loss",
         prevalence: 0.40,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "TP53",
         alteration: "various",
         prevalence: 0.28,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "TERT",
         alteration: "promoter C228T/C250T",
         prevalence: 0.72,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
     DriverMutation {
         gene: "IDH1",
         alteration: "R132H (IDH-mutant subset)",
         prevalence: 0.10,
+        chrom: None,
+        pos: None,
+        ref_allele: None,
+        alt_allele: None,
     },
 ];
 
@@ -620,6 +804,7 @@ mod tests {
                 manifest: false,
                 germline_vcf: false,
                 single_read_bam: false,
+                mapq: 60,
             },
             sample: SampleConfig::default(),
             fragment: FragmentConfig::default(),

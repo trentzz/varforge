@@ -441,6 +441,8 @@ mod tests {
             fragment_length: len + 50,
             chrom: "chr1".to_string(),
             variant_tags: Vec::new(),
+            ref_seq_r1: Vec::new(),
+            ref_seq_r2: Vec::new(),
         }
     }
 
