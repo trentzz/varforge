@@ -20,4 +20,4 @@ planned tasks should be annotated with the task ID, not silently suppressed.
 
 - T103: Audit all dead_code annotations; remove genuinely unused items; annotate kept items
   with task IDs
-- T104: Remove PcrFamilySizeSampler from fragment.rs if no task plans to use it
+- T104: Wire PcrFamilySizeSampler into UMI family generation (log-normal family sizes)
