@@ -18,3 +18,5 @@ These features reduce friction for users running large-scale evaluations and for
 - T047: Implement `${variable}` substitution in Config loading + `--set key=value` CLI flag
 - T050: Complete `learn-profile` command: read quality-by-cycle from BAM
 - T051: Serialise/deserialise quality profile to `.profile.tsv`
+- T065: Unify edit VCF parser with io/vcf_input.rs
+- T066: Streaming BAM editor (BAI-based regional query, eliminates in-memory load)

@@ -14,3 +14,4 @@ New users should be able to get a working config with one line. Presets also act
 - T016: Define preset lookup table in `io/config.rs`
 - T017: Apply preset defaults after YAML deserialisation
 - T018: Add integration test: preset fills expected defaults
+- T068: Wire driver mutation tables into cancer presets (include_driver_mutations flag)

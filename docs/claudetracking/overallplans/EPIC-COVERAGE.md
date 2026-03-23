@@ -16,3 +16,5 @@ Real capture panels have non-uniform depth across targets. A per-target depth co
 - T021: Track per-chromosome coverage statistics (mean, sd) during simulation
 - T022: Compute family size distribution and duplicate rate
 - T023: Write `sim_report.json` with coverage, VAF accuracy, family stats
+- T069: Replace intersect_with_targets O(n*m) with sort-merge approach
+- T070: Wrap Config in Arc to eliminate per-region clones in parallel loop
