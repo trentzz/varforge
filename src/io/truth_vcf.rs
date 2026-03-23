@@ -1,22 +1,29 @@
-use std::io::{BufWriter, Write};
+use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use noodles_bgzf as bgzf;
 
 use crate::core::types::{MutationType, Variant};
+use crate::variants::structural::StructuralVariant;
+use crate::variants::structural::{sv_vcf_alt, sv_vcf_info};
 
 /// Writer for truth VCF files produced by VarForge.
 ///
-/// Outputs a VCF 4.3 file containing every variant spiked into the simulated
-/// reads, annotated with expected VAF, clone assignment, variant type, and
-/// cancer-cell fraction.  The file is intended as a ground-truth reference for
-/// benchmarking variant callers.
+/// Outputs a bgzip-compressed VCF 4.3 file containing every variant spiked
+/// into the simulated reads, annotated with expected VAF, clone assignment,
+/// variant type, and cancer-cell fraction.  The file is intended as a
+/// ground-truth reference for benchmarking variant callers.
+///
+/// The output is bgzip-compressed so standard tools (bcftools, IGV) can read
+/// it directly.  To build a tabix index, run `tabix -p vcf output.vcf.gz`
+/// after generation.
 pub struct TruthVcfWriter {
-    writer: BufWriter<std::fs::File>,
+    writer: bgzf::Writer<std::fs::File>,
 }
 
 impl TruthVcfWriter {
-    /// Create a new truth VCF at `path`.
+    /// Create a new bgzip-compressed truth VCF at `path`.
     ///
     /// Writes the complete VCF header immediately, including:
     /// - `##fileformat`, `##source`, INFO meta-lines, contig lines, FORMAT line.
@@ -27,7 +34,7 @@ impl TruthVcfWriter {
     pub fn new(path: &Path, sample_name: &str, contigs: &[(String, u64)]) -> Result<Self> {
         let file = std::fs::File::create(path)
             .with_context(|| format!("failed to create truth VCF: {}", path.display()))?;
-        let mut writer = BufWriter::new(file);
+        let mut writer = bgzf::Writer::new(file);
 
         // File-format and source
         writeln!(writer, "##fileformat=VCFv4.3")?;
@@ -58,6 +65,18 @@ impl TruthVcfWriter {
             writer,
             r#"##INFO=<ID=N_DUPLEX_ALT,Number=1,Type=Integer,Description="Number of duplex AB+BA family pairs carrying the alt allele">"#
         )?;
+        writeln!(
+            writer,
+            r#"##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Structural variant type (DEL, INS, INV, DUP, BND)">"#
+        )?;
+        writeln!(
+            writer,
+            r#"##INFO=<ID=SVLEN,Number=1,Type=Integer,Description="Difference in length between REF and ALT alleles">"#
+        )?;
+        writeln!(
+            writer,
+            r#"##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the structural variant">"#
+        )?;
 
         // Contig lines
         for (name, length) in contigs {
@@ -79,6 +98,24 @@ impl TruthVcfWriter {
         Ok(Self { writer })
     }
 
+    /// Select the VCF genotype string for a variant.
+    ///
+    /// Returns `"1/1"` when the variant is homozygous (VAF >= 0.99 or
+    /// clone_id contains "hom"), and `"0/1"` otherwise.
+    fn genotype(variant: &Variant) -> &'static str {
+        let is_hom = variant.expected_vaf >= 0.99
+            || variant
+                .clone_id
+                .as_deref()
+                .map(|id| id.contains("hom"))
+                .unwrap_or(false);
+        if is_hom {
+            "1/1"
+        } else {
+            "0/1"
+        }
+    }
+
     /// Write a single variant record.
     ///
     /// - `ref_allele` / `alt_allele` are the REF and ALT byte sequences.
@@ -86,7 +123,9 @@ impl TruthVcfWriter {
     /// - `n_duplex_alt` is the number of duplex AB+BA family pairs carrying the alt allele.
     /// - The position written is 1-based (VCF convention); `variant.pos()` is
     ///   assumed to be 0-based and is incremented by 1.
-    /// - QUAL is `.`, FILTER is `PASS`, FORMAT/SAMPLE is `GT\t0/1`.
+    /// - QUAL is `.`, FILTER is `PASS`.
+    /// - GT is `1/1` for homozygous variants (VAF >= 0.99 or clone_id contains "hom"),
+    ///   `0/1` otherwise.
     pub fn write_variant(
         &mut self,
         variant: &Variant,
@@ -106,6 +145,7 @@ impl TruthVcfWriter {
         // no richer tumour model is present.  Callers that have a full ClonalTree
         // should populate a CCF field on Variant in a future iteration.
         let ccf = vaf;
+        let gt = Self::genotype(variant);
 
         let info = format!(
             "EXPECTED_VAF={vaf:.6};CLONE={clone_id};VARTYPE={vartype};CCF={ccf:.6};\
@@ -114,7 +154,7 @@ impl TruthVcfWriter {
 
         writeln!(
             self.writer,
-            "{chrom}\t{pos}\t.\t{ref_str}\t{alt_str}\t.\tPASS\t{info}\tGT\t0/1",
+            "{chrom}\t{pos}\t.\t{ref_str}\t{alt_str}\t.\tPASS\t{info}\tGT\t{gt}",
             chrom = variant.chrom,
             pos = pos_1based,
         )?;
@@ -122,9 +162,53 @@ impl TruthVcfWriter {
         Ok(())
     }
 
-    /// Flush and close the writer.
+    /// Write a structural variant record.
+    ///
+    /// The ALT uses symbolic alleles (`<DEL>`, `<INS>`, `<INV>`, `<DUP>`) or
+    /// BND notation for translocations.  The INFO field includes SVTYPE, END,
+    /// and SVLEN in standard VCF format.
+    ///
+    /// - `expected_vaf` is the target allele frequency.
+    /// - `clone_id` is the clone assignment (used to select GT and annotate CLONE).
+    #[allow(dead_code)]
+    pub fn write_sv(
+        &mut self,
+        sv: &StructuralVariant,
+        expected_vaf: f64,
+        clone_id: Option<&str>,
+    ) -> Result<()> {
+        let chrom = sv.chrom();
+        let pos_1based = sv.start() + 1;
+        let _end_1based = sv.end();
+
+        let alt = sv_vcf_alt(sv);
+        let sv_info = sv_vcf_info(sv);
+        let clone_str = clone_id.unwrap_or(".");
+
+        // Homozygous if VAF >= 0.99 or clone_id contains "hom".
+        let is_hom = expected_vaf >= 0.99 || clone_id.map(|id| id.contains("hom")).unwrap_or(false);
+        let gt = if is_hom { "1/1" } else { "0/1" };
+
+        let info = format!(
+            "{sv_info};EXPECTED_VAF={expected_vaf:.6};CLONE={clone_str};\
+             VARTYPE=SV;CCF={expected_vaf:.6};N_ALT_MOL=0;N_DUPLEX_ALT=0"
+        );
+
+        writeln!(
+            self.writer,
+            "{chrom}\t{pos_1based}\t.\tN\t{alt}\t.\tPASS\t{info}\tGT\t{gt}",
+        )?;
+
+        Ok(())
+    }
+
+    /// Flush and close the bgzip writer.
+    ///
+    /// To build a tabix index after generation, run: `tabix -p vcf output.vcf.gz`
     pub fn finish(mut self) -> Result<()> {
-        self.writer.flush().context("failed to flush truth VCF")?;
+        self.writer
+            .try_finish()
+            .context("failed to finish bgzip truth VCF")?;
         Ok(())
     }
 }
@@ -180,6 +264,7 @@ mod tests {
             expected_vaf: vaf,
             clone_id: clone.map(|s| s.to_string()),
             haplotype: None,
+            ccf: None,
         }
     }
 
@@ -194,6 +279,7 @@ mod tests {
             expected_vaf: vaf,
             clone_id: None,
             haplotype: None,
+            ccf: None,
         }
     }
 
@@ -208,6 +294,7 @@ mod tests {
             expected_vaf: vaf,
             clone_id: None,
             haplotype: None,
+            ccf: None,
         }
     }
 
@@ -222,6 +309,7 @@ mod tests {
             expected_vaf: vaf,
             clone_id: None,
             haplotype: None,
+            ccf: None,
         }
     }
 
@@ -232,8 +320,14 @@ mod tests {
         ]
     }
 
+    /// Read and decompress a bgzip VCF for assertions.
     fn read_vcf(path: &std::path::Path) -> String {
-        std::fs::read_to_string(path).expect("failed to read VCF file")
+        use std::io::Read;
+        let file = std::fs::File::open(path).expect("failed to open VCF");
+        let mut reader = bgzf::Reader::new(file);
+        let mut buf = String::new();
+        reader.read_to_string(&mut buf).expect("failed to read VCF");
+        buf
     }
 
     // ------------------------------------------------------------------
@@ -241,7 +335,7 @@ mod tests {
     // ------------------------------------------------------------------
     #[test]
     fn test_write_header() {
-        let tmp = NamedTempFile::new().unwrap();
+        let tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
         let contigs = default_contigs();
         let writer = TruthVcfWriter::new(tmp.path(), "SAMPLE01", &contigs).unwrap();
         writer.finish().unwrap();
@@ -278,7 +372,7 @@ mod tests {
     // ------------------------------------------------------------------
     #[test]
     fn test_write_snv() {
-        let tmp = NamedTempFile::new().unwrap();
+        let tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
         let contigs = default_contigs();
         let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
 
@@ -312,7 +406,7 @@ mod tests {
     // ------------------------------------------------------------------
     #[test]
     fn test_write_indel() {
-        let tmp = NamedTempFile::new().unwrap();
+        let tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
         let contigs = default_contigs();
         let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
 
@@ -348,7 +442,7 @@ mod tests {
     // ------------------------------------------------------------------
     #[test]
     fn test_write_mnv() {
-        let tmp = NamedTempFile::new().unwrap();
+        let tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
         let contigs = default_contigs();
         let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
 
@@ -375,7 +469,7 @@ mod tests {
     // ------------------------------------------------------------------
     #[test]
     fn test_expected_vaf_in_info() {
-        let tmp = NamedTempFile::new().unwrap();
+        let tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
         let contigs = default_contigs();
         let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
 
@@ -404,7 +498,7 @@ mod tests {
     // ------------------------------------------------------------------
     #[test]
     fn test_clone_assignment() {
-        let tmp = NamedTempFile::new().unwrap();
+        let tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
         let contigs = default_contigs();
         let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
 
@@ -433,7 +527,7 @@ mod tests {
     // ------------------------------------------------------------------
     #[test]
     fn test_multiple_variants() {
-        let tmp = NamedTempFile::new().unwrap();
+        let tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
         let contigs = default_contigs();
         let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
 
@@ -466,7 +560,7 @@ mod tests {
     // ------------------------------------------------------------------
     #[test]
     fn test_contig_headers() {
-        let tmp = NamedTempFile::new().unwrap();
+        let tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
         let contigs = vec![
             ("chrX".to_string(), 156040895u64),
             ("chrY".to_string(), 57227415u64),
@@ -484,5 +578,115 @@ mod tests {
             vcf.contains("##contig=<ID=chrY,length=57227415>"),
             "missing chrY contig line"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // test_homozygous_genotype (T079)
+    // ------------------------------------------------------------------
+    #[test]
+    fn test_homozygous_genotype() {
+        let tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
+        let contigs = default_contigs();
+        let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
+
+        // Germline homozygous by clone_id
+        let hom_by_clone = snv_variant("chr1", 100, 0.5, Some("germline_hom"));
+        writer
+            .write_variant(&hom_by_clone, b"A", b"T", 10, 0)
+            .unwrap();
+
+        // Homozygous by VAF >= 0.99
+        let hom_by_vaf = snv_variant("chr1", 200, 1.0, None);
+        writer
+            .write_variant(&hom_by_vaf, b"C", b"G", 10, 0)
+            .unwrap();
+
+        // Somatic heterozygous
+        let het = snv_variant("chr1", 300, 0.35, Some("clone_A"));
+        writer.write_variant(&het, b"G", b"A", 10, 0).unwrap();
+
+        writer.finish().unwrap();
+
+        let vcf = read_vcf(tmp.path());
+        let data_lines: Vec<&str> = vcf.lines().filter(|l| !l.starts_with('#')).collect();
+        assert_eq!(data_lines.len(), 3);
+
+        let gt0 = data_lines[0].split('\t').nth(9).unwrap();
+        let gt1 = data_lines[1].split('\t').nth(9).unwrap();
+        let gt2 = data_lines[2].split('\t').nth(9).unwrap();
+
+        assert_eq!(gt0, "1/1", "germline_hom clone should produce GT=1/1");
+        assert_eq!(gt1, "1/1", "VAF=1.0 should produce GT=1/1");
+        assert_eq!(gt2, "0/1", "somatic variant should produce GT=0/1");
+    }
+
+    // ------------------------------------------------------------------
+    // test_sv_record (T082)
+    // ------------------------------------------------------------------
+    #[test]
+    fn test_sv_record() {
+        let tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
+        let contigs = default_contigs();
+        let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
+
+        // Deletion SV: chr1:1000-2000
+        let del_sv = StructuralVariant::Deletion {
+            chrom: "chr1".to_string(),
+            start: 1000,
+            end: 2000,
+        };
+        writer.write_sv(&del_sv, 0.45, Some("clone_A")).unwrap();
+
+        writer.finish().unwrap();
+
+        let vcf = read_vcf(tmp.path());
+        let record: Vec<&str> = vcf
+            .lines()
+            .find(|l| !l.starts_with('#'))
+            .expect("no data line")
+            .split('\t')
+            .collect();
+
+        assert_eq!(record[0], "chr1", "CHROM");
+        assert_eq!(record[1], "1001", "POS (1-based, start+1)");
+        assert_eq!(record[3], "N", "REF for SV is N");
+        assert_eq!(record[4], "<DEL>", "ALT for deletion is <DEL>");
+        assert_eq!(record[6], "PASS", "FILTER");
+
+        let info = record[7];
+        assert!(info.contains("SVTYPE=DEL"), "INFO must contain SVTYPE=DEL");
+        assert!(info.contains("END=2000"), "INFO must contain END=2000");
+        assert!(
+            info.contains("SVLEN=-1000"),
+            "INFO must contain SVLEN=-1000"
+        );
+
+        assert_eq!(record[8], "GT", "FORMAT");
+        assert_eq!(record[9], "0/1", "GT for VAF=0.45 is 0/1");
+    }
+
+    // ------------------------------------------------------------------
+    // test_bgzip_output (T081)
+    // ------------------------------------------------------------------
+    #[test]
+    fn test_bgzip_output() {
+        use std::io::Read;
+
+        let tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
+        let contigs = default_contigs();
+        let writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
+        writer.finish().unwrap();
+
+        // Read raw bytes — bgzip files start with the gzip magic number 0x1f 0x8b.
+        let mut raw = Vec::new();
+        std::fs::File::open(tmp.path())
+            .unwrap()
+            .read_to_end(&mut raw)
+            .unwrap();
+        assert!(
+            raw.starts_with(&[0x1f, 0x8b]),
+            "output must start with gzip magic bytes"
+        );
+        // Tabix index (.tbi) is generated by the caller via `tabix -p vcf output.vcf.gz`.
     }
 }

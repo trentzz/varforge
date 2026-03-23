@@ -30,22 +30,54 @@ pub fn partition_regions(chrom_lengths: &[(String, u64)], chunk_size: u64) -> Ve
 }
 
 /// Filter regions to only those overlapping a set of target intervals.
+///
+/// Uses a sort-merge two-pointer approach: O((n+m) log n) versus the naive
+/// O(n×m) nested loop. Both inputs are sorted by (chrom, start) before
+/// the merge so callers do not need to pre-sort.
 pub fn intersect_with_targets(regions: &[Region], targets: &[Region]) -> Vec<Region> {
+    if regions.is_empty() || targets.is_empty() {
+        return Vec::new();
+    }
+
+    // Sort copies so we can two-pointer merge without mutating the inputs.
+    let mut sorted_regions: Vec<&Region> = regions.iter().collect();
+    let mut sorted_targets: Vec<&Region> = targets.iter().collect();
+    sorted_regions.sort_by(|a, b| a.chrom.cmp(&b.chrom).then_with(|| a.start.cmp(&b.start)));
+    sorted_targets.sort_by(|a, b| a.chrom.cmp(&b.chrom).then_with(|| a.start.cmp(&b.start)));
+
     let mut result = Vec::new();
-    for region in regions {
-        for target in targets {
-            if region.chrom == target.chrom
-                && region.start < target.end
-                && region.end > target.start
-            {
-                result.push(Region::new(
-                    region.chrom.clone(),
-                    region.start.max(target.start),
-                    region.end.min(target.end),
-                ));
+    let mut t_start = 0usize;
+
+    for region in &sorted_regions {
+        // Advance the target pointer past targets that end before this region starts.
+        while t_start < sorted_targets.len() {
+            let t = sorted_targets[t_start];
+            if t.chrom < region.chrom || (t.chrom == region.chrom && t.end <= region.start) {
+                t_start += 1;
+            } else {
+                break;
             }
         }
+
+        // Scan forward from t_start and emit overlaps.
+        let mut t_idx = t_start;
+        while t_idx < sorted_targets.len() {
+            let t = sorted_targets[t_idx];
+            // Stop when we've passed the end of this region or moved to a different chrom.
+            if t.chrom != region.chrom || t.start >= region.end {
+                break;
+            }
+            if t.end > region.start {
+                result.push(Region::new(
+                    region.chrom.clone(),
+                    region.start.max(t.start),
+                    region.end.min(t.end),
+                ));
+            }
+            t_idx += 1;
+        }
     }
+
     result
 }
 

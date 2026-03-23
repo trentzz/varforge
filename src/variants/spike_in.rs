@@ -91,7 +91,7 @@ pub fn spike_indel(
                 let mut new_qual = Vec::with_capacity(original_len);
                 new_qual.extend_from_slice(&read.qual[..offset]);
                 let avg_qual = if offset > 0 && offset < read.qual.len() {
-                    (read.qual[offset - 1] + read.qual[offset]) / 2
+                    ((read.qual[offset - 1] as u16 + read.qual[offset] as u16) / 2) as u8
                 } else {
                     read.qual[offset.min(read.qual.len() - 1)]
                 };
@@ -262,5 +262,28 @@ mod tests {
         spike_indel(&mut read, 100, &mutation, b"NNNN");
         assert_eq!(read.len(), original_len, "read length must be preserved");
         assert_eq!(read.seq.len(), read.qual.len(), "seq and qual must match");
+    }
+
+    // ------------------------------------------------------------------
+    // Quality averaging overflow (T053)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_indel_quality_avg_no_overflow() {
+        // Plain u8 addition `200 + 200` overflows in debug (panic) and wraps in
+        // release. The fix widens to u16 before dividing. Ensure the averaged
+        // quality is 200, not 0 or a panic.
+        let mut read = Read::new(b"ACGTACGTACGT".to_vec(), vec![200u8; 12]);
+        let mutation = MutationType::Indel {
+            pos: 103,
+            ref_seq: vec![b'T'],
+            alt_seq: vec![b'T', b'A'],
+        };
+        spike_indel(&mut read, 100, &mutation, b"NN");
+        assert!(
+            read.qual.iter().all(|&q| q == 200),
+            "all qualities must remain 200; got {:?}",
+            read.qual
+        );
     }
 }

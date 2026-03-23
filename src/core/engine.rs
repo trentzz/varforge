@@ -20,6 +20,7 @@ use crate::core::quality::{
 use crate::core::types::{MutationType, Read, ReadPair, Region, SvType, Variant, VariantTag};
 use crate::io::config::{Config, FragmentModel};
 use crate::io::reference::ReferenceGenome;
+use crate::seq_utils::reverse_complement;
 use crate::umi::barcode::{generate_duplex_umi_pair, generate_umi};
 use crate::umi::families::{generate_pcr_copies, sample_family_size, UmiFamily};
 use crate::variants::cnv::{adjusted_coverage, find_cn_region, CopyNumberRegion};
@@ -250,17 +251,27 @@ impl SimulationEngine {
                 FragmentModel::Cfda => {
                     let mono_peak = self.config.fragment.mean;
                     let di_peak = mono_peak * 2.0;
-                    let ctdna_fraction = self
-                        .config
-                        .tumour
-                        .as_ref()
-                        .map(|t| 1.0 - t.purity) // ctDNA fraction is related to tumour content
-                        .unwrap_or(0.0);
+                    // Resolve ctDNA fraction: explicit config field takes priority
+                    // over purity. Higher purity means more tumour-derived ctDNA,
+                    // so we use purity directly (not 1.0 - purity).
+                    let ctdna_fraction = self.config.fragment.ctdna_fraction.unwrap_or_else(|| {
+                        self.config.tumour.as_ref().map(|t| t.purity).unwrap_or(0.0)
+                    });
+                    if (ctdna_fraction - 1.0).abs() < f64::EPSILON {
+                        tracing::warn!(
+                            "purity=1.0 with cfDNA model: all fragments will be \
+                             tumour-derived. Did you mean to set a lower purity?"
+                        );
+                    }
+                    let mono_sd = self.config.fragment.mono_sd.unwrap_or(20.0);
+                    let di_sd = self.config.fragment.di_sd.unwrap_or(30.0);
                     Sampler::Cfdna(CfdnaFragmentSampler::new(
                         mono_peak,
                         di_peak,
                         0.85,
                         ctdna_fraction,
+                        mono_sd,
+                        di_sd,
                     ))
                 }
                 _ => Sampler::Normal(NormalFragmentSampler::new(
@@ -416,6 +427,11 @@ impl SimulationEngine {
             // fragments on that haplotype.
             let fragment_haplotype: u8 = self.rng.gen_range(0u8..2);
 
+            // ---- Save pre-variant reference for MD tag construction ----
+            // Clone the unmodified fragment sequence before any variant is applied.
+            // The BAM writer uses this to build the MD tag.
+            let pre_variant_frag_seq = frag_seq.clone();
+
             // ---- Variant spike-in ----
             // Collect tags for any variant actually applied to this fragment.
             let mut fragment_variant_tags: Vec<VariantTag> = Vec::new();
@@ -473,6 +489,25 @@ impl SimulationEngine {
             let r1_len = read_length.min(actual_frag_len);
             let r2_len = read_length.min(actual_frag_len);
 
+            // Extract pre-variant reference slices for MD tag.
+            // Use the unmodified fragment length (from pre_variant_frag_seq) to
+            // determine the R2 reference offset, then pad to read_length.
+            let pre_len = pre_variant_frag_seq.len();
+            let pre_r1_len = read_length.min(pre_len);
+            let pre_r2_len = read_length.min(pre_len);
+            let mut ref_r1: Vec<u8> = pre_variant_frag_seq[..pre_r1_len].to_vec();
+            let mut ref_r2: Vec<u8> = if pre_len >= read_length {
+                pre_variant_frag_seq[pre_len - pre_r2_len..].to_vec()
+            } else {
+                pre_variant_frag_seq[pre_len - pre_r2_len.min(pre_len)..].to_vec()
+            };
+            while ref_r1.len() < read_length {
+                ref_r1.push(b'N');
+            }
+            while ref_r2.len() < read_length {
+                ref_r2.push(b'N');
+            }
+
             let mut r1_seq: Vec<u8> = frag_seq[..r1_len].to_vec();
             let mut r2_seq: Vec<u8> = if actual_frag_len >= read_length {
                 frag_seq[actual_frag_len - r2_len..].to_vec()
@@ -518,8 +553,10 @@ impl SimulationEngine {
                     (q1, q2)
                 }
                 QualModel::NanoporeR10 => {
-                    let q1 = sample_nanopore_r10_qualities(read_length, &mut self.rng);
-                    let q2 = sample_nanopore_r10_qualities(read_length, &mut self.rng);
+                    // Pass the read sequence so homopolymer-aware quality degradation
+                    // can be applied at the correct positions.
+                    let q1 = sample_nanopore_r10_qualities(read_length, &r1_seq, &mut self.rng);
+                    let q2 = sample_nanopore_r10_qualities(read_length, &r2_seq, &mut self.rng);
                     inject_errors(&mut r1_seq, &q1, &mut self.rng);
                     inject_errors(&mut r2_seq, &q2, &mut self.rng);
                     (q1, q2)
@@ -544,6 +581,8 @@ impl SimulationEngine {
                 fragment_length: actual_frag_len,
                 chrom: region.chrom.clone(),
                 variant_tags: fragment_variant_tags,
+                ref_seq_r1: ref_r1,
+                ref_seq_r2: ref_r2,
             };
 
             read_pairs.push(pair);
@@ -690,6 +729,8 @@ impl SimulationEngine {
                         fragment_length: pair.fragment_length,
                         chrom: pair.chrom.clone(),
                         variant_tags: pair.variant_tags.clone(),
+                        ref_seq_r1: pair.ref_seq_r2.iter().copied().rev().collect(),
+                        ref_seq_r2: pair.ref_seq_r1.iter().copied().rev().collect(),
                     };
                     let ba_family_size = sample_family_size(family_mean, family_sd, &mut self.rng);
                     let ba_family = UmiFamily {
@@ -864,26 +905,6 @@ fn build_empirical_quality(config: &Config) -> Option<EmpiricalQualityModel> {
 // ---------------------------------------------------------------------------
 // Helper utilities
 // ---------------------------------------------------------------------------
-
-/// Return the reverse complement of a DNA sequence.
-///
-/// Unknown bases are mapped to N. The input is not modified.
-fn reverse_complement(seq: &[u8]) -> Vec<u8> {
-    seq.iter()
-        .rev()
-        .map(|&b| match b {
-            b'A' => b'T',
-            b'T' => b'A',
-            b'C' => b'G',
-            b'G' => b'C',
-            b'a' => b't',
-            b't' => b'a',
-            b'c' => b'g',
-            b'g' => b'c',
-            _ => b'N',
-        })
-        .collect()
-}
 
 /// Return true if the variant's position falls within the region.
 fn variant_overlaps_region(variant: &Variant, region: &Region) -> bool {
@@ -1109,6 +1130,7 @@ mod tests {
                 manifest: false,
                 germline_vcf: false,
                 single_read_bam: false,
+                mapq: 60,
             },
             sample: SampleConfig {
                 name: "TEST".to_string(),
@@ -1122,6 +1144,9 @@ mod tests {
                 sd: 20.0,
                 long_read: None,
                 end_motif_model: None,
+                ctdna_fraction: None,
+                mono_sd: None,
+                di_sd: None,
             },
             quality: QualityConfig {
                 mean_quality: 36,
@@ -1164,6 +1189,7 @@ mod tests {
             expected_vaf: vaf,
             clone_id: None,
             haplotype: None,
+            ccf: None,
         }
     }
 
@@ -1390,6 +1416,9 @@ mod tests {
             sd: 20.0,
             long_read: None,
             end_motif_model: None,
+            ctdna_fraction: None,
+            mono_sd: None,
+            di_sd: None,
         };
         config.sample.coverage = 5.0;
         let reference = open_reference(&fa);
@@ -1632,6 +1661,7 @@ mod tests {
             expected_vaf: 1.0,
             clone_id: None,
             haplotype: None,
+            ccf: None,
         };
 
         // Must not panic; may return an empty or non-empty result.

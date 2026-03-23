@@ -24,10 +24,18 @@ output:
   manifest: true
 
 # Top-level fragment and quality settings are inherited by all samples.
+#
+# ctdna_fraction: fraction of fragments drawn from the short tumour-derived
+#   distribution (~143 bp). When omitted, defaults to tumour.purity.
+# mono_sd / di_sd: standard deviations (bp) of the nucleosomal peaks.
+#   Defaults (20 / 30 bp) are from Cristiano et al. 2019 Science (DELFI).
 fragment:
   model: cfda
   mean: 167.0
   sd: 20.0
+  # ctdna_fraction: 0.05   # uncomment to override purity-derived fraction
+  # mono_sd: 20.0          # default: 20 bp (Cristiano et al. 2019)
+  # di_sd: 30.0            # default: 30 bp (Cristiano et al. 2019)
 
 quality:
   mean_quality: 36

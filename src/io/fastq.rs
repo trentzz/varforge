@@ -133,6 +133,8 @@ mod tests {
             fragment_length: seq1.len(),
             chrom: "chr1".to_string(),
             variant_tags: Vec::new(),
+            ref_seq_r1: Vec::new(),
+            ref_seq_r2: Vec::new(),
         }
     }
 

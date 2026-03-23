@@ -223,6 +223,7 @@ fn parse_record(
         expected_vaf: vaf,
         clone_id,
         haplotype: None,
+        ccf: None,
     }))
 }
 

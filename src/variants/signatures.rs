@@ -15,6 +15,8 @@
 // formatters, summary tools). Not all are currently wired into the binary.
 #![allow(dead_code)]
 
+use crate::seq_utils::complement;
+
 /// The SBS96 substitution types in channel order.
 pub const SUBSTITUTION_TYPES: [&str; 6] = ["C>A", "C>G", "C>T", "T>A", "T>C", "T>G"];
 
@@ -117,16 +119,6 @@ fn normalise_to_pyrimidine(
             complement(ctx_3p).to_ascii_uppercase(),
             complement(ctx_5p).to_ascii_uppercase(),
         ))
-    }
-}
-
-fn complement(base: u8) -> u8 {
-    match base.to_ascii_uppercase() {
-        b'A' => b'T',
-        b'T' => b'A',
-        b'C' => b'G',
-        b'G' => b'C',
-        _ => b'N',
     }
 }
 

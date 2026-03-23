@@ -52,6 +52,7 @@ pub fn generate_random_mutations<R: Rng>(
                 expected_vaf: vaf,
                 clone_id: None,
                 haplotype: None,
+                ccf: None,
             });
         }
     }
@@ -347,6 +348,7 @@ pub fn generate_msi_indels<R: Rng>(
             expected_vaf: 0.3,
             clone_id: Some("msi".to_string()),
             haplotype: None,
+            ccf: None,
         });
     }
 

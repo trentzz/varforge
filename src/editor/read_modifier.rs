@@ -165,7 +165,7 @@ pub fn apply_insertion(record: &mut RecordBuf, mutation: &MutationType) -> Modif
 
     // Build new quality scores (use average neighbor quality for inserted bases).
     let avg_qual = if offset > 0 && offset < orig_qual.len() {
-        (orig_qual[offset - 1] as u16 + orig_qual[offset] as u16) as u8 / 2
+        ((orig_qual[offset - 1] as u16 + orig_qual[offset] as u16) / 2) as u8
     } else {
         orig_qual.get(offset).copied().unwrap_or(30)
     };
@@ -532,7 +532,7 @@ fn update_nm_tag(record: &mut RecordBuf, delta: i32) {
 /// This is a simplified updater: if an existing MD tag is present and parseable,
 /// it replaces the ref base at the position with the substitution marker.
 /// If absent or complex, clears the MD tag.
-fn update_md_for_snv(record: &mut RecordBuf, _read_offset: usize, ref_base: u8, _align_start: u64) {
+fn update_md_for_snv(record: &mut RecordBuf, read_offset: usize, ref_base: u8, _align_start: u64) {
     // Get current MD string.
     let md_str = match record.data().get(&Tag::MISMATCHED_POSITIONS) {
         Some(Value::String(s)) => String::from_utf8(s.iter().copied().collect()).ok(),
@@ -541,7 +541,7 @@ fn update_md_for_snv(record: &mut RecordBuf, _read_offset: usize, ref_base: u8, 
 
     if let Some(md) = md_str {
         // Attempt to inject the ref base substitution into the MD string.
-        let new_md = inject_snv_into_md(&md, ref_base);
+        let new_md = inject_snv_into_md(&md, read_offset, ref_base);
         let mut data: Data = record
             .data()
             .iter()
@@ -557,20 +557,149 @@ fn update_md_for_snv(record: &mut RecordBuf, _read_offset: usize, ref_base: u8, 
     // If no MD tag exists, leave absent (no-op).
 }
 
-/// Inject a ref-base SNV substitution into an MD string.
+/// A single token from a parsed MD string.
+#[derive(Debug, PartialEq)]
+enum MdToken {
+    /// A run of matching bases of the given length.
+    Run(usize),
+    /// A single-base mismatch showing the reference base.
+    Mismatch(u8),
+    /// Deleted reference bases (the sequence between `^` and the next digit).
+    Deletion(Vec<u8>),
+}
+
+/// Parse an MD string into a list of tokens.
 ///
-/// This is a best-effort implementation. For a read that previously had no
-/// mismatches at the variant position, we need to split the numeric run at
-/// the relevant read offset and insert the ref base letter.
+/// The MD format is `[0-9]+(([A-Z]|\^[A-Z]+)[0-9]+)*`.
+/// A numeric token represents that many consecutive matching bases.
+/// An uppercase letter is a single-base mismatch (the reference base).
+/// `^` followed by uppercase letters is a deleted reference sequence.
+fn parse_md(md: &str) -> Vec<MdToken> {
+    let bytes = md.as_bytes();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            let n: usize = md[start..i].parse().unwrap_or(0);
+            tokens.push(MdToken::Run(n));
+        } else if bytes[i] == b'^' {
+            i += 1;
+            let start = i;
+            while i < bytes.len() && bytes[i].is_ascii_uppercase() {
+                i += 1;
+            }
+            tokens.push(MdToken::Deletion(bytes[start..i].to_vec()));
+        } else if bytes[i].is_ascii_uppercase() {
+            tokens.push(MdToken::Mismatch(bytes[i]));
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    tokens
+}
+
+/// Serialise a list of MD tokens back into a string.
 ///
-/// Example: MD="10" → MD="5A4" after SNV at offset 5 (ref=A).
-fn inject_snv_into_md(md: &str, ref_base: u8) -> String {
-    // For simplicity, append the ref base as a substitution marker.
-    // A full implementation would parse the MD at the specific read offset.
-    // We do a safe approximation: append the ref base then "0".
-    // This won't be perfectly accurate for complex reads but is correct for
-    // reads that previously had MD="N" (all matches).
-    format!("{}{}", md, ref_base as char)
+/// Inserts a zero-length run between adjacent non-run tokens to keep the
+/// output valid per the SAM spec.
+fn serialise_md(tokens: &[MdToken]) -> String {
+    let mut out = String::new();
+    let mut last_was_nonrun = false;
+
+    for token in tokens {
+        match token {
+            MdToken::Run(n) => {
+                out.push_str(&n.to_string());
+                last_was_nonrun = false;
+            }
+            MdToken::Mismatch(b) => {
+                if last_was_nonrun {
+                    out.push('0');
+                }
+                out.push(*b as char);
+                last_was_nonrun = true;
+            }
+            MdToken::Deletion(bases) => {
+                if last_was_nonrun {
+                    out.push('0');
+                }
+                out.push('^');
+                for &b in bases {
+                    out.push(b as char);
+                }
+                last_was_nonrun = true;
+            }
+        }
+    }
+
+    out
+}
+
+/// Inject a ref-base SNV substitution into an MD string at `read_offset`.
+///
+/// Walks the token list counting consumed read bases. When the run that
+/// covers `read_offset` is found, it is split and the ref base is inserted.
+///
+/// Example: MD="150", offset=50, ref_base=A → "50A99".
+fn inject_snv_into_md(md: &str, read_offset: usize, ref_base: u8) -> String {
+    let tokens = parse_md(md);
+    let mut new_tokens: Vec<MdToken> = Vec::new();
+    // `cursor` counts read bases consumed so far. Deletions do not consume
+    // read bases, so they are passed through without advancing the cursor.
+    let mut cursor: usize = 0;
+    let mut injected = false;
+
+    for token in tokens {
+        if injected {
+            new_tokens.push(token);
+            continue;
+        }
+
+        match token {
+            MdToken::Run(n) => {
+                if cursor + n > read_offset {
+                    // The target offset falls inside this run.
+                    let before = read_offset - cursor;
+                    let after = n - before - 1; // -1 for the substituted base
+                                                // Always emit the run before the mismatch, even when
+                                                // before==0, so the MD string starts with a digit per spec.
+                    new_tokens.push(MdToken::Run(before));
+                    new_tokens.push(MdToken::Mismatch(ref_base));
+                    new_tokens.push(MdToken::Run(after));
+                    injected = true;
+                    cursor += n;
+                } else {
+                    cursor += n;
+                    new_tokens.push(MdToken::Run(n));
+                }
+            }
+            MdToken::Mismatch(b) => {
+                // A mismatch consumes one read base.
+                if cursor == read_offset {
+                    // The SNV lands on an already-recorded mismatch; update
+                    // the ref base.
+                    new_tokens.push(MdToken::Mismatch(ref_base));
+                    injected = true;
+                } else {
+                    new_tokens.push(MdToken::Mismatch(b));
+                }
+                cursor += 1;
+            }
+            MdToken::Deletion(bases) => {
+                // Deletions do not consume read bases.
+                new_tokens.push(MdToken::Deletion(bases));
+            }
+        }
+    }
+
+    serialise_md(&new_tokens)
 }
 
 /// Remove the MD tag from the record.
@@ -883,5 +1012,93 @@ mod tests {
         assert_eq!(merged[0], Op::new(Kind::Match, 8));
         assert_eq!(merged[1], Op::new(Kind::Insertion, 2));
         assert_eq!(merged[2], Op::new(Kind::Match, 5));
+    }
+
+    // ------------------------------------------------------------------
+    // Quality averaging overflow (T052)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_insertion_quality_avg_no_overflow() {
+        // Qualities of 200 on both sides of the insertion point must average to
+        // 200. The old expression `(a as u16 + b as u16) as u8 / 2` would cast
+        // 400 to u8 (wrapping to 144) then divide, giving 72.
+        let cigar_ops = parse_cigar_str("8M");
+        let mut record = RecordBuf::builder()
+            .set_flags(noodles_sam::alignment::record::Flags::empty())
+            .set_alignment_start(Position::new(101).unwrap())
+            .set_cigar(cigar_ops.into_iter().collect::<Cigar>())
+            .set_sequence(Sequence::from(b"ACGTACGT".as_ref()))
+            .set_quality_scores(QualityScores::from(vec![200u8; 8]))
+            .build();
+        let mutation = MutationType::Indel {
+            pos: 102,
+            ref_seq: vec![b'G'],
+            alt_seq: vec![b'G', b'T'],
+        };
+        let result = apply_insertion(&mut record, &mutation);
+        assert_eq!(result, ModifyResult::Modified);
+        // All quality scores must remain 200 after padding inserted bases.
+        let quals: Vec<u8> = record.quality_scores().as_ref().to_vec();
+        assert!(
+            quals.iter().all(|&q| q == 200),
+            "all qualities must be 200 after insertion; got {quals:?}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // inject_snv_into_md tests (T054)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_inject_snv_at_position_zero() {
+        // MD="150", offset=0, ref=T → "0T149"
+        let result = inject_snv_into_md("150", 0, b'T');
+        assert_eq!(result, "0T149");
+    }
+
+    #[test]
+    fn test_inject_snv_in_middle_of_all_match() {
+        // MD="150", offset=50, ref=A → "50A99"
+        let result = inject_snv_into_md("150", 50, b'A');
+        assert_eq!(result, "50A99");
+    }
+
+    #[test]
+    fn test_inject_snv_at_last_base() {
+        // MD="150", offset=149, ref=C → "149C0"
+        let result = inject_snv_into_md("150", 149, b'C');
+        assert_eq!(result, "149C0");
+    }
+
+    #[test]
+    fn test_inject_snv_into_read_with_existing_mismatch() {
+        // MD="75A74", read offsets: 0..74 match, offset 75 is mismatch A,
+        // offsets 76..149 match. Inject at offset=100, ref=G → "75A24G49"
+        let result = inject_snv_into_md("75A74", 100, b'G');
+        assert_eq!(result, "75A24G49");
+    }
+
+    #[test]
+    fn test_inject_snv_into_read_with_deletion() {
+        // MD="10^AC20", offset=25 (past the deletion).
+        // Token breakdown: Run(10), Deletion(AC), Run(20).
+        // Read offsets: 0..9 → Run(10), deletion consumes no read bases,
+        // then 10..29 → Run(20). Offset 25 is at read position 25 - 10 = 15
+        // inside the second run.
+        // Expected: "10^AC15G4"
+        let result = inject_snv_into_md("10^AC20", 25, b'G');
+        assert_eq!(result, "10^AC15G4");
+    }
+
+    #[test]
+    fn test_inject_snv_into_read_with_deletion_before_offset() {
+        // MD="5^GT10", inject at offset=12, ref=C.
+        // Tokens: Run(5), Deletion(GT), Run(10).
+        // Offsets: 0..4 match (Run 5), deletion skipped, 5..14 match (Run 10).
+        // Offset 12 → 7 into the second run → before=7, after=2.
+        // Expected: "5^GT7C2"
+        let result = inject_snv_into_md("5^GT10", 12, b'C');
+        assert_eq!(result, "5^GT7C2");
     }
 }

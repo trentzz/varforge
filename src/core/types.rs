@@ -49,6 +49,13 @@ pub struct ReadPair {
     pub chrom: String,
     /// Variants carried by this read pair, populated during spike-in.
     pub variant_tags: Vec<VariantTag>,
+    /// Reference sequence underlying read1, used to build the MD tag.
+    ///
+    /// Sliced from the unmodified reference before variant application, so
+    /// the MD tag reflects true mismatches between the read and the genome.
+    pub ref_seq_r1: Vec<u8>,
+    /// Reference sequence underlying read2, used to build the MD tag.
+    pub ref_seq_r2: Vec<u8>,
 }
 
 /// A single read with sequence and qualities.
@@ -108,6 +115,29 @@ pub enum MutationType {
     },
 }
 
+#[allow(dead_code)]
+impl MutationType {
+    /// Return the primary 0-based genomic position of this mutation.
+    pub fn position(&self) -> u64 {
+        match self {
+            Self::Snv { pos, .. } => *pos,
+            Self::Indel { pos, .. } => *pos,
+            Self::Mnv { pos, .. } => *pos,
+            Self::Sv { start, .. } => *start,
+        }
+    }
+
+    /// Return a short string label for this mutation type.
+    pub fn vartype_str(&self) -> &'static str {
+        match self {
+            Self::Snv { .. } => "SNV",
+            Self::Indel { .. } => "INDEL",
+            Self::Mnv { .. } => "MNV",
+            Self::Sv { .. } => "SV",
+        }
+    }
+}
+
 /// Structural variant type classifications.
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,6 +161,13 @@ pub struct Variant {
     /// When set, the variant is only spiked into fragments sampled from the
     /// matching haplotype. When `None`, the variant is applied regardless.
     pub haplotype: Option<u8>,
+    /// Cancer cell fraction of the clone carrying this variant.
+    ///
+    /// Populated when a `ClonalTree` is constructed from config.  `None`
+    /// indicates no clonal-tree model was used; callers fall back to
+    /// `expected_vaf` as a proxy.
+    #[allow(dead_code)]
+    pub ccf: Option<f64>,
 }
 
 #[cfg(test)]

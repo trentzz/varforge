@@ -12,8 +12,8 @@
 //! individual fields without deserialising YAML.
 
 use crate::io::config::{
-    ArtifactConfig, FragmentConfig, FragmentModel, MutationConfig, RandomMutationConfig,
-    SampleConfig, UmiConfig,
+    ArtifactConfig, CaptureConfig, FragmentConfig, FragmentModel, MutationConfig,
+    RandomMutationConfig, SampleConfig, UmiConfig,
 };
 
 /// A partial configuration overlay produced by a preset.
@@ -30,6 +30,7 @@ pub struct PresetOverlay {
     pub umi: Option<UmiConfig>,
     pub artifacts: Option<ArtifactConfig>,
     pub purity: Option<f64>,
+    pub capture: Option<CaptureConfig>,
 }
 
 /// Return the overlay for a named preset, or an error if the name is unknown.
@@ -47,8 +48,9 @@ pub fn get(name: &str) -> anyhow::Result<PresetOverlay> {
         "cfdna" => Ok(preset_cfdna()),
         "ffpe" => Ok(preset_ffpe()),
         "umi" => Ok(preset_umi()),
+        "twist" => Ok(preset_twist()),
         other => anyhow::bail!(
-            "unknown preset '{}'; valid choices: small, panel, wgs, cfdna, ffpe, umi, \
+            "unknown preset '{}'; valid choices: small, panel, wgs, cfdna, ffpe, umi, twist, \
              or cancer:<type> (e.g. cancer:lung_adeno)",
             other
         ),
@@ -60,7 +62,7 @@ pub fn get(name: &str) -> anyhow::Result<PresetOverlay> {
 /// [`crate::cli::cancer_presets::all_names`]).
 #[allow(dead_code)]
 pub fn all_names() -> &'static [&'static str] {
-    &["small", "panel", "wgs", "cfdna", "ffpe", "umi"]
+    &["small", "panel", "wgs", "cfdna", "ffpe", "umi", "twist"]
 }
 
 // ---------------------------------------------------------------------------
@@ -161,6 +163,9 @@ fn preset_cfdna() -> PresetOverlay {
             sd: 20.0,
             long_read: None,
             end_motif_model: None,
+            ctdna_fraction: None,
+            mono_sd: None,
+            di_sd: None,
         }),
         purity: Some(0.02),
         mutations: Some(MutationConfig {
@@ -251,6 +256,61 @@ fn preset_umi() -> PresetOverlay {
     }
 }
 
+/// `twist` – Twist Biosciences hybrid-capture duplex UMI panel preset.
+///
+/// 2 000× coverage, 150 bp reads, cfDNA-range fragment sizes, 9 bp inline
+/// dual UMIs with duplex mode.  VAF range tuned for ultra-low ctDNA detection.
+fn preset_twist() -> PresetOverlay {
+    PresetOverlay {
+        coverage: Some(2000.0),
+        read_length: Some(150),
+        fragment: Some(FragmentConfig {
+            model: FragmentModel::Normal,
+            mean: 170.0,
+            sd: 30.0,
+            long_read: None,
+            end_motif_model: None,
+            ctdna_fraction: None,
+            mono_sd: None,
+            di_sd: None,
+        }),
+        umi: Some(UmiConfig {
+            length: 9,
+            duplex: true,
+            pcr_cycles: 10,
+            family_size_mean: 3.5,
+            family_size_sd: 1.5,
+            inline: true,
+        }),
+        mutations: Some(MutationConfig {
+            vcf: None,
+            random: Some(RandomMutationConfig {
+                count: 50,
+                vaf_min: 0.0001,
+                vaf_max: 0.1,
+                snv_fraction: 0.80,
+                indel_fraction: 0.15,
+                mnv_fraction: 0.05,
+                signature: None,
+            }),
+            sv_count: 0,
+            sv_signature: None,
+        }),
+        capture: Some(CaptureConfig {
+            enabled: true,
+            targets_bed: None,
+            off_target_fraction: 0.03,
+            coverage_uniformity: 0.15,
+            edge_dropoff_bases: 50,
+            mode: "panel".to_string(),
+            primer_trim: 0,
+            coverage_cv_target: Some(0.25),
+            on_target_fraction_target: Some(0.95),
+        }),
+        ..Default::default()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Apply a preset overlay onto a Config
 // ---------------------------------------------------------------------------
@@ -328,6 +388,12 @@ pub fn apply_preset_to_config(config: &mut Config, overlay: &PresetOverlay) {
             });
         }
     }
+
+    if let Some(ref cap) = overlay.capture {
+        if config.capture.is_none() {
+            config.capture = Some(cap.clone());
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -381,6 +447,7 @@ mod tests {
                 manifest: false,
                 germline_vcf: false,
                 single_read_bam: false,
+                mapq: 60,
             },
             sample: SampleConfig::default(),
             fragment: FragmentConfig::default(),
@@ -440,6 +507,7 @@ mod tests {
                 manifest: false,
                 germline_vcf: false,
                 single_read_bam: false,
+                mapq: 60,
             },
             // User set coverage to 60x in YAML.
             sample: SampleConfig {

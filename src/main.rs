@@ -3,6 +3,7 @@ mod cli;
 mod core;
 mod editor;
 mod io;
+mod seq_utils;
 mod tumour;
 mod umi;
 mod variants;

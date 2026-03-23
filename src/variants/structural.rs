@@ -1,6 +1,7 @@
 use rand::Rng;
 
 use crate::core::types::{Read, SvType};
+use crate::seq_utils::complement;
 use crate::variants::vaf::sample_alt_count;
 
 /// A structural variant with all parameters needed to generate affected reads.
@@ -188,7 +189,7 @@ pub fn apply_insertion(read: &mut Read, read_start: u64, sv: &StructuralVariant)
     let mut new_qual: Vec<u8> = Vec::with_capacity(original_len);
     new_qual.extend_from_slice(&read.qual[..offset]);
     let avg_qual = if offset > 0 && offset < read.qual.len() {
-        (read.qual[offset - 1] as u16 + read.qual[offset] as u16) as u8 / 2
+        ((read.qual[offset - 1] as u16 + read.qual[offset] as u16) / 2) as u8
     } else {
         read.qual[offset.min(read.qual.len() - 1)]
     };
@@ -430,21 +431,6 @@ fn revcomp_slice(seq: &mut [u8]) {
     seq.reverse();
     for b in seq.iter_mut() {
         *b = complement(*b);
-    }
-}
-
-/// Return the DNA complement of a base (IUPAC uppercase).
-fn complement(b: u8) -> u8 {
-    match b {
-        b'A' => b'T',
-        b'T' => b'A',
-        b'C' => b'G',
-        b'G' => b'C',
-        b'a' => b't',
-        b't' => b'a',
-        b'c' => b'g',
-        b'g' => b'c',
-        _ => b'N',
     }
 }
 
@@ -727,6 +713,36 @@ mod tests {
         assert!(
             alt_bnd.starts_with('N'),
             "BND ALT must start with N anchor base"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Quality averaging overflow (T052)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_insertion_quality_avg_no_overflow() {
+        // Qualities 200 and 200 must average to 200, not wrap to 100
+        // (the old cast `(a as u16 + b as u16) as u8 / 2` would wrap 400
+        // to 144 and then divide to give 72).
+        let mut read = Read::new(
+            b"ACGTACGT".to_vec(),
+            vec![200u8, 200, 200, 200, 200, 200, 200, 200],
+        );
+        let sv = StructuralVariant::Insertion {
+            chrom: "chr1".into(),
+            pos: 102,
+            sequence: b"TT".to_vec(),
+        };
+        let mut rng = StdRng::seed_from_u64(0);
+        apply_insertion(&mut read, 100, &sv);
+        let _ = &mut rng; // silence unused warning
+                          // The inserted bases are padded using the average of neighbors at offset 2.
+                          // Neighbors are both 200, so every quality in the read must remain 200.
+        assert!(
+            read.qual.iter().all(|&q| q == 200),
+            "all qualities must remain 200 after insertion padding; got {:?}",
+            read.qual
         );
     }
 }
