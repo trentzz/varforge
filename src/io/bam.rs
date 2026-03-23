@@ -30,6 +30,8 @@ pub struct BamWriter {
     writer: bam::io::Writer<bgzf::Writer<File>>,
     header: sam::Header,
     sample_name: String,
+    /// Mapping quality written to every record.
+    mapq: u8,
 }
 
 impl BamWriter {
@@ -42,6 +44,7 @@ impl BamWriter {
         path: &Path,
         ref_sequences: &[(String, u64)],
         sample_config: &SampleConfig,
+        mapq: u8,
     ) -> Result<Self> {
         let file = File::create(path)
             .with_context(|| format!("failed to create BAM file: {}", path.display()))?;
@@ -108,6 +111,7 @@ impl BamWriter {
             writer,
             header,
             sample_name,
+            mapq,
         })
     }
 
@@ -126,12 +130,19 @@ impl BamWriter {
         cigar_r1: &str,
         cigar_r2: &str,
     ) -> Result<()> {
-        let data_r1: Data = [(Tag::READ_GROUP, Value::from(self.sample_name.as_str()))]
-            .into_iter()
-            .collect();
-        let data_r2: Data = [(Tag::READ_GROUP, Value::from(self.sample_name.as_str()))]
-            .into_iter()
-            .collect();
+        // NM=0: simulated reads with no injected variants have zero mismatches.
+        let data_r1: Data = [
+            (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
+            (Tag::EDIT_DISTANCE, Value::from(0i32)),
+        ]
+        .into_iter()
+        .collect();
+        let data_r2: Data = [
+            (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
+            (Tag::EDIT_DISTANCE, Value::from(0i32)),
+        ]
+        .into_iter()
+        .collect();
         self.write_pair_inner(pair, ref_id, pos, cigar_r1, cigar_r2, data_r1, data_r2)
     }
 
@@ -202,6 +213,7 @@ impl BamWriter {
             (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
             (Tag::UMI_SEQUENCE, Value::from(umi)),
             (Tag::UMI_ID, Value::from(family_id)),
+            (Tag::EDIT_DISTANCE, Value::from(0i32)),
         ]
         .into_iter()
         .collect();
@@ -209,6 +221,7 @@ impl BamWriter {
             (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
             (Tag::UMI_SEQUENCE, Value::from(umi)),
             (Tag::UMI_ID, Value::from(family_id)),
+            (Tag::EDIT_DISTANCE, Value::from(0i32)),
         ]
         .into_iter()
         .collect();
@@ -235,14 +248,17 @@ impl BamWriter {
         let pos1 = Position::new(pos as usize + 1)
             .ok_or_else(|| anyhow::anyhow!("invalid alignment position"))?;
 
-        // Place read 2 immediately after read 1's reference span.
-        let r1_ref_span = cigar_ref_span(cigar_r1);
-        let pos2_val = pos as usize + r1_ref_span + 1;
-        let pos2 = Position::new(pos2_val)
+        // R2 starts at fragment_start + fragment_length - r2_read_length (0-based).
+        // This is the correct paired-end position formula: R2 ends at the far end of
+        // the fragment and reads back toward R1.
+        let r2_len = pair.read2.seq.len();
+        let pos2_zero = (pos as usize + pair.fragment_length).saturating_sub(r2_len);
+        let pos2 = Position::new(pos2_zero + 1)
             .ok_or_else(|| anyhow::anyhow!("invalid mate alignment position"))?;
 
-        let mapq = MappingQuality::new(60).expect("60 is a valid mapping quality");
-        let template_len = pair.fragment_length as i32;
+        let mapq = MappingQuality::new(self.mapq).expect("mapq is a valid mapping quality");
+        // Use a saturating cast; fragment_length > i32::MAX is possible for long reads.
+        let template_len = i32::try_from(pair.fragment_length).unwrap_or(i32::MAX);
 
         // Flags for R1: paired, properly segmented, mate reverse, first segment.
         let flags_r1 = Flags::SEGMENTED
@@ -260,6 +276,12 @@ impl BamWriter {
             parse_cigar(cigar_r1).with_context(|| format!("failed to parse CIGAR: {cigar_r1}"))?;
         let cigar_ops_r2 =
             parse_cigar(cigar_r2).with_context(|| format!("failed to parse CIGAR: {cigar_r2}"))?;
+
+        // R2 sequence must be reverse-complemented: BAM stores the sequence as it
+        // appears on the forward strand, but R2 aligns to the reverse strand.
+        let r2_seq_rc = crate::seq_utils::reverse_complement(&pair.read2.seq);
+        let mut r2_qual_rev = pair.read2.qual.clone();
+        r2_qual_rev.reverse();
 
         let r1 = build_record(
             &pair.name,
@@ -284,8 +306,8 @@ impl BamWriter {
             mapq,
             cigar_ops_r2,
             -template_len,
-            &pair.read2.seq,
-            pair.read2.qual.clone(),
+            &r2_seq_rc,
+            r2_qual_rev,
             data_r2,
         );
 
@@ -358,6 +380,7 @@ pub fn parse_cigar(cigar_str: &str) -> Result<Vec<Op>> {
 }
 
 /// Calculate the reference span consumed by a CIGAR string.
+#[allow(dead_code)]
 fn cigar_ref_span(cigar_str: &str) -> usize {
     parse_cigar(cigar_str)
         .unwrap_or_default()
@@ -469,7 +492,7 @@ mod tests {
         let refs = ref_seqs();
         let cfg = make_sample_config("SAMPLE");
 
-        let writer = BamWriter::new(tmp.path(), &refs, &cfg).unwrap();
+        let writer = BamWriter::new(tmp.path(), &refs, &cfg, 60).unwrap();
         let header = writer.header().clone();
         writer.finish().unwrap();
 
@@ -494,7 +517,7 @@ mod tests {
 
         let pair = make_read_pair("read1", 150);
 
-        let mut writer = BamWriter::new(tmp.path(), &refs, &cfg).unwrap();
+        let mut writer = BamWriter::new(tmp.path(), &refs, &cfg, 60).unwrap();
         writer.write_pair(&pair, 0, 1000, "150M", "150M").unwrap();
         let header = writer.header().clone();
         writer.finish().unwrap();
@@ -518,7 +541,7 @@ mod tests {
 
         let pair = make_read_pair("flagtest", 100);
 
-        let mut writer = BamWriter::new(tmp.path(), &refs, &cfg).unwrap();
+        let mut writer = BamWriter::new(tmp.path(), &refs, &cfg, 60).unwrap();
         writer.write_pair(&pair, 0, 500, "100M", "100M").unwrap();
         let header = writer.header().clone();
         writer.finish().unwrap();
@@ -568,7 +591,7 @@ mod tests {
 
         let pair = make_read_pair("umipair", 100);
 
-        let mut writer = BamWriter::new(tmp.path(), &refs, &cfg).unwrap();
+        let mut writer = BamWriter::new(tmp.path(), &refs, &cfg, 60).unwrap();
         writer
             .write_pair_with_umi(&pair, 0, 500, "100M", "100M", "ACGTACGT", 42)
             .unwrap();
@@ -605,7 +628,7 @@ mod tests {
         // Use a more complex CIGAR: 5M2I143M
         let pair = make_read_pair("cigartest", 150);
 
-        let mut writer = BamWriter::new(tmp.path(), &refs, &cfg).unwrap();
+        let mut writer = BamWriter::new(tmp.path(), &refs, &cfg, 60).unwrap();
         writer
             .write_pair(&pair, 0, 200, "5M2I143M", "150M")
             .unwrap();
@@ -634,7 +657,7 @@ mod tests {
 
         let pair = make_read_pair("rgtest", 100);
 
-        let mut writer = BamWriter::new(tmp.path(), &refs, &cfg).unwrap();
+        let mut writer = BamWriter::new(tmp.path(), &refs, &cfg, 60).unwrap();
         writer.write_pair(&pair, 0, 0, "100M", "100M").unwrap();
         let header = writer.header().clone();
         writer.finish().unwrap();

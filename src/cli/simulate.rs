@@ -403,8 +403,13 @@ pub(crate) fn run_single_sample(
     let mut bam_writer = if cfg.output.bam {
         let bam_path = out_dir.join(format!("{}.bam", sample_name));
         Some(
-            BamWriter::new(&bam_path, &ref_sequences_for_bam, &cfg.sample)
-                .context("failed to create BAM writer")?,
+            BamWriter::new(
+                &bam_path,
+                &ref_sequences_for_bam,
+                &cfg.sample,
+                cfg.output.mapq,
+            )
+            .context("failed to create BAM writer")?,
         )
     } else {
         None
@@ -1340,8 +1345,13 @@ fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64
     let mut bam_writer = if cfg.output.bam {
         let bam_path = out_dir.join(format!("{}.bam", sample_name));
         Some(
-            BamWriter::new(&bam_path, &ref_sequences_for_bam, &cfg.sample)
-                .context("failed to create BAM writer")?,
+            BamWriter::new(
+                &bam_path,
+                &ref_sequences_for_bam,
+                &cfg.sample,
+                cfg.output.mapq,
+            )
+            .context("failed to create BAM writer")?,
         )
     } else {
         None
