@@ -489,6 +489,9 @@ pub(crate) fn run_single_sample(
     // Wrap the reference in Arc so it can be shared across rayon worker
     // threads.  ReferenceGenome uses an internal Mutex for safe concurrent access.
     let reference = Arc::new(reference);
+    // Wrap config in Arc so each rayon worker shares the struct rather than
+    // cloning the full config (including all variant/clone Vecs) per region.
+    let cfg_arc = Arc::new(cfg.clone());
     let master_seed = cfg.seed;
     let pb_ref = pb.clone();
 
@@ -677,10 +680,14 @@ pub(crate) fn run_single_sample(
         .enumerate()
         .try_for_each(|(idx, region)| {
             let ref_arc = Arc::clone(&reference);
-            let mut local_cfg = cfg.clone();
-            // Override seed to per-region value for determinism.
-            local_cfg.seed = master_seed.map(|s| derive_region_seed(s, idx as u64));
-            let mut engine = SimulationEngine::new_with_shared_reference(local_cfg, ref_arc);
+            // Derive a per-region seed for determinism; share the Arc<Config>
+            // rather than cloning the full config struct per region.
+            let region_seed = master_seed.map(|s| derive_region_seed(s, idx as u64));
+            let mut engine = SimulationEngine::new_with_shared_config(
+                Arc::clone(&cfg_arc),
+                region_seed,
+                ref_arc,
+            );
 
             // Wire in capture model.
             if let Some(ref cap) = capture_model {
@@ -1533,6 +1540,7 @@ fn run_sample_simulation(
     .context("failed to write variant_reads.tsv header")?;
 
     let reference = Arc::new(reference);
+    let cfg_arc = Arc::new(cfg.clone());
     let master_seed = cfg.seed;
 
     // Create bounded channel for streaming batches to the writer thread.
@@ -1720,9 +1728,12 @@ fn run_sample_simulation(
         .enumerate()
         .try_for_each(|(idx, region)| {
             let ref_arc = Arc::clone(&reference);
-            let mut local_cfg = cfg.clone();
-            local_cfg.seed = master_seed.map(|s| derive_region_seed(s, idx as u64));
-            let mut engine = SimulationEngine::new_with_shared_reference(local_cfg, ref_arc);
+            let region_seed = master_seed.map(|s| derive_region_seed(s, idx as u64));
+            let mut engine = SimulationEngine::new_with_shared_config(
+                Arc::clone(&cfg_arc),
+                region_seed,
+                ref_arc,
+            );
             if let Some(ref cap) = capture_model {
                 engine.set_capture_model(Arc::clone(cap));
             }

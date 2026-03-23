@@ -57,7 +57,7 @@ pub struct AppliedVariant {
 
 /// Core simulation engine that wires together all sub-modules.
 pub struct SimulationEngine {
-    pub config: Config,
+    pub config: Arc<Config>,
     pub reference: Arc<ReferenceGenome>,
     pub rng: StdRng,
     /// Optional GC bias model, built from config.gc_bias.
@@ -77,6 +77,7 @@ impl SimulationEngine {
     /// from the OS.
     #[allow(dead_code)]
     pub fn new(config: Config, reference: ReferenceGenome) -> Self {
+        let config = Arc::new(config);
         let rng = match config.seed {
             Some(seed) => StdRng::seed_from_u64(seed),
             None => StdRng::from_entropy(),
@@ -99,9 +100,39 @@ impl SimulationEngine {
     ///
     /// This is used for parallel region simulation where the same reference
     /// is shared across multiple engines running on different threads.
+    #[allow(dead_code)]
     pub fn new_with_shared_reference(config: Config, reference: Arc<ReferenceGenome>) -> Self {
+        let config = Arc::new(config);
         let rng = match config.seed {
             Some(seed) => StdRng::seed_from_u64(seed),
+            None => StdRng::from_entropy(),
+        };
+        let gc_bias_model = build_gc_bias_model(&config);
+        let cnv_regions = build_cnv_regions(&config);
+        let empirical_quality = build_empirical_quality(&config);
+        Self {
+            config,
+            reference,
+            rng,
+            gc_bias_model,
+            capture_model: None,
+            cnv_regions,
+            empirical_quality,
+        }
+    }
+
+    /// Create a new engine sharing an Arc-wrapped config and reference.
+    ///
+    /// Used in the parallel region loop to share the config across all worker
+    /// threads without cloning the full struct per region. The per-region seed
+    /// is passed separately so that each engine gets a unique RNG stream.
+    pub fn new_with_shared_config(
+        config: Arc<Config>,
+        seed: Option<u64>,
+        reference: Arc<ReferenceGenome>,
+    ) -> Self {
+        let rng = match seed {
+            Some(s) => StdRng::seed_from_u64(s),
             None => StdRng::from_entropy(),
         };
         let gc_bias_model = build_gc_bias_model(&config);
@@ -143,6 +174,7 @@ impl SimulationEngine {
             }
             None => StdRng::from_entropy(),
         };
+        let config = Arc::new(config);
         let gc_bias_model = build_gc_bias_model(&config);
         let cnv_regions = build_cnv_regions(&config);
         let empirical_quality = build_empirical_quality(&config);
