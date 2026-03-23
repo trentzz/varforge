@@ -201,6 +201,53 @@ impl BamWriter {
         Ok(())
     }
 
+    /// Write a single aligned read to the BAM file.
+    ///
+    /// Used for long-read platforms where each molecule produces one record.
+    /// The record uses the pair QNAME and read1 sequence/quality. No mate
+    /// information is set; flags indicate a primary, unpaired, mapped read.
+    ///
+    /// - `pair`: the [`ReadPair`] whose `read1` field is written
+    /// - `ref_id`: 0-based reference sequence index
+    /// - `pos`: 0-based alignment start position on the reference
+    /// - `cigar`: CIGAR string for the read (e.g. `"15000M"`)
+    pub fn write_single_read(
+        &mut self,
+        pair: &crate::core::types::ReadPair,
+        ref_id: usize,
+        pos: u64,
+        cigar: &str,
+    ) -> Result<()> {
+        let pos1 = Position::new(pos as usize + 1)
+            .ok_or_else(|| anyhow::anyhow!("invalid alignment position"))?;
+
+        let mapq = MappingQuality::new(60).expect("60 is a valid mapping quality");
+
+        let data: Data = [(Tag::READ_GROUP, Value::from(self.sample_name.as_str()))]
+            .into_iter()
+            .collect();
+
+        // Flag 0: primary, mapped, single-segment (not paired).
+        let flags = Flags::empty();
+
+        let cigar_ops =
+            parse_cigar(cigar).with_context(|| format!("failed to parse CIGAR: {cigar}"))?;
+
+        let record = RecordBuf::builder()
+            .set_name(pair.name.as_str())
+            .set_flags(flags)
+            .set_reference_sequence_id(ref_id)
+            .set_alignment_start(pos1)
+            .set_mapping_quality(mapq)
+            .set_cigar(cigar_ops.into_iter().collect::<Cigar>())
+            .set_sequence(Sequence::from(pair.read1.seq.as_slice()))
+            .set_quality_scores(QualityScores::from(pair.read1.qual.clone()))
+            .set_data(data)
+            .build();
+
+        self.emit(&record)
+    }
+
     /// Write a read pair with optional UMI tags (RX and MI).
     ///
     /// - `umi`: UMI barcode sequence string (written as `RX:Z:...`)
@@ -393,6 +440,7 @@ mod tests {
             fragment_start: 100,
             fragment_length: len + 50,
             chrom: "chr1".to_string(),
+            variant_tags: Vec::new(),
         }
     }
 

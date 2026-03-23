@@ -1,3 +1,4 @@
+pub mod benchmark_suite;
 pub mod cancer_presets;
 pub mod edit;
 pub mod learn_profile;
@@ -43,6 +44,24 @@ pub enum Command {
     Edit(edit::EditOpts),
     /// Learn an error/quality profile from a real BAM file
     LearnProfile(learn_profile::LearnProfileOpts),
+    /// Run a VAF × coverage benchmark grid
+    BenchmarkSuite(BenchmarkSuiteOpts),
+}
+
+#[derive(Parser)]
+pub struct BenchmarkSuiteOpts {
+    /// Path to base YAML configuration file
+    #[arg(short, long)]
+    pub config: PathBuf,
+    /// VAF values to sweep (e.g. 0.01,0.05,0.1)
+    #[arg(long, num_args = 1.., value_delimiter = ',')]
+    pub vafs: Vec<f64>,
+    /// Coverage values to sweep (e.g. 100,500,1000)
+    #[arg(long, num_args = 1.., value_delimiter = ',')]
+    pub coverages: Vec<f64>,
+    /// Output base directory (overrides config)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
 }
 
 #[derive(Parser)]
@@ -94,6 +113,10 @@ pub struct SimulateOpts {
     /// Validate config only, report estimated output size
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Set config variables: --set key=value (repeatable). Replaces ${key} in the YAML.
+    #[arg(long = "set", value_name = "KEY=VALUE", action = clap::ArgAction::Append)]
+    pub set: Option<Vec<String>>,
 }
 
 #[derive(Parser)]

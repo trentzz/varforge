@@ -174,6 +174,11 @@ impl ReferenceGenome {
         &self.chrom_lengths
     }
 
+    /// Returns the length of the named chromosome, or `None` if it is not in the index.
+    pub fn chrom_len(&self, name: &str) -> Option<u64> {
+        self.chrom_lengths.get(name).copied()
+    }
+
     /// Returns `true` if the reference contains a chromosome named `name`.
     #[allow(dead_code)]
     pub fn contains_chromosome(&self, name: &str) -> bool {

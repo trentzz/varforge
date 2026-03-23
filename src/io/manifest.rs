@@ -167,6 +167,8 @@ mod tests {
                 bam: false,
                 truth_vcf: true,
                 manifest: true,
+                germline_vcf: false,
+                single_read_bam: false,
             },
             sample: SampleConfig {
                 name: "SAMPLE".to_string(),
@@ -178,6 +180,8 @@ mod tests {
                 model: FragmentModel::Normal,
                 mean: 300.0,
                 sd: 50.0,
+                long_read: None,
+                end_motif_model: None,
             },
             quality: QualityConfig {
                 mean_quality: 36,
@@ -197,6 +201,11 @@ mod tests {
             chromosomes: None,
             regions_bed: None,
             performance: Default::default(),
+            preset: None,
+            vafs: None,
+            germline: None,
+            paired: None,
+            contamination: None,
         }
     }
 

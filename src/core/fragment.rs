@@ -1,6 +1,8 @@
 use rand::Rng;
 use rand_distr::{Distribution, LogNormal, Normal};
 
+use crate::io::config::LongReadFragmentConfig;
+
 /// Samples fragment sizes according to a configured model.
 pub trait FragmentSampler: Send + Sync {
     fn sample<R: Rng>(&self, rng: &mut R) -> usize;
@@ -82,6 +84,23 @@ impl FragmentSampler for CfdnaFragmentSampler {
         let size = self.apply_periodicity(raw_size, rng);
         (size.round() as i64).max(self.min_size as i64) as usize
     }
+}
+
+/// Sample a fragment length for a long-read platform using a log-normal distribution.
+///
+/// The distribution is parameterised by the linear-space mean and standard
+/// deviation. These are converted to the underlying normal parameters (mu, sigma)
+/// before sampling. The result is clamped to [min_len, max_len].
+pub fn sample_long_read_length<R: Rng>(cfg: &LongReadFragmentConfig, rng: &mut R) -> usize {
+    let mean = cfg.mean as f64;
+    let sd = cfg.sd as f64;
+    let variance = sd * sd;
+    // Convert linear-space mean/sd to log-normal mu/sigma.
+    let mu = (mean * mean / (mean * mean + variance).sqrt()).ln();
+    let sigma = (1.0_f64 + variance / (mean * mean)).ln().sqrt();
+    let dist = LogNormal::new(mu, sigma).expect("invalid log-normal parameters");
+    let sample = dist.sample(rng) as usize;
+    sample.clamp(cfg.min_len, cfg.max_len)
 }
 
 /// PCR family size sampler using a log-normal distribution.
@@ -176,6 +195,32 @@ mod tests {
         assert!(sizes.iter().all(|&s| s >= 1), "min family size is 1");
         let mean = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
         assert!((mean - 3.0).abs() < 1.0, "mean {} too far from 3.0", mean);
+    }
+
+    #[test]
+    fn test_long_read_length_range() {
+        use crate::io::config::LongReadFragmentConfig;
+        let cfg = LongReadFragmentConfig {
+            mean: 15000,
+            sd: 5000,
+            min_len: 1000,
+            max_len: 100000,
+        };
+        let mut rng = StdRng::seed_from_u64(42);
+        let sizes: Vec<usize> = (0..1000)
+            .map(|_| sample_long_read_length(&cfg, &mut rng))
+            .collect();
+        assert!(
+            sizes.iter().all(|&s| s >= 1000 && s <= 100000),
+            "all samples must be within [min_len, max_len]"
+        );
+        let mean = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
+        // Log-normal with these parameters centres around 15000; allow wide tolerance.
+        assert!(
+            mean > 5000.0 && mean < 30000.0,
+            "mean {} outside expected range",
+            mean
+        );
     }
 
     #[test]

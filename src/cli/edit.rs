@@ -195,6 +195,7 @@ fn run_from_config(config_path: &PathBuf, seed_override: u64, purity_override: f
             mutation,
             expected_vaf: iv.vaf,
             clone_id: None,
+            haplotype: None,
         });
     }
 
@@ -289,6 +290,7 @@ fn load_variants_from_vcf(vcf_path: &PathBuf) -> Result<Vec<Variant>> {
             mutation,
             expected_vaf,
             clone_id: None,
+            haplotype: None,
         });
     }
 

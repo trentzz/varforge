@@ -601,6 +601,7 @@ mod tests {
             },
             expected_vaf: 1.0, // 100% so all reads are modified
             clone_id: None,
+            haplotype: None,
         };
 
         let config = EditConfig {
@@ -656,6 +657,7 @@ mod tests {
             },
             expected_vaf: 0.5,
             clone_id: None,
+            haplotype: None,
         };
 
         let config = EditConfig {
@@ -703,6 +705,7 @@ mod tests {
             },
             expected_vaf: 1.0,
             clone_id: None,
+            haplotype: None,
         };
 
         let config = EditConfig {
@@ -754,6 +757,7 @@ mod tests {
             },
             expected_vaf: 1.0,
             clone_id: None,
+            haplotype: None,
         };
 
         let config = EditConfig {
@@ -827,6 +831,7 @@ mod tests {
             },
             expected_vaf: 1.0,
             clone_id: None,
+            haplotype: None,
         };
 
         let config = EditConfig {
@@ -907,6 +912,7 @@ mod tests {
             },
             expected_vaf: 0.5, // 50 of 100 reads
             clone_id: None,
+            haplotype: None,
         };
 
         let config = EditConfig {
@@ -986,6 +992,7 @@ mod tests {
             },
             expected_vaf: 1.0,
             clone_id: None,
+            haplotype: None,
         };
 
         let config = EditConfig {
@@ -1035,6 +1042,7 @@ mod tests {
             },
             expected_vaf: 1.0,
             clone_id: None,
+            haplotype: None,
         };
 
         let config = EditConfig {
@@ -1080,6 +1088,7 @@ mod tests {
             },
             expected_vaf: 0.3,
             clone_id: None,
+            haplotype: None,
         };
 
         let run = |seed: u64| -> Vec<u8> {
@@ -1137,6 +1146,7 @@ mod tests {
             },
             expected_vaf: 0.5,
             clone_id: None,
+            haplotype: None,
         };
 
         let config = EditConfig {
@@ -1254,6 +1264,7 @@ mod tests {
             },
             expected_vaf: 0.25,
             clone_id: None,
+            haplotype: None,
         };
 
         let config = EditConfig {
@@ -1322,6 +1333,7 @@ mod tests {
             },
             expected_vaf: 1.0,
             clone_id: None,
+            haplotype: None,
         };
 
         let config = EditConfig {

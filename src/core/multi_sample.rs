@@ -204,6 +204,7 @@ fn apply_tumour_fraction(
                 purity: tumour_fraction,
                 ploidy: 2,
                 clones,
+                msi: false,
             });
         }
     }
@@ -284,6 +285,8 @@ mod tests {
                 bam: false,
                 truth_vcf: true,
                 manifest: true,
+                germline_vcf: false,
+                single_read_bam: false,
             },
             sample: SampleConfig {
                 name: "BASE".to_string(),
@@ -295,6 +298,8 @@ mod tests {
                 model: FragmentModel::Normal,
                 mean: 300.0,
                 sd: 50.0,
+                long_read: None,
+                end_motif_model: None,
             },
             quality: QualityConfig {
                 mean_quality: 36,
@@ -316,6 +321,7 @@ mod tests {
                         parent: Some("clone_A".to_string()),
                     },
                 ],
+                msi: false,
             }),
             mutations: None,
             umi: None,
@@ -329,6 +335,11 @@ mod tests {
             samples: None,
             capture: None,
             performance: Default::default(),
+            preset: None,
+            vafs: None,
+            germline: None,
+            paired: None,
+            contamination: None,
         }
     }
 
@@ -398,6 +409,8 @@ samples:
         cfg.mutations = Some(MutationConfig {
             vcf: None,
             random: None,
+            sv_count: 0,
+            sv_signature: None,
         });
         cfg.samples = Some(vec![
             SampleEntry {

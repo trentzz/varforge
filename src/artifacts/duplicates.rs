@@ -56,6 +56,7 @@ mod tests {
             fragment_start: 1000,
             fragment_length: 300,
             chrom: "chr1".to_string(),
+            variant_tags: Vec::new(),
         };
 
         let dup = duplicate_read_pair(&original, 0);

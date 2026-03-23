@@ -222,6 +222,7 @@ fn parse_record(
         mutation,
         expected_vaf: vaf,
         clone_id,
+        haplotype: None,
     }))
 }
 

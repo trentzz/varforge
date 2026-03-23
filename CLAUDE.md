@@ -60,3 +60,28 @@ cargo test
 ## Target consumers
 
 km, samtools, HUMID, fgbio, UMI-tools, Mutect2, VarDict, Strelka2, CNVkit.
+
+---
+
+## Task Tracking
+
+All development tasks are tracked in `docs/claudetracking/KANBAN.md` as a kanban board
+with four columns: TODO, IN_PROGRESS, DONE, BLOCKED.
+
+### Rules
+
+- Before starting any task, move it from TODO to **IN_PROGRESS** in the kanban.
+- Mark **DONE** only after `cargo fmt -- --check`, `cargo clippy -- -D warnings`, and
+  `cargo test` all pass cleanly.
+- If a task is blocked, move it to **BLOCKED** with a one-line note explaining why.
+- Check the `Depends on` column before starting: all listed dependencies must be DONE first.
+- When running parallel agents, each agent is responsible for moving its own tasks to
+  the correct column when it finishes.
+
+### Format
+
+Each task row: `ID | Title | Priority | Depends on | Notes`
+
+Priority levels: P0 (critical bug), P1 (high), P2 (medium), P3 (low).
+
+Task IDs are stable: never reuse an ID, even after a task is deleted.
