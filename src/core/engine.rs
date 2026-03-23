@@ -335,6 +335,11 @@ impl SimulationEngine {
             ))
         };
 
+        // Determine whether duplex UMI mode is active. In duplex mode, every alt
+        // molecule produces both an AB and a BA strand family, so the duplex alt
+        // count equals the molecule-level alt count.
+        let is_duplex_mode = self.config.umi.as_ref().map(|u| u.duplex).unwrap_or(false);
+
         let mut read_pairs: Vec<ReadPair> = Vec::with_capacity(n_pairs as usize);
 
         // We may need to generate more than n_pairs fragments due to GC bias
@@ -796,7 +801,9 @@ impl SimulationEngine {
                 variant: v.clone(),
                 actual_alt_count: alt_counts[i],
                 actual_total_count: total_counts[i],
-                duplex_alt_count: 0, // TODO(T004): wire duplex family count here
+                // In duplex mode both AB and BA strand families carry the same
+                // variant, so every alt molecule contributes to the duplex count.
+                duplex_alt_count: if is_duplex_mode { alt_counts[i] } else { 0 },
             })
             .collect();
 
@@ -1724,6 +1731,55 @@ mod tests {
         assert!(
             found_duplex_pair,
             "duplex mode should produce at least one AB/BA read pair complement"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // 16. duplex_alt_count is non-zero at moderate VAF in duplex mode (T106)
+    // -----------------------------------------------------------------------
+    //
+    // In duplex mode every alt molecule produces both an AB and a BA family, so
+    // duplex_alt_count should equal the molecule-level alt count and therefore be
+    // greater than zero when the variant is spiked at a moderate VAF.
+    #[test]
+    fn test_duplex_alt_count_is_nonzero_at_moderate_vaf() {
+        let dir = TempDir::new().unwrap();
+        let fa = write_test_fasta(&dir);
+        let mut config = make_config(106);
+        // Use high coverage so the variant is applied to many molecules,
+        // making a zero duplex_alt_count extremely unlikely at VAF=0.5.
+        config.sample.coverage = 100.0;
+        config.umi = Some(UmiConfig {
+            length: 8,
+            duplex: true,
+            pcr_cycles: 1,
+            family_size_mean: 1.0,
+            family_size_sd: 0.1,
+            inline: false,
+        });
+        let reference = open_reference(&fa);
+        let mut engine = SimulationEngine::new(config, reference);
+
+        // Position 248 in the ACGT repeating pattern: 248 % 4 = 0 → 'A'.
+        // Spike A→C at 50% VAF over a central region.
+        let variant = snv_variant(248, b'A', b'C', 0.5);
+        let region = Region::new("chr1", 0, 500);
+        let output = engine.generate_region(&region, &[variant]).unwrap();
+
+        let applied = &output.applied_variants;
+        assert!(!applied.is_empty(), "variant should be applied");
+
+        let av = &applied[0];
+        assert!(
+            av.duplex_alt_count > 0,
+            "duplex_alt_count should be > 0 in duplex mode at VAF=0.5, got {}",
+            av.duplex_alt_count
+        );
+        assert!(
+            av.duplex_alt_count <= av.actual_alt_count,
+            "duplex_alt_count {} must not exceed actual_alt_count {}",
+            av.duplex_alt_count,
+            av.actual_alt_count
         );
     }
 }
