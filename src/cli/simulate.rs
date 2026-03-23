@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -20,7 +21,10 @@ use crate::io::manifest::{Manifest, ReferenceInfo, SimulationStatistics};
 use crate::io::reference::ReferenceGenome;
 use crate::io::truth_vcf::TruthVcfWriter;
 use crate::io::vcf_input;
-use crate::variants::random_gen::generate_random_mutations;
+use crate::variants::germline::generate_germline_variants;
+use crate::variants::random_gen::{
+    generate_msi_indels, generate_random_mutations, resolve_signature,
+};
 
 /// A batch of generated reads for one region, sent through the streaming channel.
 struct RegionBatch {
@@ -33,6 +37,14 @@ struct RegionBatch {
 struct WriterStats {
     total_read_pairs: u64,
     all_applied: Vec<AppliedVariant>,
+    /// Mean coverage per chromosome: chrom -> mean coverage (×).
+    // Collected for future use; not yet surfaced in output.
+    #[allow(dead_code)]
+    chrom_coverage: std::collections::HashMap<String, f64>,
+    /// Estimated PCR duplicate rate (0.0 if UMI is not enabled).
+    // Collected for future use; not yet surfaced in output.
+    #[allow(dead_code)]
+    duplicate_rate: f64,
 }
 
 /// Default chunk size for partitioning regions (~1 Mbp).
@@ -84,6 +96,7 @@ pub fn apply_overrides(
                     purity,
                     ploidy: 2,
                     clones: Vec::new(),
+                    msi: false,
                 });
             }
         }
@@ -102,6 +115,8 @@ pub fn apply_overrides(
         let existing = config.mutations.get_or_insert(config::MutationConfig {
             vcf: None,
             random: None,
+            sv_count: 0,
+            sv_signature: None,
         });
         let rand = existing.random.get_or_insert(config::RandomMutationConfig {
             count: 0,
@@ -110,6 +125,7 @@ pub fn apply_overrides(
             snv_fraction: 0.80,
             indel_fraction: 0.15,
             mnv_fraction: 0.05,
+            signature: None,
         });
         rand.count = count;
         rand.vaf_min = vaf_min;
@@ -134,7 +150,20 @@ pub fn run(opts: SimulateOpts, cli_threads: Option<usize>) -> Result<()> {
     // 1. Load and validate config, applying CLI overrides
     // -----------------------------------------------------------------------
     tracing::info!("loading config from {}", opts.config.display());
-    let mut cfg = config::load(&opts.config)
+    // Parse --set key=value pairs and substitute ${key} placeholders.
+    let vars: std::collections::HashMap<String, String> = opts
+        .set
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|kv| {
+            let (k, v) = kv.split_once('=').ok_or_else(|| {
+                anyhow::anyhow!("--set value '{}' must be in KEY=VALUE format", kv)
+            })?;
+            Ok((k.to_string(), v.to_string()))
+        })
+        .collect::<Result<_>>()?;
+    let mut cfg = config::load_with_vars(&opts.config, &vars)
         .with_context(|| format!("failed to load config: {}", opts.config.display()))?;
 
     // Apply preset (lower precedence than YAML).
@@ -163,10 +192,25 @@ pub fn run(opts: SimulateOpts, cli_threads: Option<usize>) -> Result<()> {
         .with_context(|| format!("failed to open reference: {}", cfg.reference.display()))?;
 
     // -----------------------------------------------------------------------
-    // 3. Multi-sample mode: if samples[] is present, delegate to per-sample runs
+    // 3. Paired tumour-normal mode: if `paired` is set, delegate before any
+    //    other mode check so paired overrides multi-sample and batch modes.
+    // -----------------------------------------------------------------------
+    if cfg.paired.is_some() {
+        return run_paired_simulation(cfg, reference, start_time, opts.dry_run);
+    }
+
+    // -----------------------------------------------------------------------
+    // 3b. Multi-sample mode: if samples[] is present, delegate to per-sample runs
     // -----------------------------------------------------------------------
     if cfg.samples.is_some() && !cfg.samples.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
         return run_multi_sample(cfg, reference, start_time);
+    }
+
+    // -----------------------------------------------------------------------
+    // 3b. Batch (vafs) mode: run one simulation per VAF value
+    // -----------------------------------------------------------------------
+    if cfg.vafs.as_ref().map(|v| !v.is_empty()).unwrap_or(false) {
+        return run_batch(cfg, reference, start_time, opts.dry_run);
     }
 
     // -----------------------------------------------------------------------
@@ -176,7 +220,7 @@ pub fn run(opts: SimulateOpts, cli_threads: Option<usize>) -> Result<()> {
 }
 
 /// Run the simulation for a single sample configuration.
-fn run_single_sample(
+pub(crate) fn run_single_sample(
     cfg: Config,
     reference: ReferenceGenome,
     start_time: Instant,
@@ -199,12 +243,13 @@ fn run_single_sample(
     let regions = if let Some(ref bed_path) = cfg.regions_bed {
         let targets = parse_bed_file(bed_path)
             .with_context(|| format!("failed to parse regions BED: {}", bed_path.display()))?;
+        let target_regions: Vec<Region> = targets.iter().map(|(r, _)| r.clone()).collect();
         tracing::info!(
             "filtering {} regions to {} BED targets",
             regions.len(),
-            targets.len()
+            target_regions.len()
         );
-        let filtered = intersect_with_targets(&regions, &targets);
+        let filtered = intersect_with_targets(&regions, &target_regions);
         anyhow::ensure!(
             !filtered.is_empty(),
             "regions_bed produced zero overlapping regions; check chromosome names match the reference"
@@ -265,6 +310,18 @@ fn run_single_sample(
         None
     };
 
+    // Open the variant reads sidecar before starting the writer thread so it
+    // can be moved in alongside the FASTQ and BAM writers.
+    let variant_reads_path = out_dir.join("variant_reads.tsv");
+    let mut variant_reads_writer = std::io::BufWriter::new(
+        std::fs::File::create(&variant_reads_path).context("failed to create variant_reads.tsv")?,
+    );
+    writeln!(
+        variant_reads_writer,
+        "read_name\tchrom\tpos\tvartype\tvaf\tclone_id"
+    )
+    .context("failed to write variant_reads.tsv header")?;
+
     // We'll open truth VCF after collecting applied variants; use a temp path
     // and rename, or just open now (write header) and stream records.
     let truth_vcf_path = out_dir.join(format!("{}.truth.vcf", sample_name));
@@ -282,6 +339,25 @@ fn run_single_sample(
     // Build capture model (shared across all region engines)
     // -----------------------------------------------------------------------
     let capture_model: Option<Arc<CaptureModel>> = build_capture_model(&cfg)?;
+
+    // In amplicon mode, replace the partitioned regions with the amplicon targets
+    // so that each target becomes exactly one simulation region.
+    let regions = if let Some(ref cap) = capture_model {
+        if cap.is_amplicon() {
+            tracing::info!(
+                "amplicon mode: using {} targets as simulation regions",
+                cap.target_regions.len()
+            );
+            cap.target_regions
+                .iter()
+                .map(|t| Region::new(t.chrom.clone(), t.start, t.end))
+                .collect::<Vec<_>>()
+        } else {
+            regions
+        }
+    } else {
+        regions
+    };
 
     // -----------------------------------------------------------------------
     // Run simulation per region in parallel, streaming batches to a dedicated
@@ -316,13 +392,53 @@ fn run_single_sample(
     let writer_handle = std::thread::spawn(move || -> Result<WriterStats> {
         let mut total_read_pairs: u64 = 0;
         let mut all_applied: Vec<AppliedVariant> = Vec::new();
+        // Accumulate read pairs per chromosome for coverage computation.
+        let mut chrom_read_pairs: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+
+        // Primer trim amount: only active in amplicon mode.
+        let primer_trim = writer_cfg
+            .capture
+            .as_ref()
+            .filter(|c| c.mode == "amplicon")
+            .map(|c| c.primer_trim)
+            .unwrap_or(0);
 
         for batch in rx {
-            // Write FASTQ
+            // Write FASTQ — annotate read names with variant tags when present.
             if let Some(ref mut fq) = fastq_writer {
                 for pair in &batch.read_pairs {
-                    fq.write_pair(pair, &pair.name)
-                        .context("failed to write FASTQ record")?;
+                    let name = if pair.variant_tags.is_empty() {
+                        pair.name.clone()
+                    } else {
+                        let tags: String = pair
+                            .variant_tags
+                            .iter()
+                            .map(|t| format!(" VT:Z:{}:{}:{}", t.chrom, t.pos + 1, t.vartype))
+                            .collect::<Vec<_>>()
+                            .join("");
+                        format!("{}{}", pair.name, tags)
+                    };
+                    // Apply primer trimming when configured: remove the first and
+                    // last `primer_trim` bases to simulate primer removal.
+                    if primer_trim > 0 && pair.read1.seq.len() > 2 * primer_trim + 10 {
+                        let mut trimmed = pair.clone();
+                        let len1 = trimmed.read1.seq.len();
+                        trimmed.read1.seq =
+                            trimmed.read1.seq[primer_trim..len1 - primer_trim].to_vec();
+                        trimmed.read1.qual =
+                            trimmed.read1.qual[primer_trim..len1 - primer_trim].to_vec();
+                        let len2 = trimmed.read2.seq.len();
+                        trimmed.read2.seq =
+                            trimmed.read2.seq[primer_trim..len2 - primer_trim].to_vec();
+                        trimmed.read2.qual =
+                            trimmed.read2.qual[primer_trim..len2 - primer_trim].to_vec();
+                        fq.write_pair(&trimmed, &name)
+                            .context("failed to write FASTQ record")?;
+                    } else {
+                        fq.write_pair(pair, &name)
+                            .context("failed to write FASTQ record")?;
+                    }
                 }
             }
 
@@ -333,16 +449,91 @@ fn run_single_sample(
                     .position(|(name, _)| *name == batch.region.chrom)
                     .unwrap_or(0);
                 let read_len = writer_cfg.sample.read_length;
-                let cigar = format!("{}M", read_len);
-                for pair in &batch.read_pairs {
-                    bam.write_pair(pair, ref_id, pair.fragment_start, &cigar, &cigar)
-                        .context("failed to write BAM record")?;
+                if writer_cfg.output.single_read_bam {
+                    // Long-read mode: write one record per read pair (read1 only).
+                    for pair in &batch.read_pairs {
+                        let actual_len = pair.read1.seq.len();
+                        let cigar = if primer_trim > 0 && actual_len > 2 * primer_trim + 10 {
+                            // Soft-clip primer bases at both ends.
+                            format!(
+                                "{}S{}M{}S",
+                                primer_trim,
+                                actual_len - 2 * primer_trim,
+                                primer_trim
+                            )
+                        } else {
+                            format!("{}M", read_len)
+                        };
+                        bam.write_single_read(pair, ref_id, pair.fragment_start, &cigar)
+                            .context("failed to write BAM single read record")?;
+                    }
+                } else {
+                    for pair in &batch.read_pairs {
+                        let actual_len = pair.read1.seq.len();
+                        let cigar = if primer_trim > 0 && actual_len > 2 * primer_trim + 10 {
+                            // Soft-clip primer bases at both ends.
+                            format!(
+                                "{}S{}M{}S",
+                                primer_trim,
+                                actual_len - 2 * primer_trim,
+                                primer_trim
+                            )
+                        } else {
+                            format!("{}M", read_len)
+                        };
+                        bam.write_pair(pair, ref_id, pair.fragment_start, &cigar, &cigar)
+                            .context("failed to write BAM record")?;
+                    }
                 }
             }
 
-            total_read_pairs += batch.read_pairs.len() as u64;
+            // Write variant reads sidecar — one row per variant tag per read pair.
+            for pair in &batch.read_pairs {
+                for tag in &pair.variant_tags {
+                    writeln!(
+                        variant_reads_writer,
+                        "{}	{}	{}	{}	{:.6}	{}",
+                        pair.name,
+                        tag.chrom,
+                        tag.pos + 1,
+                        tag.vartype,
+                        tag.vaf,
+                        tag.clone_id.as_deref().unwrap_or(".")
+                    )
+                    .context("failed to write variant_reads.tsv row")?;
+                }
+            }
+
+            let batch_pairs = batch.read_pairs.len() as u64;
+            total_read_pairs += batch_pairs;
+            // Accumulate per-chromosome pair count for coverage reporting.
+            *chrom_read_pairs
+                .entry(batch.region.chrom.clone())
+                .or_insert(0) += batch_pairs;
             all_applied.extend(batch.applied_variants);
         }
+
+        // Compute mean coverage per chromosome from accumulated pair counts.
+        let chrom_coverage: std::collections::HashMap<String, f64> = chrom_read_pairs
+            .iter()
+            .map(|(chrom, &pairs)| {
+                let chrom_len = writer_chrom_lengths
+                    .iter()
+                    .find(|(c, _)| c == chrom)
+                    .map(|(_, l)| *l)
+                    .unwrap_or(1);
+                let coverage =
+                    (pairs * 2 * writer_cfg.sample.read_length as u64) as f64 / chrom_len as f64;
+                (chrom.clone(), coverage)
+            })
+            .collect();
+
+        // Estimate duplicate rate from UMI family size mean, if configured.
+        let duplicate_rate = if let Some(ref umi) = writer_cfg.umi {
+            1.0 - 1.0 / umi.family_size_mean
+        } else {
+            0.0
+        };
 
         // Finalize writers
         if let Some(fq) = fastq_writer {
@@ -351,10 +542,15 @@ fn run_single_sample(
         if let Some(bam) = bam_writer {
             bam.finish().context("failed to finalize BAM file")?;
         }
+        variant_reads_writer
+            .flush()
+            .context("failed to flush variant_reads.tsv")?;
 
         Ok(WriterStats {
             total_read_pairs,
             all_applied,
+            chrom_coverage,
+            duplicate_rate,
         })
     });
 
@@ -399,19 +595,40 @@ fn run_single_sample(
 
     let total_read_pairs = stats.total_read_pairs;
     let all_applied = stats.all_applied;
+    let chrom_coverage = stats.chrom_coverage;
+    let duplicate_rate = stats.duplicate_rate;
 
     // -----------------------------------------------------------------------
     // Write truth VCF with all applied variants
+    //
+    // Aggregate alt-molecule counts across all regions for each unique variant,
+    // then emit one record per variant with the summed N_ALT_MOL and N_DUPLEX_ALT.
     // -----------------------------------------------------------------------
     if let Some(ref mut vcf) = truth_vcf_writer {
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // key -> (canonical variant, total alt count, total duplex alt count)
+        let mut agg: std::collections::HashMap<String, (crate::core::types::Variant, u32, u32)> =
+            std::collections::HashMap::new();
         for av in &all_applied {
-            let key = variant_key(&av.variant);
-            if seen.insert(key) {
-                let (ref_allele, alt_allele) = variant_alleles(&av.variant);
-                vcf.write_variant(&av.variant, &ref_allele, &alt_allele)
-                    .context("failed to write truth VCF record")?;
+            // Skip contamination variants: they are not ground-truth somatic events.
+            if av.variant.clone_id.as_deref() == Some("contamination") {
+                continue;
             }
+            let key = variant_key(&av.variant);
+            let entry = agg.entry(key).or_insert_with(|| (av.variant.clone(), 0, 0));
+            entry.1 = entry.1.saturating_add(av.actual_alt_count);
+            entry.2 = entry.2.saturating_add(av.duplex_alt_count);
+        }
+        // Sort by (chrom, pos) for deterministic output.
+        let mut records: Vec<_> = agg.into_values().collect();
+        records.sort_by(|a, b| {
+            a.0.chrom
+                .cmp(&b.0.chrom)
+                .then_with(|| a.0.pos().cmp(&b.0.pos()))
+        });
+        for (variant, n_alt_mol, n_duplex_alt) in &records {
+            let (ref_allele, alt_allele) = variant_alleles(variant);
+            vcf.write_variant(variant, &ref_allele, &alt_allele, *n_alt_mol, *n_duplex_alt)
+                .context("failed to write truth VCF record")?;
         }
     }
 
@@ -420,6 +637,56 @@ fn run_single_sample(
     // -----------------------------------------------------------------------
     if let Some(vcf) = truth_vcf_writer {
         vcf.finish().context("failed to finalize truth VCF")?;
+    }
+
+    // -----------------------------------------------------------------------
+    // Write germline truth VCF when germline simulation was active.
+    //
+    // Filter applied variants to those with clone_id starting with "germline_"
+    // and write them to a separate germline_truth.vcf.
+    // -----------------------------------------------------------------------
+    if cfg.germline.is_some() && cfg.output.germline_vcf {
+        let germline_vcf_path = out_dir.join("germline_truth.vcf");
+        let contigs: Vec<(String, u64)> = chrom_lengths.clone();
+        let mut germ_vcf = TruthVcfWriter::new(&germline_vcf_path, sample_name, &contigs)
+            .context("failed to create germline truth VCF writer")?;
+
+        let mut agg: std::collections::HashMap<String, (crate::core::types::Variant, u32, u32)> =
+            std::collections::HashMap::new();
+        for av in &all_applied {
+            let is_germline = av
+                .variant
+                .clone_id
+                .as_deref()
+                .map(|id| id.starts_with("germline_"))
+                .unwrap_or(false);
+            if !is_germline {
+                continue;
+            }
+            let key = variant_key(&av.variant);
+            let entry = agg.entry(key).or_insert_with(|| (av.variant.clone(), 0, 0));
+            entry.1 = entry.1.saturating_add(av.actual_alt_count);
+            entry.2 = entry.2.saturating_add(av.duplex_alt_count);
+        }
+        let mut records: Vec<_> = agg.into_values().collect();
+        records.sort_by(|a, b| {
+            a.0.chrom
+                .cmp(&b.0.chrom)
+                .then_with(|| a.0.pos().cmp(&b.0.pos()))
+        });
+        for (variant, n_alt_mol, n_duplex_alt) in &records {
+            let (ref_allele, alt_allele) = variant_alleles(variant);
+            germ_vcf
+                .write_variant(variant, &ref_allele, &alt_allele, *n_alt_mol, *n_duplex_alt)
+                .context("failed to write germline truth VCF record")?;
+        }
+        germ_vcf
+            .finish()
+            .context("failed to finalise germline truth VCF")?;
+        tracing::info!(
+            "germline truth VCF written to {}",
+            germline_vcf_path.display()
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -535,12 +802,143 @@ fn run_single_sample(
         tracing::info!("manifest written to {}", manifest_path.display());
     }
 
+    // -----------------------------------------------------------------------
+    // Write sim_report.json with coverage and UMI statistics
+    // -----------------------------------------------------------------------
+    {
+        // Build chromosomes object: chrom -> { mean_coverage }.
+        let mut chroms_obj = serde_json::Map::new();
+        let mut sorted_chroms: Vec<(&String, &f64)> = chrom_coverage.iter().collect();
+        sorted_chroms.sort_by_key(|(c, _)| c.as_str());
+        for (chrom, cov) in sorted_chroms {
+            let mut chrom_entry = serde_json::Map::new();
+            chrom_entry.insert(
+                "mean_coverage".into(),
+                serde_json::json!((*cov * 100.0).round() / 100.0),
+            );
+            chroms_obj.insert(chrom.clone(), serde_json::Value::Object(chrom_entry));
+        }
+
+        // Count variants by type.
+        let mut by_type_obj = serde_json::Map::new();
+        for av in &all_applied {
+            let type_name = match &av.variant.mutation {
+                MutationType::Snv { .. } => "SNV",
+                MutationType::Indel { .. } => "INDEL",
+                MutationType::Mnv { .. } => "MNV",
+                MutationType::Sv { .. } => "SV",
+            };
+            let entry = by_type_obj
+                .entry(type_name.to_string())
+                .or_insert(serde_json::json!(0u64));
+            if let Some(n) = entry.as_u64() {
+                *entry = serde_json::json!(n + 1);
+            }
+        }
+
+        let umi_obj = if let Some(ref umi) = cfg.umi {
+            serde_json::json!({
+                "enabled": true,
+                "estimated_duplicate_rate": (duplicate_rate * 10000.0).round() / 10000.0,
+                "family_size_mean": umi.family_size_mean,
+            })
+        } else {
+            serde_json::json!({ "enabled": false })
+        };
+
+        let report = serde_json::json!({
+            "total_read_pairs": total_read_pairs,
+            "sample_name": sample_name,
+            "target_coverage": cfg.sample.coverage,
+            "read_length": cfg.sample.read_length,
+            "chromosomes": serde_json::Value::Object(chroms_obj),
+            "variants": {
+                "total": all_applied.len(),
+                "by_type": serde_json::Value::Object(by_type_obj),
+            },
+            "umi": umi_obj,
+        });
+
+        let report_path = out_dir.join("sim_report.json");
+        let report_pretty =
+            serde_json::to_string_pretty(&report).context("failed to serialise sim_report")?;
+        std::fs::write(&report_path, report_pretty)
+            .with_context(|| format!("failed to write sim_report: {}", report_path.display()))?;
+        tracing::info!("sim_report written to {}", report_path.display());
+    }
+
     eprintln!(
         "Simulation complete: {} read pairs, {} variants applied, {:.2}s ({:.0} reads/sec)",
         total_read_pairs,
         all_applied.len(),
         elapsed.as_secs_f64(),
         throughput,
+    );
+
+    Ok(())
+}
+
+/// Run a paired tumour-normal simulation.
+///
+/// The tumour sample is simulated with all configured somatic and germline
+/// variants. The normal sample is simulated with germline variants only (somatic
+/// mutations are cleared). Outputs go to `{base_output}/tumour/` and
+/// `{base_output}/normal/` respectively.
+fn run_paired_simulation(
+    cfg: Config,
+    reference: ReferenceGenome,
+    start_time: Instant,
+    dry_run: bool,
+) -> Result<()> {
+    let paired = cfg.paired.as_ref().expect("paired config must be set");
+    let base_output = cfg.output.directory.clone();
+
+    // --- Tumour run ---
+    let tumour_dir = base_output.join("tumour");
+    let mut tumour_cfg = cfg.clone();
+    tumour_cfg.output.directory = tumour_dir;
+    tumour_cfg.paired = None;
+
+    eprintln!("Running tumour sample simulation...");
+    let reference_for_tumour = ReferenceGenome::open(&cfg.reference)
+        .context("failed to re-open reference for tumour run")?;
+    run_single_sample(tumour_cfg, reference_for_tumour, Instant::now(), dry_run)?;
+
+    // --- Normal run: germline-only by default; optionally with scaled somatic VAFs ---
+    let normal_dir = base_output.join("normal");
+    let mut normal_cfg = cfg.clone();
+    normal_cfg.output.directory = normal_dir;
+    normal_cfg.paired = None;
+    normal_cfg.sample.name = paired.normal_sample_name.clone();
+    normal_cfg.sample.coverage = paired.normal_coverage;
+
+    let contamination = paired.tumour_contamination_in_normal;
+    if contamination > 0.0 {
+        // Scale somatic VAFs by the contamination fraction to simulate
+        // a small amount of tumour DNA in the normal sample.
+        if let Some(ref mut muts) = normal_cfg.mutations {
+            if let Some(ref mut rand) = muts.random {
+                rand.vaf_min *= contamination;
+                rand.vaf_max *= contamination;
+                // Ensure vaf_min < vaf_max after scaling.
+                if rand.vaf_min >= rand.vaf_max {
+                    rand.vaf_max = rand.vaf_min + 1e-9;
+                }
+            }
+        }
+    } else {
+        // No contamination: suppress somatic mutations in the normal sample.
+        normal_cfg.mutations = None;
+    }
+    // Keep germline if present.
+
+    eprintln!("Running normal sample simulation...");
+    run_single_sample(normal_cfg, reference, Instant::now(), dry_run)?;
+
+    let elapsed = start_time.elapsed();
+    eprintln!(
+        "Paired simulation complete in {:.1}s. Outputs: tumour/ and normal/",
+        elapsed.as_secs_f64()
     );
 
     Ok(())
@@ -633,6 +1031,182 @@ fn run_multi_sample(cfg: Config, reference: ReferenceGenome, start_time: Instant
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Batch mode
+// ---------------------------------------------------------------------------
+
+/// One row in the batch manifest TSV.
+struct BatchManifestRow {
+    vaf: f64,
+    output_dir: std::path::PathBuf,
+    n_variants: usize,
+    seed: Option<u64>,
+    status: String,
+}
+
+/// Run one simulation per VAF listed in `cfg.vafs`.
+///
+/// Each run writes its output to a sub-directory named `{vaf_pct}pct/` under
+/// the original output directory. After all runs, a `batch_manifest.tsv` is
+/// written to the root output directory regardless of whether individual runs
+/// failed.
+fn run_batch(
+    cfg: Config,
+    reference: ReferenceGenome,
+    start_time: Instant,
+    dry_run: bool,
+) -> Result<()> {
+    let vafs = cfg.vafs.clone().unwrap_or_default();
+    tracing::info!("batch mode: {} VAF values configured", vafs.len());
+
+    let root_dir = cfg.output.directory.clone();
+    let reference_path = cfg.reference.clone();
+
+    let mut rows: Vec<BatchManifestRow> = Vec::new();
+
+    for vaf in &vafs {
+        let vaf = *vaf;
+
+        // Build a label like "1pct", "5pct", or "0.5000pct" for fractional percentages.
+        let pct_val = vaf * 100.0;
+        let pct_str = if pct_val.fract() < 1e-9 {
+            format!("{:.0}pct", pct_val)
+        } else {
+            format!("{:.4}pct", pct_val)
+        };
+
+        let sub_dir = root_dir.join(&pct_str);
+
+        // Fork the config for this VAF value.
+        let mut run_cfg = cfg.clone();
+        run_cfg.vafs = None; // Prevent infinite recursion.
+        run_cfg.output.directory = sub_dir.clone();
+
+        // Override the random mutation VAF range to pin it to this exact value.
+        if let Some(ref mut mutations) = run_cfg.mutations {
+            if let Some(ref mut random) = mutations.random {
+                random.vaf_min = vaf;
+                // Keep vaf_min < vaf_max as required by the validator.
+                random.vaf_max = vaf + 1e-9;
+            }
+        }
+
+        // Count variants for the manifest row (requires a reference lookup).
+        let n_variants = count_variants_for_config(&run_cfg, &reference_path);
+
+        let seed = run_cfg.seed;
+
+        tracing::info!("batch: simulating VAF {} → {}", vaf, sub_dir.display());
+
+        let result = {
+            // Clone the reference (reopens the file handle) for this run.
+            let ref_for_run = reference.clone();
+            run_single_sample(run_cfg, ref_for_run, Instant::now(), dry_run)
+        };
+
+        let status = match result {
+            Ok(()) => "ok".to_string(),
+            Err(ref e) => {
+                tracing::error!("batch run for VAF {} failed: {:#}", vaf, e);
+                format!("err:{}", e)
+            }
+        };
+
+        rows.push(BatchManifestRow {
+            vaf,
+            output_dir: sub_dir,
+            n_variants,
+            seed,
+            status,
+        });
+    }
+
+    // Write the batch manifest even if some individual runs failed.
+    if !dry_run {
+        write_batch_manifest(&root_dir, &rows)?;
+    }
+
+    let elapsed = start_time.elapsed();
+    let failed = rows.iter().filter(|r| r.status != "ok").count();
+    eprintln!(
+        "Batch simulation complete: {} VAF values, {} failed, {:.2}s",
+        rows.len(),
+        failed,
+        elapsed.as_secs_f64(),
+    );
+
+    if failed > 0 {
+        anyhow::bail!(
+            "{} batch run(s) failed; see batch_manifest.tsv for details",
+            failed
+        );
+    }
+
+    Ok(())
+}
+
+/// Count the number of variants that would be generated for `cfg` without
+/// actually opening a reference genome (uses the count from the random
+/// mutation config, or 0 if a VCF is used or no mutations are configured).
+///
+/// This is a best-effort count used only for the manifest row. For VCF-sourced
+/// variants the real count is only known after parsing, so we return 0.
+fn count_variants_for_config(cfg: &Config, _reference_path: &std::path::Path) -> usize {
+    match &cfg.mutations {
+        Some(m) => {
+            if m.vcf.is_some() {
+                // VCF variant count requires parsing; return 0 as a placeholder.
+                0
+            } else if let Some(ref rand) = m.random {
+                rand.count
+            } else {
+                0
+            }
+        }
+        None => 0,
+    }
+}
+
+/// Write a TSV batch manifest to `{root_dir}/batch_manifest.tsv`.
+fn write_batch_manifest(root_dir: &std::path::Path, rows: &[BatchManifestRow]) -> Result<()> {
+    use std::io::Write;
+
+    std::fs::create_dir_all(root_dir).with_context(|| {
+        format!(
+            "failed to create batch output directory: {}",
+            root_dir.display()
+        )
+    })?;
+
+    let manifest_path = root_dir.join("batch_manifest.tsv");
+    let mut f = std::fs::File::create(&manifest_path).with_context(|| {
+        format!(
+            "failed to create batch manifest: {}",
+            manifest_path.display()
+        )
+    })?;
+
+    writeln!(f, "vaf\toutput_dir\tn_variants\tseed\tstatus")?;
+    for row in rows {
+        let seed_str = row
+            .seed
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "".to_string());
+        writeln!(
+            f,
+            "{}\t{}\t{}\t{}\t{}",
+            row.vaf,
+            row.output_dir.display(),
+            row.n_variants,
+            seed_str,
+            row.status,
+        )?;
+    }
+
+    tracing::info!("batch manifest written to {}", manifest_path.display());
+    Ok(())
+}
+
 /// Run the simulation for one sample config and return (total_read_pairs, applied_variant_count).
 fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64, usize)> {
     let chrom_lengths = build_chrom_list(&cfg, &reference)?;
@@ -674,6 +1248,17 @@ fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64
         None
     };
 
+    // Open the variant reads sidecar for this sample.
+    let variant_reads_path = out_dir.join("variant_reads.tsv");
+    let mut variant_reads_writer = std::io::BufWriter::new(
+        std::fs::File::create(&variant_reads_path).context("failed to create variant_reads.tsv")?,
+    );
+    writeln!(
+        variant_reads_writer,
+        "read_name\tchrom\tpos\tvartype\tvaf\tclone_id"
+    )
+    .context("failed to write variant_reads.tsv header")?;
+
     let reference = Arc::new(reference);
     let master_seed = cfg.seed;
 
@@ -688,13 +1273,53 @@ fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64
     let writer_handle = std::thread::spawn(move || -> Result<WriterStats> {
         let mut total_read_pairs: u64 = 0;
         let mut all_applied: Vec<AppliedVariant> = Vec::new();
+        // Accumulate read pairs per chromosome for coverage computation.
+        let mut chrom_read_pairs: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+
+        // Primer trim amount: only active in amplicon mode.
+        let primer_trim = writer_cfg
+            .capture
+            .as_ref()
+            .filter(|c| c.mode == "amplicon")
+            .map(|c| c.primer_trim)
+            .unwrap_or(0);
 
         for batch in rx {
-            // Write FASTQ
+            // Write FASTQ — annotate read names with variant tags when present.
             if let Some(ref mut fq) = fastq_writer {
                 for pair in &batch.read_pairs {
-                    fq.write_pair(pair, &pair.name)
-                        .context("failed to write FASTQ record")?;
+                    let name = if pair.variant_tags.is_empty() {
+                        pair.name.clone()
+                    } else {
+                        let tags: String = pair
+                            .variant_tags
+                            .iter()
+                            .map(|t| format!(" VT:Z:{}:{}:{}", t.chrom, t.pos + 1, t.vartype))
+                            .collect::<Vec<_>>()
+                            .join("");
+                        format!("{}{}", pair.name, tags)
+                    };
+                    // Apply primer trimming when configured: remove the first and
+                    // last `primer_trim` bases to simulate primer removal.
+                    if primer_trim > 0 && pair.read1.seq.len() > 2 * primer_trim + 10 {
+                        let mut trimmed = pair.clone();
+                        let len1 = trimmed.read1.seq.len();
+                        trimmed.read1.seq =
+                            trimmed.read1.seq[primer_trim..len1 - primer_trim].to_vec();
+                        trimmed.read1.qual =
+                            trimmed.read1.qual[primer_trim..len1 - primer_trim].to_vec();
+                        let len2 = trimmed.read2.seq.len();
+                        trimmed.read2.seq =
+                            trimmed.read2.seq[primer_trim..len2 - primer_trim].to_vec();
+                        trimmed.read2.qual =
+                            trimmed.read2.qual[primer_trim..len2 - primer_trim].to_vec();
+                        fq.write_pair(&trimmed, &name)
+                            .context("failed to write FASTQ record")?;
+                    } else {
+                        fq.write_pair(pair, &name)
+                            .context("failed to write FASTQ record")?;
+                    }
                 }
             }
 
@@ -705,16 +1330,91 @@ fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64
                     .position(|(name, _)| *name == batch.region.chrom)
                     .unwrap_or(0);
                 let read_len = writer_cfg.sample.read_length;
-                let cigar = format!("{}M", read_len);
-                for pair in &batch.read_pairs {
-                    bam.write_pair(pair, ref_id, pair.fragment_start, &cigar, &cigar)
-                        .context("failed to write BAM record")?;
+                if writer_cfg.output.single_read_bam {
+                    // Long-read mode: write one record per read pair (read1 only).
+                    for pair in &batch.read_pairs {
+                        let actual_len = pair.read1.seq.len();
+                        let cigar = if primer_trim > 0 && actual_len > 2 * primer_trim + 10 {
+                            // Soft-clip primer bases at both ends.
+                            format!(
+                                "{}S{}M{}S",
+                                primer_trim,
+                                actual_len - 2 * primer_trim,
+                                primer_trim
+                            )
+                        } else {
+                            format!("{}M", read_len)
+                        };
+                        bam.write_single_read(pair, ref_id, pair.fragment_start, &cigar)
+                            .context("failed to write BAM single read record")?;
+                    }
+                } else {
+                    for pair in &batch.read_pairs {
+                        let actual_len = pair.read1.seq.len();
+                        let cigar = if primer_trim > 0 && actual_len > 2 * primer_trim + 10 {
+                            // Soft-clip primer bases at both ends.
+                            format!(
+                                "{}S{}M{}S",
+                                primer_trim,
+                                actual_len - 2 * primer_trim,
+                                primer_trim
+                            )
+                        } else {
+                            format!("{}M", read_len)
+                        };
+                        bam.write_pair(pair, ref_id, pair.fragment_start, &cigar, &cigar)
+                            .context("failed to write BAM record")?;
+                    }
                 }
             }
 
-            total_read_pairs += batch.read_pairs.len() as u64;
+            // Write variant reads sidecar — one row per variant tag per read pair.
+            for pair in &batch.read_pairs {
+                for tag in &pair.variant_tags {
+                    writeln!(
+                        variant_reads_writer,
+                        "{}	{}	{}	{}	{:.6}	{}",
+                        pair.name,
+                        tag.chrom,
+                        tag.pos + 1,
+                        tag.vartype,
+                        tag.vaf,
+                        tag.clone_id.as_deref().unwrap_or(".")
+                    )
+                    .context("failed to write variant_reads.tsv row")?;
+                }
+            }
+
+            let batch_pairs = batch.read_pairs.len() as u64;
+            total_read_pairs += batch_pairs;
+            // Accumulate per-chromosome pair count for coverage reporting.
+            *chrom_read_pairs
+                .entry(batch.region.chrom.clone())
+                .or_insert(0) += batch_pairs;
             all_applied.extend(batch.applied_variants);
         }
+
+        // Compute mean coverage per chromosome from accumulated pair counts.
+        let chrom_coverage: std::collections::HashMap<String, f64> = chrom_read_pairs
+            .iter()
+            .map(|(chrom, &pairs)| {
+                let chrom_len = writer_chrom_lengths
+                    .iter()
+                    .find(|(c, _)| c == chrom)
+                    .map(|(_, l)| *l)
+                    .unwrap_or(1);
+                let coverage =
+                    (pairs * 2 * writer_cfg.sample.read_length as u64) as f64 / chrom_len as f64;
+                (chrom.clone(), coverage)
+            })
+            .collect();
+
+        // Estimate duplicate rate from UMI family size mean, if configured.
+        let duplicate_rate = if let Some(ref umi) = writer_cfg.umi {
+            1.0 - 1.0 / umi.family_size_mean
+        } else {
+            0.0
+        };
 
         // Finalize writers
         if let Some(fq) = fastq_writer {
@@ -723,10 +1423,15 @@ fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64
         if let Some(bam) = bam_writer {
             bam.finish().context("failed to finalize BAM file")?;
         }
+        variant_reads_writer
+            .flush()
+            .context("failed to flush variant_reads.tsv")?;
 
         Ok(WriterStats {
             total_read_pairs,
             all_applied,
+            chrom_coverage,
+            duplicate_rate,
         })
     });
 
@@ -766,14 +1471,26 @@ fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64
     let all_applied = stats.all_applied;
 
     if let Some(ref mut vcf) = truth_vcf_writer {
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Aggregate alt-molecule counts across all regions for each unique variant.
+        let mut agg: std::collections::HashMap<String, (crate::core::types::Variant, u32, u32)> =
+            std::collections::HashMap::new();
         for av in &all_applied {
             let key = variant_key(&av.variant);
-            if seen.insert(key) {
-                let (ref_allele, alt_allele) = variant_alleles(&av.variant);
-                vcf.write_variant(&av.variant, &ref_allele, &alt_allele)
-                    .context("failed to write truth VCF record")?;
-            }
+            let entry = agg.entry(key).or_insert_with(|| (av.variant.clone(), 0, 0));
+            entry.1 = entry.1.saturating_add(av.actual_alt_count);
+            entry.2 = entry.2.saturating_add(av.duplex_alt_count);
+        }
+        // Sort by (chrom, pos) for deterministic output.
+        let mut records: Vec<_> = agg.into_values().collect();
+        records.sort_by(|a, b| {
+            a.0.chrom
+                .cmp(&b.0.chrom)
+                .then_with(|| a.0.pos().cmp(&b.0.pos()))
+        });
+        for (variant, n_alt_mol, n_duplex_alt) in &records {
+            let (ref_allele, alt_allele) = variant_alleles(variant);
+            vcf.write_variant(variant, &ref_allele, &alt_allele, *n_alt_mol, *n_duplex_alt)
+                .context("failed to write truth VCF record")?;
         }
     }
 
@@ -832,6 +1549,43 @@ fn run_dry(
     eprintln!("Truth VCF output:      {}", cfg.output.truth_vcf);
     eprintln!("(dry-run: no files written)");
 
+    // -----------------------------------------------------------------------
+    // Per-VAF table (only when batch mode is configured)
+    // -----------------------------------------------------------------------
+    if let Some(vafs) = &cfg.vafs {
+        if !vafs.is_empty() {
+            let family_size_mean = cfg.umi.as_ref().map(|u| u.family_size_mean).unwrap_or(1.0);
+
+            eprintln!();
+            eprintln!("=== PER-VAF BATCH ESTIMATES ===");
+            eprintln!(
+                "{:<10}  {:>22}  {:>22}",
+                "VAF", "ExpectedAltReadPairs", "ExpectedAltFamilies"
+            );
+            eprintln!("{}", "-".repeat(58));
+
+            let mut any_below_one = false;
+            for &vaf in vafs {
+                let expected_alt_pairs = expected_pairs as f64 * vaf;
+                let expected_alt_families = expected_alt_pairs / family_size_mean;
+                if expected_alt_families < 1.0 {
+                    any_below_one = true;
+                }
+                eprintln!(
+                    "{:<10.6}  {:>22.1}  {:>22.1}",
+                    vaf, expected_alt_pairs, expected_alt_families
+                );
+            }
+
+            if any_below_one {
+                anyhow::bail!(
+                    "one or more VAF values produce fewer than 1 expected alt family at this \
+                     coverage; increase coverage or raise the VAF floor"
+                );
+            }
+        }
+    }
+
     tracing::info!(
         expected_pairs,
         expected_reads,
@@ -875,8 +1629,11 @@ fn build_chrom_list(cfg: &Config, reference: &ReferenceGenome) -> Result<Vec<(St
     Ok(selected)
 }
 
-/// Build the variant list from config: VCF input takes precedence over random generation.
-fn build_variant_list(
+/// Build the somatic variant list from config: VCF input takes precedence over random generation.
+///
+/// Returns somatic variants only. Germline variants are appended separately by
+/// `build_germline_variant_list` and merged by the caller.
+fn build_somatic_variant_list(
     cfg: &Config,
     regions: &[Region],
     reference: &ReferenceGenome,
@@ -885,13 +1642,15 @@ fn build_variant_list(
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
+    use crate::variants::sv_signatures;
+
     let mutations_cfg = match &cfg.mutations {
         Some(m) => m,
         None => return Ok(Vec::new()),
     };
 
-    // VCF input takes precedence over random generation.
-    if let Some(ref vcf_path) = mutations_cfg.vcf {
+    // Build the base variant list from VCF or random generation.
+    let mut variants: Vec<Variant> = if let Some(ref vcf_path) = mutations_cfg.vcf {
         tracing::info!("loading variants from VCF: {}", vcf_path.display());
         let chrom_lengths = reference.chromosome_lengths();
         let known_chroms: Vec<String> = chrom_lengths.keys().cloned().collect();
@@ -901,10 +1660,8 @@ fn build_variant_list(
             tracing::warn!("{} VCF records were skipped", result.skipped);
         }
         tracing::info!("loaded {} variants from VCF", result.variants.len());
-        return Ok(result.variants);
-    }
-
-    if let Some(rand_cfg) = &mutations_cfg.random {
+        result.variants
+    } else if let Some(rand_cfg) = &mutations_cfg.random {
         let mut rng = StdRng::seed_from_u64(seed.wrapping_add(1));
         let lookup = |chrom: &str, pos: u64| -> Option<u8> {
             let region = Region::new(chrom, pos, pos + 1);
@@ -913,7 +1670,18 @@ fn build_variant_list(
                 .ok()
                 .and_then(|seq| seq.into_iter().next())
         };
-        let variants = generate_random_mutations(
+
+        // Resolve the optional SBS signature for weighted alt base selection.
+        let signature = if let Some(ref name) = rand_cfg.signature {
+            let sig = resolve_signature(name)
+                .ok_or_else(|| anyhow::anyhow!("unknown SBS signature: {}", name))?;
+            tracing::info!("using SBS signature {} for SNV alt base selection", name);
+            Some(sig)
+        } else {
+            None
+        };
+
+        generate_random_mutations(
             regions,
             rand_cfg.count,
             rand_cfg.vaf_min,
@@ -922,12 +1690,209 @@ fn build_variant_list(
             rand_cfg.indel_fraction,
             rand_cfg.mnv_fraction,
             &lookup,
+            signature,
             &mut rng,
+        )
+    } else {
+        Vec::new()
+    };
+
+    // SV signature generation (HRD, TDP, chromothripsis).
+    if let Some(ref sig) = mutations_cfg.sv_signature {
+        let count = mutations_cfg.sv_count;
+        let mut sig_rng = StdRng::seed_from_u64(seed.wrapping_add(3));
+        let chrom_lengths_map = reference.chromosome_lengths();
+        let chrom_lengths: Vec<(String, u64)> = chrom_lengths_map
+            .iter()
+            .map(|(c, &l)| (c.clone(), l))
+            .collect();
+        let sv_variants = match sig.as_str() {
+            "HRD" => sv_signatures::generate_hrd_deletions(&chrom_lengths, count, &mut sig_rng),
+            "TDP" => sv_signatures::generate_tdp_duplications(&chrom_lengths, count, &mut sig_rng),
+            "CHROMOTHRIPSIS" => {
+                sv_signatures::generate_chromothripsis(&chrom_lengths, count, &mut sig_rng)
+            }
+            other => {
+                tracing::warn!("unknown sv_signature '{}'; ignoring", other);
+                Vec::new()
+            }
+        };
+        tracing::info!(
+            "generated {} SV signature variants ({})",
+            sv_variants.len(),
+            sig
         );
-        return Ok(variants);
+        variants.extend(sv_variants);
     }
 
-    Ok(Vec::new())
+    // MSI mode: add extra indels at homopolymer and dinucleotide repeat loci.
+    if cfg.tumour.as_ref().map(|t| t.msi).unwrap_or(false) {
+        let mut msi_rng = rand::rngs::StdRng::seed_from_u64(seed.wrapping_add(7));
+        let lookup = |chrom: &str, pos: u64| -> Option<u8> {
+            let region = Region::new(chrom, pos, pos + 1);
+            reference
+                .sequence(&region)
+                .ok()
+                .and_then(|seq| seq.into_iter().next())
+        };
+        let msi_variants = generate_msi_indels(regions, &lookup, &mut msi_rng, 50, 500);
+        tracing::info!(
+            "MSI mode: generated {} indels at repeat loci",
+            msi_variants.len()
+        );
+        variants.extend(msi_variants);
+    }
+
+    Ok(variants)
+}
+
+/// Generate germline variants from config and merge them with somatic variants.
+///
+/// Uses a separate RNG stream (seed + 2) so germline placement is independent
+/// of somatic variant generation. Returns an empty list when `cfg.germline` is
+/// `None`.
+fn build_germline_variant_list(
+    cfg: &Config,
+    regions: &[Region],
+    reference: &ReferenceGenome,
+    seed: u64,
+) -> Result<Vec<Variant>> {
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    let germline_cfg = match &cfg.germline {
+        Some(g) => g,
+        None => return Ok(Vec::new()),
+    };
+
+    // If a VCF is specified, load germline variants from it directly.
+    if let Some(ref vcf_path) = germline_cfg.vcf {
+        tracing::info!("loading germline variants from VCF: {}", vcf_path.display());
+        let chrom_lengths = reference.chromosome_lengths();
+        let known_chroms: Vec<String> = chrom_lengths.keys().cloned().collect();
+        let result = vcf_input::parse_vcf(vcf_path, Some(&known_chroms), None)
+            .with_context(|| format!("failed to parse germline VCF: {}", vcf_path.display()))?;
+        if result.skipped > 0 {
+            tracing::warn!("{} germline VCF records were skipped", result.skipped);
+        }
+        tracing::info!(
+            "loaded {} germline variants from VCF",
+            result.variants.len()
+        );
+        return Ok(result.variants);
+    }
+
+    let mut rng = StdRng::seed_from_u64(seed.wrapping_add(2));
+    let lookup = |chrom: &str, pos: u64| -> Option<u8> {
+        let region = Region::new(chrom, pos, pos + 1);
+        reference
+            .sequence(&region)
+            .ok()
+            .and_then(|seq| seq.into_iter().next())
+    };
+
+    let variants = generate_germline_variants(regions, germline_cfg, &lookup, &mut rng);
+    tracing::info!("generated {} germline variants", variants.len());
+    Ok(variants)
+}
+
+/// Build the full variant list (somatic + germline + contamination) from config.
+fn build_variant_list(
+    cfg: &Config,
+    regions: &[Region],
+    reference: &ReferenceGenome,
+    seed: u64,
+) -> Result<Vec<Variant>> {
+    let mut variants = build_somatic_variant_list(cfg, regions, reference, seed)?;
+    let germline = build_germline_variant_list(cfg, regions, reference, seed)?;
+    variants.extend(germline);
+
+    // Load contamination variants when the contamination block is configured.
+    if let Some(ref cont_cfg) = cfg.contamination {
+        if cont_cfg.fraction > 0.0 {
+            if let Some(ref vcf_path) = cont_cfg.vcf {
+                // T040: VCF-source contamination.
+                // Load donor SNPs and override each variant's VAF with the
+                // contamination fraction.
+                let chrom_lengths = reference.chromosome_lengths();
+                let known_chroms: Vec<String> = chrom_lengths.keys().cloned().collect();
+                let result = vcf_input::parse_vcf(vcf_path, Some(&known_chroms), None)
+                    .with_context(|| {
+                        format!("failed to parse contamination VCF: {}", vcf_path.display())
+                    })?;
+
+                let cont_fraction = cont_cfg.fraction;
+                let contamination_variants: Vec<Variant> = result
+                    .variants
+                    .into_iter()
+                    .map(|mut v| {
+                        v.expected_vaf = cont_fraction;
+                        v.clone_id = Some("contamination".to_string());
+                        v
+                    })
+                    .collect();
+
+                tracing::info!(
+                    "loaded {} contamination variants at fraction {:.4}",
+                    contamination_variants.len(),
+                    cont_fraction
+                );
+
+                variants.extend(contamination_variants);
+            } else {
+                // T041: BAM-source contamination.
+                // Generate random donor-like SNVs at a sparse density to
+                // represent cross-sample contamination without a specific donor.
+                use rand::rngs::StdRng;
+                use rand::SeedableRng;
+
+                let total_bp: u64 = regions.iter().map(|r| r.len()).sum();
+                // Approximate number of contamination SNVs: keep the list
+                // sparse so the variant engine is not overwhelmed.
+                let approx_count = ((total_bp as f64 * cfg.sample.coverage * cont_cfg.fraction
+                    / cfg.sample.read_length as f64
+                    / 100.0) as usize)
+                    .clamp(1, 1000);
+
+                let mut cont_rng = StdRng::seed_from_u64(seed.wrapping_add(10));
+                let lookup = |chrom: &str, pos: u64| -> Option<u8> {
+                    let region = Region::new(chrom, pos, pos + 1);
+                    reference
+                        .sequence(&region)
+                        .ok()
+                        .and_then(|seq| seq.into_iter().next())
+                };
+
+                let cont_fraction = cont_cfg.fraction;
+                let mut cont_variants = generate_random_mutations(
+                    regions,
+                    approx_count,
+                    cont_fraction,
+                    cont_fraction + 1e-9,
+                    1.0,
+                    0.0,
+                    0.0,
+                    &lookup,
+                    None,
+                    &mut cont_rng,
+                );
+
+                for v in &mut cont_variants {
+                    v.clone_id = Some("contamination".to_string());
+                }
+
+                tracing::info!(
+                    "generated {} random contamination variants at fraction {:.4}",
+                    cont_variants.len(),
+                    cont_fraction
+                );
+
+                variants.extend(cont_variants);
+            }
+        }
+    }
+
+    Ok(variants)
 }
 
 /// Build a CaptureModel from config, or None if capture is disabled or absent.
@@ -940,11 +1905,14 @@ fn build_capture_model(cfg: &Config) -> Result<Option<Arc<CaptureModel>>> {
         _ => return Ok(None),
     };
 
-    let target_regions = if let Some(ref bed_path) = capture_cfg.targets_bed {
-        parse_bed_file(bed_path)
-            .with_context(|| format!("failed to parse capture BED: {}", bed_path.display()))?
+    let (target_regions, target_depths) = if let Some(ref bed_path) = capture_cfg.targets_bed {
+        let entries = parse_bed_file(bed_path)
+            .with_context(|| format!("failed to parse capture BED: {}", bed_path.display()))?;
+        let regions: Vec<Region> = entries.iter().map(|(r, _)| r.clone()).collect();
+        let depths: Vec<Option<f64>> = entries.into_iter().map(|(_, d)| d).collect();
+        (regions, depths)
     } else {
-        Vec::new()
+        (Vec::new(), Vec::new())
     };
 
     if target_regions.is_empty() && capture_cfg.targets_bed.is_some() {
@@ -959,9 +1927,11 @@ fn build_capture_model(cfg: &Config) -> Result<Option<Arc<CaptureModel>>> {
 
     let model = CaptureModel::new(
         target_regions,
+        target_depths,
         capture_cfg.off_target_fraction,
         capture_cfg.coverage_uniformity,
         capture_cfg.edge_dropoff_bases,
+        capture_cfg.mode.clone(),
     );
 
     tracing::info!(
@@ -975,17 +1945,19 @@ fn build_capture_model(cfg: &Config) -> Result<Option<Arc<CaptureModel>>> {
     Ok(Some(Arc::new(model)))
 }
 
-/// Parse a BED file into a list of Regions.
+/// Parse a BED file into a list of regions with optional depth multipliers.
 ///
 /// Expects tab- or space-separated lines with at least 3 fields: chrom, start, end.
+/// An optional 4th column is parsed as a depth multiplier (`f64`).  Lines with an
+/// unparseable 4th column emit a warning and set the depth to `None`.
 /// Comment lines (starting with '#') and blank lines are skipped.
-fn parse_bed_file(path: &std::path::Path) -> Result<Vec<Region>> {
+fn parse_bed_file(path: &std::path::Path) -> Result<Vec<(Region, Option<f64>)>> {
     use std::io::{BufRead, BufReader};
 
     let file = std::fs::File::open(path)
         .with_context(|| format!("cannot open BED file: {}", path.display()))?;
     let reader = BufReader::new(file);
-    let mut regions = Vec::new();
+    let mut entries: Vec<(Region, Option<f64>)> = Vec::new();
 
     for (line_no, line) in reader.lines().enumerate() {
         let line = line.context("I/O error reading BED file")?;
@@ -1000,10 +1972,11 @@ fn parse_bed_file(path: &std::path::Path) -> Result<Vec<Region>> {
             continue;
         }
 
-        let fields: Vec<&str> = line.splitn(4, '\t').collect();
+        // Parse up to 5 fields so we can capture col 4 (depth) if present.
+        let fields: Vec<&str> = line.splitn(5, '\t').collect();
         if fields.len() < 3 {
             // Try space-separated as fallback.
-            let fields: Vec<&str> = line.splitn(4, ' ').collect();
+            let fields: Vec<&str> = line.splitn(5, ' ').collect();
             if fields.len() < 3 {
                 tracing::warn!(
                     "BED line {} has fewer than 3 fields, skipping: {}",
@@ -1018,7 +1991,8 @@ fn parse_bed_file(path: &std::path::Path) -> Result<Vec<Region>> {
             let end: u64 = fields[2].parse().with_context(|| {
                 format!("invalid BED end at line {}: {}", line_no + 1, fields[2])
             })?;
-            regions.push(Region::new(fields[0], start, end));
+            let depth = parse_bed_depth(fields.get(3).copied(), line_no + 1);
+            entries.push((Region::new(fields[0], start, end), depth));
             continue;
         }
 
@@ -1028,10 +2002,34 @@ fn parse_bed_file(path: &std::path::Path) -> Result<Vec<Region>> {
         let end: u64 = fields[2]
             .parse()
             .with_context(|| format!("invalid BED end at line {}: {}", line_no + 1, fields[2]))?;
-        regions.push(Region::new(fields[0], start, end));
+        let depth = parse_bed_depth(fields.get(3).copied(), line_no + 1);
+        entries.push((Region::new(fields[0], start, end), depth));
     }
 
-    Ok(regions)
+    Ok(entries)
+}
+
+/// Parse the optional 4th BED column as a depth multiplier.
+///
+/// Returns `None` if the field is absent, empty, or non-numeric (with a warning
+/// on non-numeric values).
+fn parse_bed_depth(field: Option<&str>, line_no: usize) -> Option<f64> {
+    let s = field?.trim();
+    if s.is_empty() {
+        return None;
+    }
+    match s.parse::<f64>() {
+        Ok(d) => Some(d),
+        Err(_) => {
+            // Non-numeric column 4 (e.g. a gene name): treat as absent.
+            tracing::debug!(
+                "BED line {}: column 4 '{}' is not a number; depth multiplier set to None",
+                line_no,
+                s
+            );
+            None
+        }
+    }
 }
 
 /// Parse a VAF range string like "0.001-0.05" into (min, max).
@@ -1163,6 +2161,7 @@ mod tests {
             },
             expected_vaf: 0.3,
             clone_id: None,
+            haplotype: None,
         };
         let key = variant_key(&v);
         assert!(key.contains("SNV"));
@@ -1181,6 +2180,7 @@ mod tests {
             },
             expected_vaf: 0.5,
             clone_id: None,
+            haplotype: None,
         };
         let (r, a) = variant_alleles(&v);
         assert_eq!(r, b"G");
@@ -1198,6 +2198,7 @@ mod tests {
             },
             expected_vaf: 0.1,
             clone_id: None,
+            haplotype: None,
         };
         let (r, a) = variant_alleles(&v);
         assert_eq!(r, b"ACG");
@@ -1302,6 +2303,8 @@ mod tests {
                 bam: false,
                 truth_vcf: false,
                 manifest: false,
+                germline_vcf: false,
+                single_read_bam: false,
             },
             sample: SampleConfig {
                 name: "TEST".to_string(),
@@ -1313,6 +2316,8 @@ mod tests {
                 model: FragmentModel::Normal,
                 mean: 200.0,
                 sd: 20.0,
+                long_read: None,
+                end_motif_model: None,
             },
             quality: QualityConfig {
                 mean_quality: 36,
@@ -1332,6 +2337,11 @@ mod tests {
             chromosomes: None,
             regions_bed: None,
             performance: Default::default(),
+            preset: None,
+            vafs: None,
+            germline: None,
+            paired: None,
+            contamination: None,
         };
 
         let master_seed = 42u64;
@@ -1420,6 +2430,8 @@ mod tests {
                 bam: false,
                 truth_vcf: false,
                 manifest: false,
+                germline_vcf: false,
+                single_read_bam: false,
             },
             sample: SampleConfig::default(),
             fragment: FragmentConfig::default(),
@@ -1437,6 +2449,11 @@ mod tests {
             samples: None,
             capture: None,
             performance: Default::default(),
+            preset: None,
+            vafs: None,
+            germline: None,
+            paired: None,
+            contamination: None,
         }
     }
 
@@ -1454,6 +2471,7 @@ mod tests {
             vaf_range: None,
             preset: None,
             dry_run: false,
+            set: None,
         }
     }
 
@@ -1607,13 +2625,15 @@ mod tests {
         writeln!(f, "chr2\t0\t1000").unwrap();
         f.flush().unwrap();
 
-        let regions = parse_bed_file(f.path()).unwrap();
-        assert_eq!(regions.len(), 3);
-        assert_eq!(regions[0].chrom, "chr1");
-        assert_eq!(regions[0].start, 100);
-        assert_eq!(regions[0].end, 200);
-        assert_eq!(regions[2].chrom, "chr2");
-        assert_eq!(regions[2].start, 0);
-        assert_eq!(regions[2].end, 1000);
+        let entries = parse_bed_file(f.path()).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].0.chrom, "chr1");
+        assert_eq!(entries[0].0.start, 100);
+        assert_eq!(entries[0].0.end, 200);
+        assert_eq!(entries[0].1, None); // no depth column
+        assert_eq!(entries[1].1, None); // "gene_A" is not a number
+        assert_eq!(entries[2].0.chrom, "chr2");
+        assert_eq!(entries[2].0.start, 0);
+        assert_eq!(entries[2].0.end, 1000);
     }
 }

@@ -27,5 +27,6 @@ fn main() -> Result<()> {
         cli::Command::Validate(opts) => cli::validate::run(opts),
         cli::Command::Edit(opts) => cli::edit::run(opts, threads),
         cli::Command::LearnProfile(opts) => cli::learn_profile::run(opts, threads),
+        cli::Command::BenchmarkSuite(opts) => cli::benchmark_suite::run(opts, threads),
     }
 }

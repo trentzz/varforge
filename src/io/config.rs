@@ -43,6 +43,32 @@ pub struct Config {
     pub capture: Option<CaptureConfig>,
     #[serde(default)]
     pub performance: PerformanceConfig,
+    /// Optional chemistry preset name. When set, fills any fields that are
+    /// absent or at their zero default with values appropriate for that
+    /// sequencing chemistry. Explicit YAML values always take precedence.
+    #[serde(default)]
+    pub preset: Option<String>,
+    /// When set, drives batch mode: one simulation run per VAF value.
+    /// Overrides `mutations.random.vaf_min`/`vaf_max`.
+    #[serde(default)]
+    pub vafs: Option<Vec<f64>>,
+    /// Optional germline variant simulation configuration.
+    ///
+    /// When present, germline SNPs and indels at population-frequency densities
+    /// are added to every simulated sample alongside any somatic variants.
+    #[serde(default)]
+    pub germline: Option<GermlineConfig>,
+    /// Optional paired tumour-normal simulation configuration.
+    ///
+    /// When present, VarForge runs two simulations: one tumour sample (with all
+    /// configured somatic and germline variants) and one normal sample (germline
+    /// variants only). Outputs are written to `tumour/` and `normal/`
+    /// sub-directories under `output.directory`.
+    #[serde(default)]
+    pub paired: Option<PairedConfig>,
+    /// Optional cross-sample contamination configuration.
+    #[serde(default)]
+    pub contamination: Option<ContaminationConfig>,
 }
 
 /// Performance tuning parameters for the streaming output pipeline.
@@ -67,6 +93,15 @@ pub struct OutputConfig {
     pub truth_vcf: bool,
     #[serde(default = "default_true")]
     pub manifest: bool,
+    /// Write BAM in single-read mode (one record per read, not paired).
+    ///
+    /// Use this for long-read platforms where each molecule is a single read.
+    #[serde(default)]
+    pub single_read_bam: bool,
+    /// Write `germline_truth.vcf` alongside the somatic truth VCF when
+    /// germline variants were simulated.
+    #[serde(default = "default_true")]
+    pub germline_vcf: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +135,18 @@ pub struct FragmentConfig {
     pub mean: f64,
     #[serde(default = "default_fragment_sd")]
     pub sd: f64,
+    /// Long-read fragment length model. When set, the log-normal sampler is
+    /// used instead of the standard normal or cfDNA sampler.
+    #[serde(default)]
+    pub long_read: Option<LongReadFragmentConfig>,
+    /// End motif model for fragment selection.
+    ///
+    /// When set to `"plasma"`, fragment start positions are accepted using
+    /// rejection sampling against an empirical plasma cfDNA 4-mer end motif
+    /// frequency table. Fragments whose 5' end motif has low frequency in
+    /// plasma are rejected and resampled.
+    #[serde(default)]
+    pub end_motif_model: Option<String>,
 }
 
 impl Default for FragmentConfig {
@@ -108,8 +155,43 @@ impl Default for FragmentConfig {
             model: FragmentModel::Normal,
             mean: default_fragment_mean(),
             sd: default_fragment_sd(),
+            long_read: None,
+            end_motif_model: None,
         }
     }
+}
+
+/// Fragment length configuration for long-read platforms (PacBio, Nanopore).
+///
+/// Fragment lengths are sampled from a log-normal distribution parameterised
+/// by the linear-space mean and standard deviation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LongReadFragmentConfig {
+    /// Mean fragment length in base pairs.
+    #[serde(default = "default_lr_mean")]
+    pub mean: usize,
+    /// Standard deviation of fragment length in base pairs.
+    #[serde(default = "default_lr_sd")]
+    pub sd: usize,
+    /// Minimum fragment length in base pairs.
+    #[serde(default = "default_lr_min")]
+    pub min_len: usize,
+    /// Maximum fragment length in base pairs.
+    #[serde(default = "default_lr_max")]
+    pub max_len: usize,
+}
+
+fn default_lr_mean() -> usize {
+    15000
+}
+fn default_lr_sd() -> usize {
+    5000
+}
+fn default_lr_min() -> usize {
+    1000
+}
+fn default_lr_max() -> usize {
+    100000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +234,12 @@ pub struct TumourConfig {
     pub ploidy: u32,
     #[serde(default)]
     pub clones: Vec<CloneConfig>,
+    /// Enable microsatellite instability (MSI) mode.
+    ///
+    /// When true, indel rates at homopolymer and dinucleotide repeat loci are
+    /// elevated to simulate MSI-high tumours.
+    #[serde(default)]
+    pub msi: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +256,15 @@ pub struct MutationConfig {
     pub vcf: Option<PathBuf>,
     #[serde(default)]
     pub random: Option<RandomMutationConfig>,
+    /// SV signature to apply: `"HRD"`, `"TDP"`, or `"CHROMOTHRIPSIS"`.
+    ///
+    /// When set, generates SVs with the pattern characteristic of the named
+    /// biological phenotype.
+    #[serde(default)]
+    pub sv_signature: Option<String>,
+    /// Number of SVs to generate for the configured signature (default: 10).
+    #[serde(default = "default_sv_count")]
+    pub sv_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,6 +280,10 @@ pub struct RandomMutationConfig {
     pub indel_fraction: f64,
     #[serde(default = "default_mnv_fraction")]
     pub mnv_fraction: f64,
+    /// COSMIC SBS signature name for weighted alt base selection (e.g. "SBS1").
+    /// When set, replaces uniform base selection with signature-weighted probabilities.
+    #[serde(default)]
+    pub signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,6 +415,19 @@ pub struct CaptureConfig {
     /// Bases of exponential coverage drop-off at target edges (default 50).
     #[serde(default = "default_edge_dropoff_bases")]
     pub edge_dropoff_bases: u32,
+    /// Sequencing mode: `"panel"` (default) or `"amplicon"`.
+    ///
+    /// In amplicon mode, fragments exactly span each target region; no
+    /// off-target reads are generated.
+    #[serde(default = "default_capture_mode")]
+    pub mode: String,
+    /// Number of bases to soft-clip from each read end when in amplicon mode.
+    ///
+    /// Simulates primer trimming: the first and last `primer_trim` bases of each
+    /// read are removed from the sequence and quality strings before output.
+    /// Only applied when `mode == "amplicon"` and `primer_trim > 0`.
+    #[serde(default)]
+    pub primer_trim: usize,
 }
 
 impl Default for CaptureConfig {
@@ -324,6 +438,108 @@ impl Default for CaptureConfig {
             off_target_fraction: default_off_target_fraction(),
             coverage_uniformity: default_coverage_uniformity(),
             edge_dropoff_bases: default_edge_dropoff_bases(),
+            mode: default_capture_mode(),
+            primer_trim: 0,
+        }
+    }
+}
+
+/// Configuration for germline variant simulation.
+///
+/// Germline variants are distributed across the simulated regions at the
+/// given density per kilobase pair. They are assigned VAF 0.5 (heterozygous)
+/// or 1.0 (homozygous). When `vcf` is set, the random generator is bypassed
+/// and the listed variants are used instead.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GermlineConfig {
+    /// Heterozygous SNP density per kbp (default: 0.6).
+    #[serde(default = "default_het_snp_density")]
+    pub het_snp_density: f64,
+    /// Homozygous SNP density per kbp (default: 0.3).
+    #[serde(default = "default_hom_snp_density")]
+    pub hom_snp_density: f64,
+    /// Heterozygous indel density per kbp (default: 0.05).
+    #[serde(default = "default_het_indel_density")]
+    pub het_indel_density: f64,
+    /// Optional VCF of germline variants to use instead of random generation.
+    #[serde(default)]
+    pub vcf: Option<std::path::PathBuf>,
+}
+
+impl Default for GermlineConfig {
+    fn default() -> Self {
+        Self {
+            het_snp_density: default_het_snp_density(),
+            hom_snp_density: default_hom_snp_density(),
+            het_indel_density: default_het_indel_density(),
+            vcf: None,
+        }
+    }
+}
+
+fn default_het_snp_density() -> f64 {
+    0.6
+}
+fn default_hom_snp_density() -> f64 {
+    0.3
+}
+fn default_het_indel_density() -> f64 {
+    0.05
+}
+
+/// Configuration for paired tumour-normal simulation mode.
+///
+/// When present in a config file, VarForge runs a tumour simulation
+/// (with somatic and germline variants) and a normal simulation (with
+/// germline variants only). Outputs land in `tumour/` and `normal/`
+/// sub-directories.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairedConfig {
+    /// Coverage for the normal sample (default: 30.0).
+    #[serde(default = "default_coverage")]
+    pub normal_coverage: f64,
+    /// Sample name for the normal output (default: "NORMAL").
+    #[serde(default = "default_normal_sample_name")]
+    pub normal_sample_name: String,
+    /// Tumour contamination fraction in the normal sample (0.0–1.0, default: 0.0).
+    #[serde(default)]
+    pub tumour_contamination_in_normal: f64,
+}
+
+impl Default for PairedConfig {
+    fn default() -> Self {
+        Self {
+            normal_coverage: default_coverage(),
+            normal_sample_name: default_normal_sample_name(),
+            tumour_contamination_in_normal: 0.0,
+        }
+    }
+}
+
+fn default_normal_sample_name() -> String {
+    "NORMAL".to_string()
+}
+
+/// Configuration for cross-sample contamination simulation.
+///
+/// Enables synthetic contamination from a donor SNP profile. Reads carrying
+/// donor SNPs are drawn at the specified fraction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContaminationConfig {
+    /// Contamination fraction (0.0–1.0). This fraction of read pairs will
+    /// carry donor alleles instead of the primary sample sequence.
+    pub fraction: f64,
+    /// Path to a VCF of donor SNPs. Used as the contamination source.
+    /// When absent, random donor-like SNVs are generated instead.
+    #[serde(default)]
+    pub vcf: Option<std::path::PathBuf>,
+}
+
+impl Default for ContaminationConfig {
+    fn default() -> Self {
+        Self {
+            fraction: 0.0,
+            vcf: None,
         }
     }
 }
@@ -377,6 +593,9 @@ fn default_indel_fraction() -> f64 {
 fn default_mnv_fraction() -> f64 {
     0.05
 }
+fn default_sv_count() -> usize {
+    10
+}
 fn default_umi_length() -> usize {
     8
 }
@@ -416,12 +635,241 @@ fn default_edge_dropoff_bases() -> u32 {
     50
 }
 
+fn default_capture_mode() -> String {
+    "panel".to_string()
+}
+
+/// Known sequencing chemistry presets.
+///
+/// Each variant carries fixed defaults for UMI, fragment, and quality
+/// parameters appropriate for that platform. Fields left as `None` in
+/// the preset mean the platform does not use UMIs.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChemistryPreset {
+    TwistUmiDuplex,
+    IlluminaWgs,
+    IlluminaWes,
+    IlluminaCtdna,
+    PacbioHifi,
+    NanoporeR10,
+}
+
+impl ChemistryPreset {
+    /// Parse a preset name from a string, returning `None` for unknown names.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "twist-umi-duplex" => Some(Self::TwistUmiDuplex),
+            "illumina-wgs" => Some(Self::IlluminaWgs),
+            "illumina-wes" => Some(Self::IlluminaWes),
+            "illumina-ctdna" => Some(Self::IlluminaCtdna),
+            "pacbio-hifi" => Some(Self::PacbioHifi),
+            "nanopore-r10" => Some(Self::NanoporeR10),
+            _ => None,
+        }
+    }
+}
+
+/// Apply preset defaults to a config after deserialisation.
+///
+/// Only fills fields that are `None` or at their zero/default value.
+/// Explicit values from the YAML always take precedence.
+pub fn apply_preset(config: &mut Config, preset: &ChemistryPreset) {
+    // Default values used to detect "not explicitly set".
+    let default_fragment = FragmentConfig::default();
+    let default_quality = QualityConfig::default();
+
+    match preset {
+        ChemistryPreset::TwistUmiDuplex => {
+            fill_fragment(
+                config,
+                &default_fragment,
+                FragmentModel::Normal,
+                200.0,
+                30.0,
+            );
+            fill_quality(config, &default_quality, 37);
+            fill_umi(config, 8, true, false);
+        }
+        ChemistryPreset::IlluminaWgs => {
+            fill_fragment(
+                config,
+                &default_fragment,
+                FragmentModel::Normal,
+                300.0,
+                50.0,
+            );
+            fill_quality(config, &default_quality, 36);
+            // No UMI for this chemistry.
+        }
+        ChemistryPreset::IlluminaWes => {
+            fill_fragment(
+                config,
+                &default_fragment,
+                FragmentModel::Normal,
+                200.0,
+                40.0,
+            );
+            fill_quality(config, &default_quality, 35);
+            // No UMI for this chemistry.
+        }
+        ChemistryPreset::IlluminaCtdna => {
+            fill_fragment(config, &default_fragment, FragmentModel::Cfda, 167.0, 20.0);
+            fill_quality(config, &default_quality, 36);
+            fill_umi(config, 8, false, false);
+        }
+        ChemistryPreset::PacbioHifi => {
+            fill_fragment(
+                config,
+                &default_fragment,
+                FragmentModel::Normal,
+                15000.0,
+                5000.0,
+            );
+            fill_quality(config, &default_quality, 25);
+            // No UMI for this chemistry.
+        }
+        ChemistryPreset::NanoporeR10 => {
+            fill_fragment(
+                config,
+                &default_fragment,
+                FragmentModel::Normal,
+                20000.0,
+                10000.0,
+            );
+            fill_quality(config, &default_quality, 20);
+            // No UMI for this chemistry.
+        }
+    }
+}
+
+/// Fill fragment config fields that are still at their defaults.
+///
+/// The model is always applied from the preset. The serialised default
+/// (`normal`) is identical to an explicit `model: normal` in YAML, so
+/// there is no way to distinguish them after deserialisation.
+///
+/// Mean and SD are only overwritten when they still equal the compiled
+/// defaults, indicating the user did not set them.
+fn fill_fragment(
+    config: &mut Config,
+    default: &FragmentConfig,
+    model: FragmentModel,
+    mean: f64,
+    sd: f64,
+) {
+    config.fragment.model = model;
+    if (config.fragment.mean - default.mean).abs() < f64::EPSILON {
+        config.fragment.mean = mean;
+    }
+    if (config.fragment.sd - default.sd).abs() < f64::EPSILON {
+        config.fragment.sd = sd;
+    }
+}
+
+/// Fill quality config fields that are still at their defaults.
+fn fill_quality(config: &mut Config, default: &QualityConfig, mean_quality: u8) {
+    if config.quality.mean_quality == default.mean_quality {
+        config.quality.mean_quality = mean_quality;
+    }
+}
+
+/// Fill UMI config fields, creating the struct if it does not exist.
+///
+/// If `config.umi` is `None`, creates a new `UmiConfig` with the given
+/// values. If it already exists, only fills fields that are still at
+/// their zero/default values.
+fn fill_umi(config: &mut Config, length: usize, duplex: bool, inline: bool) {
+    if config.umi.is_none() {
+        config.umi = Some(UmiConfig {
+            length,
+            duplex,
+            inline,
+            pcr_cycles: default_pcr_cycles(),
+            family_size_mean: default_family_size_mean(),
+            family_size_sd: default_family_size_sd(),
+        });
+    } else if let Some(umi) = config.umi.as_mut() {
+        // `default_umi_length()` is 8, so we cannot distinguish "not set"
+        // from "set to 8". We only overwrite zero-valued length.
+        if umi.length == 0 {
+            umi.length = length;
+        }
+        // Boolean fields: only fill if still at the false zero-value.
+        if !umi.duplex {
+            umi.duplex = duplex;
+        }
+        if !umi.inline {
+            umi.inline = inline;
+        }
+    }
+}
+
 pub fn load(path: &Path) -> Result<Config> {
     let contents = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config file: {}", path.display()))?;
-    let config: Config = serde_yaml::from_str(&contents)
+    let mut config: Config = serde_yaml::from_str(&contents)
         .with_context(|| format!("failed to parse config file: {}", path.display()))?;
+    if let Some(preset_name) = config.preset.clone() {
+        if let Some(preset) = ChemistryPreset::from_name(&preset_name) {
+            apply_preset(&mut config, &preset);
+        } else {
+            anyhow::bail!("unknown chemistry preset: {}", preset_name);
+        }
+    }
     Ok(config)
+}
+
+/// Load a YAML config file, substituting `${key}` placeholders with values from `vars`.
+///
+/// Unresolved placeholders cause an error. Call this instead of `load` when
+/// `--set` values are provided.
+pub fn load_with_vars(
+    path: &Path,
+    vars: &std::collections::HashMap<String, String>,
+) -> Result<Config> {
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read config file: {}", path.display()))?;
+    let substituted = substitute_vars(&raw, vars)?;
+    let mut config: Config = serde_yaml::from_str(&substituted)
+        .with_context(|| format!("failed to parse config file: {}", path.display()))?;
+    if let Some(preset_name) = config.preset.clone() {
+        if let Some(preset) = ChemistryPreset::from_name(&preset_name) {
+            apply_preset(&mut config, &preset);
+        } else {
+            anyhow::bail!("unknown chemistry preset: {}", preset_name);
+        }
+    }
+    Ok(config)
+}
+
+/// Replace `${key}` placeholders in `text` with values from `vars`.
+///
+/// Returns an error if a placeholder has no corresponding value.
+fn substitute_vars(text: &str, vars: &std::collections::HashMap<String, String>) -> Result<String> {
+    let mut result = text.to_string();
+    let mut i = 0;
+    while let Some(start) = result[i..].find("${") {
+        let abs_start = i + start;
+        if let Some(end_offset) = result[abs_start + 2..].find('}') {
+            let abs_end = abs_start + 2 + end_offset;
+            let key = result[abs_start + 2..abs_end].to_string();
+            if let Some(val) = vars.get(&key) {
+                let placeholder = format!("${{{key}}}");
+                result = result.replacen(&placeholder, val, 1);
+                // Don't advance i; re-scan from abs_start in case substitution
+                // introduced another placeholder.
+            } else {
+                anyhow::bail!(
+                    "config placeholder '${{{key}}}' has no --set value; \
+                     supply --set {key}=<value>"
+                );
+            }
+        } else {
+            // Unterminated placeholder: skip past the "${".
+            i = abs_start + 2;
+        }
+    }
+    Ok(result)
 }
 
 pub fn validate(config: &Config) -> Result<()> {
@@ -496,6 +944,24 @@ pub fn validate(config: &Config) -> Result<()> {
 
     if let Some(umi) = &config.umi {
         anyhow::ensure!(umi.length > 0, "UMI length must be > 0");
+    }
+
+    if let Some(vafs) = &config.vafs {
+        for &vaf in vafs {
+            anyhow::ensure!(
+                vaf > 0.0 && vaf <= 1.0,
+                "each VAF in `vafs` must be in (0.0, 1.0], got {}",
+                vaf
+            );
+        }
+    }
+
+    if let Some(ref cont) = config.contamination {
+        anyhow::ensure!(
+            (0.0..=1.0).contains(&cont.fraction),
+            "contamination fraction must be in [0.0, 1.0], got {}",
+            cont.fraction
+        );
     }
 
     Ok(())
@@ -652,5 +1118,63 @@ fragment:
         let f = write_yaml(yaml);
         let cfg = load(f.path()).unwrap();
         assert!(matches!(cfg.fragment.model, FragmentModel::Cfda));
+    }
+
+    /// Preset `twist-umi-duplex` fills UMI length, duplex flag, and quality.
+    #[test]
+    fn test_preset_twist_umi_duplex_fills_defaults() {
+        let yaml = r#"
+reference: /tmp/ref.fa
+output:
+  directory: /tmp/out
+preset: twist-umi-duplex
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        let umi = cfg.umi.expect("umi should be set by preset");
+        assert_eq!(umi.length, 8);
+        assert!(umi.duplex);
+        assert!(!umi.inline);
+        assert_eq!(cfg.fragment.mean, 200.0);
+        assert_eq!(cfg.fragment.sd, 30.0);
+        assert_eq!(cfg.quality.mean_quality, 37);
+    }
+
+    /// Preset `illumina-wgs` applies fragment defaults and leaves UMI as `None`.
+    #[test]
+    fn test_preset_illumina_wgs_no_umi() {
+        let yaml = r#"
+reference: /tmp/ref.fa
+output:
+  directory: /tmp/out
+preset: illumina-wgs
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        assert!(
+            cfg.umi.is_none(),
+            "illumina-wgs should not create UMI config"
+        );
+        assert_eq!(cfg.fragment.mean, 300.0);
+        assert_eq!(cfg.fragment.sd, 50.0);
+        assert_eq!(cfg.quality.mean_quality, 36);
+    }
+
+    /// An explicit `umi.length` in the YAML beats the preset default.
+    #[test]
+    fn test_explicit_umi_length_beats_preset() {
+        let yaml = r#"
+reference: /tmp/ref.fa
+output:
+  directory: /tmp/out
+preset: twist-umi-duplex
+umi:
+  length: 12
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        let umi = cfg.umi.expect("umi should be set");
+        // Explicit length 12 overrides the preset default of 8.
+        assert_eq!(umi.length, 12);
     }
 }

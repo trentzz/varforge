@@ -80,6 +80,7 @@ fn default_opts(config: PathBuf) -> SimulateOpts {
         vaf_range: None,
         preset: None,
         dry_run: false,
+        set: None,
     }
 }
 
@@ -699,7 +700,13 @@ umi:
     assert!(r1.exists(), "R1 FASTQ not found for duplex UMI test");
 
     let r1_content = decompress_gz(&r1);
-    let headers: Vec<&str> = r1_content.lines().filter(|l| l.starts_with('@')).collect();
+    // Parse FASTQ headers correctly: every 4th line starting from line 0.
+    // Filtering on '@' alone catches quality lines that encode high scores.
+    let lines: Vec<&str> = r1_content.lines().collect();
+    let headers: Vec<&str> = lines
+        .chunks(4)
+        .filter_map(|chunk| chunk.first().copied())
+        .collect();
     assert!(!headers.is_empty(), "duplex run should produce reads");
 
     // All headers should contain UMI marker.
@@ -1108,7 +1115,13 @@ seed: 13
     assert!(r1.exists(), "R1 FASTQ not found for UMI+cfDNA test");
 
     let content = decompress_gz(&r1);
-    let headers: Vec<&str> = content.lines().filter(|l| l.starts_with('@')).collect();
+    // Parse FASTQ headers correctly: every 4th line starting from line 0.
+    // Filtering on '@' alone catches quality lines that encode high scores.
+    let lines: Vec<&str> = content.lines().collect();
+    let headers: Vec<&str> = lines
+        .chunks(4)
+        .filter_map(|chunk| chunk.first().copied())
+        .collect();
     assert!(
         !headers.is_empty(),
         "UMI+cfDNA simulation should produce reads"

@@ -17,6 +17,11 @@ use super::types::Region;
 pub struct CaptureModel {
     /// The target regions for this panel / WES experiment.
     pub target_regions: Vec<Region>,
+    /// Optional fixed depth multiplier per target, parallel to `target_regions`.
+    ///
+    /// When `Some(d)`, the target uses `d` directly instead of sampling from
+    /// LogNormal.  When `None`, the normal LogNormal sampling path is used.
+    pub target_depths: Vec<Option<f64>>,
     /// Fraction of reads that map off-target (default: 0.2).
     pub off_target_fraction: f64,
     /// Controls per-target coverage variation via LogNormal σ.
@@ -24,22 +29,39 @@ pub struct CaptureModel {
     pub coverage_uniformity: f64,
     /// Number of bases at each target edge over which coverage decays (default: 50).
     pub edge_dropoff_bases: u32,
+    /// Sequencing mode: `"panel"` or `"amplicon"`.
+    pub mode: String,
 }
 
 impl CaptureModel {
     /// Create a new CaptureModel.
+    ///
+    /// `target_depths` is parallel to `target_regions`.  Pass an empty `Vec`
+    /// or a `Vec` of `None`s to fall back to LogNormal sampling for all targets.
     pub fn new(
         target_regions: Vec<Region>,
+        target_depths: Vec<Option<f64>>,
         off_target_fraction: f64,
         coverage_uniformity: f64,
         edge_dropoff_bases: u32,
+        mode: String,
     ) -> Self {
         Self {
             target_regions,
+            target_depths,
             off_target_fraction,
             coverage_uniformity,
             edge_dropoff_bases,
+            mode,
         }
+    }
+
+    /// Returns true when this model is in amplicon mode.
+    ///
+    /// In amplicon mode, fragments exactly span each target region rather than
+    /// being sampled from a random position within the broader capture window.
+    pub fn is_amplicon(&self) -> bool {
+        self.mode == "amplicon"
     }
 
     /// Sample a per-target coverage multiplier from LogNormal(0, uniformity).
@@ -54,6 +76,18 @@ impl CaptureModel {
         let dist =
             LogNormal::new(0.0, self.coverage_uniformity).expect("invalid LogNormal parameters");
         dist.sample(rng)
+    }
+
+    /// Sample a per-target coverage multiplier for the target at `index`.
+    ///
+    /// If a fixed depth was recorded for this target in `target_depths`, that
+    /// value is returned directly.  Otherwise the LogNormal sampling path is
+    /// used.
+    fn sample_target_multiplier_at<R: Rng>(&self, index: usize, rng: &mut R) -> f64 {
+        if let Some(Some(d)) = self.target_depths.get(index) {
+            return *d;
+        }
+        self.sample_target_multiplier(rng)
     }
 
     /// Compute the edge drop-off multiplier at `position` within a target.
@@ -134,9 +168,12 @@ impl CaptureModel {
 
     /// Sample one multiplier per target region, returned in the same order as
     /// `self.target_regions`.
+    ///
+    /// Targets that have a fixed depth in `target_depths` use that value
+    /// directly.  All others are sampled from LogNormal.
     pub fn sample_all_target_multipliers<R: Rng>(&self, rng: &mut R) -> Vec<f64> {
         (0..self.target_regions.len())
-            .map(|_| self.sample_target_multiplier(rng))
+            .map(|i| self.sample_target_multiplier_at(i, rng))
             .collect()
     }
 }
@@ -165,7 +202,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_uniform_targets() {
-        let model = CaptureModel::new(make_regions(), 0.2, 0.0, 0);
+        let model = CaptureModel::new(make_regions(), vec![], 0.2, 0.0, 0, "panel".to_string());
         let mut rng = StdRng::seed_from_u64(1);
 
         // Draw many multipliers – they must all be exactly 1.0.
@@ -181,7 +218,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_variable_targets() {
-        let model = CaptureModel::new(make_regions(), 0.2, 0.5, 0);
+        let model = CaptureModel::new(make_regions(), vec![], 0.2, 0.5, 0, "panel".to_string());
         let mut rng = StdRng::seed_from_u64(2);
 
         let multipliers: Vec<f64> = (0..500)
@@ -217,7 +254,14 @@ mod tests {
     #[test]
     fn test_edge_dropoff() {
         let dropoff_bases = 50u32;
-        let model = CaptureModel::new(make_regions(), 0.2, 0.0, dropoff_bases);
+        let model = CaptureModel::new(
+            make_regions(),
+            vec![],
+            0.2,
+            0.0,
+            dropoff_bases,
+            "panel".to_string(),
+        );
 
         let target_start = 0u64;
         let target_end = 500u64;
@@ -264,7 +308,14 @@ mod tests {
     #[test]
     fn test_off_target_reads() {
         let off_target_fraction = 0.2_f64;
-        let model = CaptureModel::new(make_regions(), off_target_fraction, 0.0, 0);
+        let model = CaptureModel::new(
+            make_regions(),
+            vec![],
+            off_target_fraction,
+            0.0,
+            0,
+            "panel".to_string(),
+        );
         let mean_coverage = 100.0_f64;
 
         // Simulate a mix of on-target and off-target positions.
@@ -309,7 +360,7 @@ mod tests {
         // edge_dropoff_bases=0 means no edge effect.
         let regions = make_regions();
         let n = regions.len();
-        let model = CaptureModel::new(regions, 1.0, 0.0, 0);
+        let model = CaptureModel::new(regions, vec![], 1.0, 0.0, 0, "panel".to_string());
         let mut rng = StdRng::seed_from_u64(5);
 
         let multipliers = model.sample_all_target_multipliers(&mut rng);

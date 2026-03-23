@@ -50,6 +50,14 @@ impl TruthVcfWriter {
             writer,
             r#"##INFO=<ID=CCF,Number=1,Type=Float,Description="Cancer cell fraction of assigned clone">"#
         )?;
+        writeln!(
+            writer,
+            r#"##INFO=<ID=N_ALT_MOL,Number=1,Type=Integer,Description="Number of read pairs carrying the alt allele">"#
+        )?;
+        writeln!(
+            writer,
+            r#"##INFO=<ID=N_DUPLEX_ALT,Number=1,Type=Integer,Description="Number of duplex AB+BA family pairs carrying the alt allele">"#
+        )?;
 
         // Contig lines
         for (name, length) in contigs {
@@ -74,6 +82,8 @@ impl TruthVcfWriter {
     /// Write a single variant record.
     ///
     /// - `ref_allele` / `alt_allele` are the REF and ALT byte sequences.
+    /// - `n_alt_mol` is the number of read pairs (molecule families) carrying the alt allele.
+    /// - `n_duplex_alt` is the number of duplex AB+BA family pairs carrying the alt allele.
     /// - The position written is 1-based (VCF convention); `variant.pos()` is
     ///   assumed to be 0-based and is incremented by 1.
     /// - QUAL is `.`, FILTER is `PASS`, FORMAT/SAMPLE is `GT\t0/1`.
@@ -82,6 +92,8 @@ impl TruthVcfWriter {
         variant: &Variant,
         ref_allele: &[u8],
         alt_allele: &[u8],
+        n_alt_mol: u32,
+        n_duplex_alt: u32,
     ) -> Result<()> {
         let pos_1based = variant.pos() + 1;
         let ref_str = std::str::from_utf8(ref_allele).context("REF allele is not valid UTF-8")?;
@@ -95,7 +107,10 @@ impl TruthVcfWriter {
         // should populate a CCF field on Variant in a future iteration.
         let ccf = vaf;
 
-        let info = format!("EXPECTED_VAF={vaf:.6};CLONE={clone_id};VARTYPE={vartype};CCF={ccf:.6}");
+        let info = format!(
+            "EXPECTED_VAF={vaf:.6};CLONE={clone_id};VARTYPE={vartype};CCF={ccf:.6};\
+             N_ALT_MOL={n_alt_mol};N_DUPLEX_ALT={n_duplex_alt}"
+        );
 
         writeln!(
             self.writer,
@@ -164,6 +179,7 @@ mod tests {
             },
             expected_vaf: vaf,
             clone_id: clone.map(|s| s.to_string()),
+            haplotype: None,
         }
     }
 
@@ -177,6 +193,7 @@ mod tests {
             },
             expected_vaf: vaf,
             clone_id: None,
+            haplotype: None,
         }
     }
 
@@ -190,6 +207,7 @@ mod tests {
             },
             expected_vaf: vaf,
             clone_id: None,
+            haplotype: None,
         }
     }
 
@@ -203,6 +221,7 @@ mod tests {
             },
             expected_vaf: vaf,
             clone_id: None,
+            haplotype: None,
         }
     }
 
@@ -238,6 +257,14 @@ mod tests {
         assert!(vcf.contains("##INFO=<ID=CLONE"), "missing CLONE INFO");
         assert!(vcf.contains("##INFO=<ID=VARTYPE"), "missing VARTYPE INFO");
         assert!(vcf.contains("##INFO=<ID=CCF"), "missing CCF INFO");
+        assert!(
+            vcf.contains("##INFO=<ID=N_ALT_MOL"),
+            "missing N_ALT_MOL INFO"
+        );
+        assert!(
+            vcf.contains("##INFO=<ID=N_DUPLEX_ALT"),
+            "missing N_DUPLEX_ALT INFO"
+        );
         assert!(vcf.contains("##FORMAT=<ID=GT"), "missing GT FORMAT");
         // Column header must contain sample name
         assert!(
@@ -256,7 +283,7 @@ mod tests {
         let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
 
         let v = snv_variant("chr1", 999, 0.35, Some("clone_A"));
-        writer.write_variant(&v, b"A", b"T").unwrap();
+        writer.write_variant(&v, b"A", b"T", 7, 0).unwrap();
         writer.finish().unwrap();
 
         let vcf = read_vcf(tmp.path());
@@ -291,11 +318,11 @@ mod tests {
 
         // Insertion
         let ins = insertion_variant("chr1", 100, 0.2);
-        writer.write_variant(&ins, b"A", b"ATG").unwrap();
+        writer.write_variant(&ins, b"A", b"ATG", 4, 0).unwrap();
 
         // Deletion
         let del = deletion_variant("chr1", 200, 0.15);
-        writer.write_variant(&del, b"ATG", b"A").unwrap();
+        writer.write_variant(&del, b"ATG", b"A", 3, 0).unwrap();
 
         writer.finish().unwrap();
 
@@ -326,7 +353,7 @@ mod tests {
         let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
 
         let v = mnv_variant("chr2", 500, 0.4);
-        writer.write_variant(&v, b"AC", b"TG").unwrap();
+        writer.write_variant(&v, b"AC", b"TG", 2, 0).unwrap();
         writer.finish().unwrap();
 
         let vcf = read_vcf(tmp.path());
@@ -353,7 +380,7 @@ mod tests {
         let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
 
         let v = snv_variant("chr1", 0, 0.123456, None);
-        writer.write_variant(&v, b"C", b"G").unwrap();
+        writer.write_variant(&v, b"C", b"G", 1, 0).unwrap();
         writer.finish().unwrap();
 
         let vcf = read_vcf(tmp.path());
@@ -382,7 +409,7 @@ mod tests {
         let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
 
         let v = snv_variant("chr1", 0, 0.3, Some("subclone_B"));
-        writer.write_variant(&v, b"G", b"A").unwrap();
+        writer.write_variant(&v, b"G", b"A", 5, 0).unwrap();
         writer.finish().unwrap();
 
         let vcf = read_vcf(tmp.path());
@@ -415,9 +442,9 @@ mod tests {
         let v2 = snv_variant("chr1", 200, 0.3, None);
         let v3 = snv_variant("chr2", 50, 0.1, None);
 
-        writer.write_variant(&v1, b"A", b"C").unwrap();
-        writer.write_variant(&v2, b"G", b"T").unwrap();
-        writer.write_variant(&v3, b"C", b"A").unwrap();
+        writer.write_variant(&v1, b"A", b"C", 10, 0).unwrap();
+        writer.write_variant(&v2, b"G", b"T", 6, 0).unwrap();
+        writer.write_variant(&v3, b"C", b"A", 1, 0).unwrap();
         writer.finish().unwrap();
 
         let vcf = read_vcf(tmp.path());

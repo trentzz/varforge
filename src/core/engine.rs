@@ -9,14 +9,18 @@ use crate::artifacts::duplicates::{duplicate_read_pair, select_duplicates};
 use crate::artifacts::ffpe::{inject_ffpe_damage, inject_oxog_damage};
 use crate::core::capture::CaptureModel;
 use crate::core::coverage::read_pairs_for_coverage;
+use crate::core::end_motifs::accept_fragment_by_end_motif;
 use crate::core::error_profile::EmpiricalQualityModel;
-use crate::core::fragment::{CfdnaFragmentSampler, NormalFragmentSampler};
+use crate::core::fragment::{sample_long_read_length, CfdnaFragmentSampler, NormalFragmentSampler};
 use crate::core::gc_bias::GcBiasModel;
-use crate::core::quality::{inject_errors, ParametricQualityModel, QualityModel};
-use crate::core::types::{MutationType, Read, ReadPair, Region, SvType, Variant};
+use crate::core::quality::{
+    inject_errors, sample_nanopore_r10_qualities, sample_pacbio_hifi_qualities,
+    ParametricQualityModel, QualityModel,
+};
+use crate::core::types::{MutationType, Read, ReadPair, Region, SvType, Variant, VariantTag};
 use crate::io::config::{Config, FragmentModel};
 use crate::io::reference::ReferenceGenome;
-use crate::umi::barcode::generate_umi;
+use crate::umi::barcode::{generate_duplex_umi_pair, generate_umi};
 use crate::umi::families::{generate_pcr_copies, sample_family_size, UmiFamily};
 use crate::variants::cnv::{adjusted_coverage, find_cn_region, CopyNumberRegion};
 use crate::variants::spike_in::spike_indel;
@@ -36,10 +40,12 @@ pub struct RegionOutput {
 /// Tracks actual alt and total depths for a spiked variant.
 pub struct AppliedVariant {
     pub variant: Variant,
-    #[allow(dead_code)]
     pub actual_alt_count: u32,
     #[allow(dead_code)]
     pub actual_total_count: u32,
+    /// Number of duplex (AB+BA) family pairs carrying the alt allele.
+    // TODO(T004): wire duplex family count here
+    pub duplex_alt_count: u32,
 }
 
 /// Core simulation engine that wires together all sub-modules.
@@ -214,54 +220,54 @@ impl SimulationEngine {
         // Build fragment sampler from config.
         // FragmentSampler uses a generic Rng parameter so we can't use
         // Box<dyn FragmentSampler>. Use an enum instead.
-        enum Sampler {
+        //
+        // When `fragment.long_read` is set, use the log-normal long-read sampler
+        // regardless of the `model` field.
+        enum Sampler<'a> {
             Normal(NormalFragmentSampler),
             Cfdna(CfdnaFragmentSampler),
+            LongRead(&'a crate::io::config::LongReadFragmentConfig),
         }
-        impl Sampler {
+        impl Sampler<'_> {
             fn sample(&self, rng: &mut StdRng) -> usize {
                 match self {
-                    Sampler::Normal(s) => s.sample(rng),
-                    Sampler::Cfdna(s) => s.sample(rng),
+                    Sampler::Normal(s) => {
+                        use crate::core::fragment::FragmentSampler as _;
+                        s.sample(rng)
+                    }
+                    Sampler::Cfdna(s) => {
+                        use crate::core::fragment::FragmentSampler as _;
+                        s.sample(rng)
+                    }
+                    Sampler::LongRead(cfg) => sample_long_read_length(cfg, rng),
                 }
             }
         }
-        // Import FragmentSampler only for the impl block above.
-        use crate::core::fragment::FragmentSampler as _;
-        let fragment_sampler = match self.config.fragment.model {
-            FragmentModel::Cfda => {
-                let mono_peak = self.config.fragment.mean;
-                let di_peak = mono_peak * 2.0;
-                let ctdna_fraction = self
-                    .config
-                    .tumour
-                    .as_ref()
-                    .map(|t| 1.0 - t.purity) // ctDNA fraction is related to tumour content
-                    .unwrap_or(0.0);
-                Sampler::Cfdna(CfdnaFragmentSampler::new(
-                    mono_peak,
-                    di_peak,
-                    0.85,
-                    ctdna_fraction,
-                ))
-            }
-            FragmentModel::Custom => {
-                tracing::warn!(
-                    "fragment.model = custom is not yet implemented; \
-                     falling back to normal (mean={}, sd={}). \
-                     Use 'normal' to suppress this warning.",
-                    self.config.fragment.mean,
-                    self.config.fragment.sd
-                );
-                Sampler::Normal(NormalFragmentSampler::new(
+        let fragment_sampler = if let Some(ref lr_cfg) = self.config.fragment.long_read {
+            Sampler::LongRead(lr_cfg)
+        } else {
+            match self.config.fragment.model {
+                FragmentModel::Cfda => {
+                    let mono_peak = self.config.fragment.mean;
+                    let di_peak = mono_peak * 2.0;
+                    let ctdna_fraction = self
+                        .config
+                        .tumour
+                        .as_ref()
+                        .map(|t| 1.0 - t.purity) // ctDNA fraction is related to tumour content
+                        .unwrap_or(0.0);
+                    Sampler::Cfdna(CfdnaFragmentSampler::new(
+                        mono_peak,
+                        di_peak,
+                        0.85,
+                        ctdna_fraction,
+                    ))
+                }
+                _ => Sampler::Normal(NormalFragmentSampler::new(
                     self.config.fragment.mean,
                     self.config.fragment.sd,
-                ))
+                )),
             }
-            FragmentModel::Normal => Sampler::Normal(NormalFragmentSampler::new(
-                self.config.fragment.mean,
-                self.config.fragment.sd,
-            )),
         };
 
         // Per-variant alt/total counters (indexed parallel to `variants`).
@@ -286,12 +292,31 @@ impl SimulationEngine {
         let region_seq: Vec<u8> = self.reference.sequence(region)?;
 
         // Hoist quality model construction outside the fragment loop (Fix C-2).
+        //
+        // For long-read platforms, use platform-specific flat quality profiles
+        // rather than the Illumina parametric model. Platform is detected from
+        // `sample.platform` only when `fragment.long_read` is set, ensuring
+        // that the long-read quality model is not applied to short-read runs.
+        let is_long_read = self.config.fragment.long_read.is_some();
+        let platform = self
+            .config
+            .sample
+            .platform
+            .as_deref()
+            .unwrap_or("")
+            .to_lowercase();
         enum QualModel<'a> {
             Empirical(&'a EmpiricalQualityModel),
             Parametric(ParametricQualityModel),
+            PacbioHifi,
+            NanoporeR10,
         }
         let qual_model = if let Some(ref emp) = self.empirical_quality {
             QualModel::Empirical(emp)
+        } else if is_long_read && platform.contains("pacbio") {
+            QualModel::PacbioHifi
+        } else if is_long_read && platform.contains("nanopore") {
+            QualModel::NanoporeR10
         } else {
             QualModel::Parametric(ParametricQualityModel::new(
                 self.config.quality.mean_quality,
@@ -333,6 +358,37 @@ impl SimulationEngine {
             let frag_end = (frag_start + frag_len as u64).min(region.end);
             let actual_frag_len = (frag_end - frag_start) as usize;
 
+            // Skip severely truncated fragments (e.g. post-deletion tail with fewer
+            // than half the requested read bases).  N-padding is fine for fragments
+            // that are only a few bases short; this guard prevents near-empty reads
+            // that would panic in downstream slice operations.
+            if actual_frag_len < read_length / 2 {
+                continue;
+            }
+
+            // ---- End motif rejection sampling ----
+            // When the plasma end motif model is enabled, extract the 4-mer at
+            // the fragment 5' end and use rejection sampling to bias fragment
+            // starts toward motifs that are enriched in plasma cfDNA.
+            if self.config.fragment.end_motif_model.as_deref() == Some("plasma") {
+                let motif_5p = {
+                    let pos = (frag_start - region.start) as usize;
+                    if pos + 4 <= region_seq.len() {
+                        Some([
+                            region_seq[pos],
+                            region_seq[pos + 1],
+                            region_seq[pos + 2],
+                            region_seq[pos + 3],
+                        ])
+                    } else {
+                        None
+                    }
+                };
+                if !accept_fragment_by_end_motif(motif_5p, &mut self.rng) {
+                    continue;
+                }
+            }
+
             // Extract reference sequence for the fragment from the pre-fetched region sequence
             // (Fix C-3: slice into cached region_seq instead of per-fragment reference call).
             let offset_start = (frag_start - region.start) as usize;
@@ -354,13 +410,28 @@ impl SimulationEngine {
                 }
             }
 
+            // ---- Haplotype assignment ----
+            // Each fragment is assigned to haplotype 0 or 1 with equal probability.
+            // Variants with a matching haplotype assignment are only applied to
+            // fragments on that haplotype.
+            let fragment_haplotype: u8 = self.rng.gen_range(0u8..2);
+
             // ---- Variant spike-in ----
+            // Collect tags for any variant actually applied to this fragment.
+            let mut fragment_variant_tags: Vec<VariantTag> = Vec::new();
             for (vi, variant) in variants.iter().enumerate() {
                 if variant_alt_budget[vi] == 0 {
                     continue;
                 }
                 if !variant_overlaps_region(variant, region) {
                     continue;
+                }
+                // Haplotype filter: skip this variant if it is assigned to a
+                // haplotype that does not match this fragment.
+                if let Some(h) = variant.haplotype {
+                    if h != fragment_haplotype {
+                        continue;
+                    }
                 }
                 // Check if this fragment overlaps the variant position.
                 let var_pos = variant_position(variant);
@@ -380,6 +451,14 @@ impl SimulationEngine {
                     apply_variant_to_seq(&mut frag_seq, frag_start, variant);
                     *budget = budget.saturating_sub(1);
                     alt_counts[vi] += 1;
+                    // Record which variant was spiked into this fragment.
+                    fragment_variant_tags.push(VariantTag {
+                        chrom: variant.chrom.clone(),
+                        pos: mutation_pos(&variant.mutation),
+                        vartype: mutation_vartype(&variant.mutation).to_string(),
+                        vaf: variant.expected_vaf,
+                        clone_id: variant.clone_id.clone(),
+                    });
                 }
             }
 
@@ -387,6 +466,10 @@ impl SimulationEngine {
             // read1: first read_length bases of fragment.
             // read2: last read_length bases of fragment (reverse complement semantics
             //        are handled by downstream tools; we store the actual sequence here).
+            //
+            // Re-derive the fragment length from frag_seq: large indels (SV spike-ins)
+            // change the sequence length after actual_frag_len was computed above.
+            let actual_frag_len = frag_seq.len();
             let r1_len = read_length.min(actual_frag_len);
             let r2_len = read_length.min(actual_frag_len);
 
@@ -406,8 +489,10 @@ impl SimulationEngine {
             }
 
             // ---- Quality and error injection ----
-            // Use empirical model when loaded, else fall back to parametric (Fix C-2: model
-            // was built once before the loop, not re-constructed each iteration).
+            // Use empirical model when loaded, else platform-specific model for
+            // long reads, else fall back to the Illumina parametric model
+            // (Fix C-2: model was built once before the loop, not re-constructed
+            // each iteration).
             let (r1_qual, r2_qual) = match &qual_model {
                 QualModel::Empirical(emp) => {
                     let q1 = emp.generate_qualities(read_length, &mut self.rng);
@@ -419,6 +504,22 @@ impl SimulationEngine {
                 QualModel::Parametric(parametric) => {
                     let q1 = parametric.generate_qualities(read_length, &mut self.rng);
                     let q2 = parametric.generate_qualities(read_length, &mut self.rng);
+                    inject_errors(&mut r1_seq, &q1, &mut self.rng);
+                    inject_errors(&mut r2_seq, &q2, &mut self.rng);
+                    (q1, q2)
+                }
+                QualModel::PacbioHifi => {
+                    // For long reads, r1 spans the full fragment; r2 is unused
+                    // but generated to keep the ReadPair structure intact.
+                    let q1 = sample_pacbio_hifi_qualities(read_length, &mut self.rng);
+                    let q2 = sample_pacbio_hifi_qualities(read_length, &mut self.rng);
+                    inject_errors(&mut r1_seq, &q1, &mut self.rng);
+                    inject_errors(&mut r2_seq, &q2, &mut self.rng);
+                    (q1, q2)
+                }
+                QualModel::NanoporeR10 => {
+                    let q1 = sample_nanopore_r10_qualities(read_length, &mut self.rng);
+                    let q2 = sample_nanopore_r10_qualities(read_length, &mut self.rng);
                     inject_errors(&mut r1_seq, &q1, &mut self.rng);
                     inject_errors(&mut r2_seq, &q2, &mut self.rng);
                     (q1, q2)
@@ -442,6 +543,7 @@ impl SimulationEngine {
                 fragment_start: frag_start,
                 fragment_length: actual_frag_len,
                 chrom: region.chrom.clone(),
+                variant_tags: fragment_variant_tags,
             };
 
             read_pairs.push(pair);
@@ -508,6 +610,14 @@ impl SimulationEngine {
                                 deleted = true;
                                 break;
                             }
+                            // Record the SV spike-in in the read pair's variant tags.
+                            pair.variant_tags.push(VariantTag {
+                                chrom: variant.chrom.clone(),
+                                pos: mutation_pos(&variant.mutation),
+                                vartype: mutation_vartype(&variant.mutation).to_string(),
+                                vaf: variant.expected_vaf,
+                                clone_id: variant.clone_id.clone(),
+                            });
                         }
                     }
                 }
@@ -524,6 +634,7 @@ impl SimulationEngine {
             let family_mean = umi_cfg.family_size_mean;
             let family_sd = umi_cfg.family_size_sd;
             let pcr_cycles = umi_cfg.pcr_cycles;
+            let is_duplex = umi_cfg.duplex;
             let pcr_error_rate = self
                 .config
                 .artifacts
@@ -533,19 +644,77 @@ impl SimulationEngine {
 
             let mut families: Vec<ReadPair> = Vec::new();
             for mut pair in read_pairs {
-                let umi = generate_umi(umi_len, &mut self.rng);
-                let umi_str = String::from_utf8_lossy(&umi).into_owned();
-                pair.name = format!("{}:UMI:{}", pair.name, umi_str);
+                if is_duplex {
+                    // Generate an AB/BA duplex pair.
+                    // AB UMI is "AAAA-BBBB"; BA UMI is the halves swapped.
+                    let (umi_a, umi_b) = generate_duplex_umi_pair(umi_len, &mut self.rng);
+                    let a_str = String::from_utf8_lossy(&umi_a[..umi_len]);
+                    let b_str = String::from_utf8_lossy(&umi_b[..umi_len]);
+                    let ab_str = format!("{}-{}", a_str, b_str);
+                    let ba_str = format!("{}-{}", b_str, a_str);
 
-                let family_size = sample_family_size(family_mean, family_sd, &mut self.rng);
-                let family = UmiFamily {
-                    umi,
-                    original: pair,
-                    family_size,
-                };
-                let mut copies =
-                    generate_pcr_copies(&family, pcr_error_rate, pcr_cycles, &mut self.rng);
-                families.append(&mut copies);
+                    // AB strand: original orientation.
+                    pair.name = format!("{}:UMI:{}", pair.name, ab_str);
+                    let family_size = sample_family_size(family_mean, family_sd, &mut self.rng);
+                    let ab_family = UmiFamily {
+                        umi: umi_a,
+                        original: pair.clone(),
+                        family_size,
+                    };
+                    let mut ab_copies =
+                        generate_pcr_copies(&ab_family, pcr_error_rate, pcr_cycles, &mut self.rng);
+                    families.append(&mut ab_copies);
+
+                    // BA strand: swap R1/R2 and reverse-complement both.
+                    // R1_BA = revcomp(R2_AB), R2_BA = revcomp(R1_AB).
+                    // This models sequencing from the opposite end of the molecule.
+                    let ba_read1 = Read::new(
+                        reverse_complement(&pair.read2.seq),
+                        pair.read2.qual.iter().copied().rev().collect(),
+                    );
+                    let ba_read2 = Read::new(
+                        reverse_complement(&pair.read1.seq),
+                        pair.read1.qual.iter().copied().rev().collect(),
+                    );
+                    // Strip the ":UMI:..." suffix we already appended, then add BA tag.
+                    let base_name = pair
+                        .name
+                        .rfind(":UMI:")
+                        .map(|i| &pair.name[..i])
+                        .unwrap_or(&pair.name);
+                    let ba_pair = ReadPair {
+                        name: format!("{}:UMI:{}", base_name, ba_str),
+                        read1: ba_read1,
+                        read2: ba_read2,
+                        fragment_start: pair.fragment_start,
+                        fragment_length: pair.fragment_length,
+                        chrom: pair.chrom.clone(),
+                        variant_tags: pair.variant_tags.clone(),
+                    };
+                    let ba_family_size = sample_family_size(family_mean, family_sd, &mut self.rng);
+                    let ba_family = UmiFamily {
+                        umi: umi_b,
+                        original: ba_pair,
+                        family_size: ba_family_size,
+                    };
+                    let mut ba_copies =
+                        generate_pcr_copies(&ba_family, pcr_error_rate, pcr_cycles, &mut self.rng);
+                    families.append(&mut ba_copies);
+                } else {
+                    let umi = generate_umi(umi_len, &mut self.rng);
+                    let umi_str = String::from_utf8_lossy(&umi).into_owned();
+                    pair.name = format!("{}:UMI:{}", pair.name, umi_str);
+
+                    let family_size = sample_family_size(family_mean, family_sd, &mut self.rng);
+                    let family = UmiFamily {
+                        umi,
+                        original: pair,
+                        family_size,
+                    };
+                    let mut copies =
+                        generate_pcr_copies(&family, pcr_error_rate, pcr_cycles, &mut self.rng);
+                    families.append(&mut copies);
+                }
             }
             read_pairs = families;
         }
@@ -586,6 +755,7 @@ impl SimulationEngine {
                 variant: v.clone(),
                 actual_alt_count: alt_counts[i],
                 actual_total_count: total_counts[i],
+                duplex_alt_count: 0, // TODO(T004): wire duplex family count here
             })
             .collect();
 
@@ -694,6 +864,26 @@ fn build_empirical_quality(config: &Config) -> Option<EmpiricalQualityModel> {
 // ---------------------------------------------------------------------------
 // Helper utilities
 // ---------------------------------------------------------------------------
+
+/// Return the reverse complement of a DNA sequence.
+///
+/// Unknown bases are mapped to N. The input is not modified.
+fn reverse_complement(seq: &[u8]) -> Vec<u8> {
+    seq.iter()
+        .rev()
+        .map(|&b| match b {
+            b'A' => b'T',
+            b'T' => b'A',
+            b'C' => b'G',
+            b'G' => b'C',
+            b'a' => b't',
+            b't' => b'a',
+            b'c' => b'g',
+            b'g' => b'c',
+            _ => b'N',
+        })
+        .collect()
+}
 
 /// Return true if the variant's position falls within the region.
 fn variant_overlaps_region(variant: &Variant, region: &Region) -> bool {
@@ -831,12 +1021,35 @@ fn apply_sv_to_read(
         StructuralVariant::Inversion { .. } => apply_inversion(read, read_start, sv),
         StructuralVariant::Duplication { .. } => apply_duplication(read, read_start, sv),
         StructuralVariant::Translocation { chrom2, pos2, .. } => {
-            // Fetch partner sequence from reference.
-            let partner_end = pos2 + read.len() as u64;
+            // Fetch partner sequence from reference.  Clamp the end coordinate to
+            // the chromosome length so that a translocation near the chromosome end
+            // does not request an out-of-bounds region.
+            let chrom_len = reference.chrom_len(chrom2).unwrap_or(u64::MAX);
+            let partner_end = (pos2 + read.len() as u64).min(chrom_len);
             let partner_region = Region::new(chrom2.clone(), *pos2, partner_end);
             let partner_seq = reference.sequence(&partner_region).unwrap_or_default();
             apply_translocation(read, read_start, chrom, sv, &partner_seq)
         }
+    }
+}
+
+/// Return a short string label for a mutation type, used in variant tags.
+fn mutation_vartype(mutation: &MutationType) -> &'static str {
+    match mutation {
+        MutationType::Snv { .. } => "SNV",
+        MutationType::Indel { .. } => "INDEL",
+        MutationType::Mnv { .. } => "MNV",
+        MutationType::Sv { .. } => "SV",
+    }
+}
+
+/// Return the primary genomic position of a mutation, used in variant tags.
+fn mutation_pos(mutation: &MutationType) -> u64 {
+    match mutation {
+        MutationType::Snv { pos, .. } => *pos,
+        MutationType::Indel { pos, .. } => *pos,
+        MutationType::Mnv { pos, .. } => *pos,
+        MutationType::Sv { start, .. } => *start,
     }
 }
 
@@ -894,6 +1107,8 @@ mod tests {
                 bam: false,
                 truth_vcf: false,
                 manifest: false,
+                germline_vcf: false,
+                single_read_bam: false,
             },
             sample: SampleConfig {
                 name: "TEST".to_string(),
@@ -905,6 +1120,8 @@ mod tests {
                 model: FragmentModel::Normal,
                 mean: 200.0,
                 sd: 20.0,
+                long_read: None,
+                end_motif_model: None,
             },
             quality: QualityConfig {
                 mean_quality: 36,
@@ -924,6 +1141,11 @@ mod tests {
             samples: None,
             capture: None,
             performance: Default::default(),
+            preset: None,
+            vafs: None,
+            germline: None,
+            paired: None,
+            contamination: None,
         }
     }
 
@@ -941,6 +1163,7 @@ mod tests {
             },
             expected_vaf: vaf,
             clone_id: None,
+            haplotype: None,
         }
     }
 
@@ -1165,6 +1388,8 @@ mod tests {
             model: FragmentModel::Cfda,
             mean: 167.0,
             sd: 20.0,
+            long_read: None,
+            end_motif_model: None,
         };
         config.sample.coverage = 5.0;
         let reference = open_reference(&fa);
@@ -1324,6 +1549,7 @@ mod tests {
             purity: 1.0,
             ploidy: 2,
             clones: Vec::new(),
+            msi: false,
         });
         // Homozygous deletion over the entire test region.
         config_del.copy_number = Some(vec![CopyNumberConfig {
@@ -1356,5 +1582,128 @@ mod tests {
         );
         // Normal should have reads.
         assert!(!out_normal.read_pairs.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // 14. SV boundary panic regression — large deletion near chromosome end
+    // -----------------------------------------------------------------------
+    //
+    // A large deletion from position 50 to 180 on a 200-bp chromosome leaves
+    // only 20 bases before the chromosome end.  With read_length=150, any
+    // fragment sampled over that tail region has fewer than read_length/2 bases
+    // and must be silently skipped rather than panicking.
+    #[test]
+    fn test_sv_deletion_near_chrom_end_no_panic() {
+        let dir = TempDir::new().unwrap();
+        let fa_path = dir.path().join("small.fa");
+        let fai_path = dir.path().join("small.fa.fai");
+
+        // 200-bp chromosome: repeating ACGT.
+        let seq: Vec<u8> = b"ACGT".iter().cycle().take(200).cloned().collect();
+        let mut fa_bytes = Vec::new();
+        fa_bytes.extend_from_slice(b">chr1\n");
+        fa_bytes.extend_from_slice(&seq);
+        fa_bytes.push(b'\n');
+        std::fs::write(&fa_path, &fa_bytes).unwrap();
+
+        // FAI: name, length, offset, line_bases, line_width
+        // offset = len(">chr1\n") = 6; 200 bases on one line → line_width = 201
+        let fai_content = "chr1\t200\t6\t200\t201\n";
+        std::fs::write(&fai_path, fai_content.as_bytes()).unwrap();
+
+        let reference = ReferenceGenome::open(&fa_path).expect("failed to open small reference");
+
+        // Config: read_length=150, low coverage so the test runs quickly.
+        let mut config = make_config(42);
+        config.sample.read_length = 150;
+        config.sample.coverage = 5.0;
+
+        let mut engine = SimulationEngine::new(config, reference);
+
+        // Deletion from 50 to 180 leaves only 20 bp of chromosome remaining.
+        let deletion = Variant {
+            chrom: "chr1".to_string(),
+            mutation: MutationType::Sv {
+                sv_type: SvType::Deletion,
+                chrom: "chr1".to_string(),
+                start: 50,
+                end: 180,
+            },
+            expected_vaf: 1.0,
+            clone_id: None,
+            haplotype: None,
+        };
+
+        // Must not panic; may return an empty or non-empty result.
+        let result = engine.generate_region(&Region::new("chr1", 0, 200), &[deletion]);
+        assert!(
+            result.is_ok(),
+            "generate_region should not panic or error on a near-end deletion, got: {:?}",
+            result.err()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // 15. Duplex simulation produces both AB and BA read pairs (T005)
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_duplex_produces_ab_and_ba_reads() {
+        let dir = TempDir::new().unwrap();
+        let fa = write_test_fasta(&dir);
+        let mut config = make_config(50);
+        // Use family_size_mean=1 to keep output predictable.
+        config.umi = Some(UmiConfig {
+            length: 8,
+            duplex: true,
+            pcr_cycles: 1,
+            family_size_mean: 1.0,
+            family_size_sd: 0.1,
+            inline: false,
+        });
+        let reference = open_reference(&fa);
+        let mut engine = SimulationEngine::new(config, reference);
+
+        let region = Region::new("chr1", 0, 500);
+        let output = engine.generate_region(&region, &[]).unwrap();
+        assert!(!output.read_pairs.is_empty(), "should produce read pairs");
+
+        // Collect all UMI strings from read names.
+        let names: Vec<&str> = output.read_pairs.iter().map(|p| p.name.as_str()).collect();
+
+        // For each AB read "...:UMI:AAAA-BBBB...", check that a BA counterpart
+        // "...:UMI:BBBB-AAAA..." also exists.
+        let mut found_duplex_pair = false;
+        for name in &names {
+            // Extract the UMI segment following ":UMI:".
+            let Some(umi_start) = name.find(":UMI:") else {
+                continue;
+            };
+            // The UMI ends at the next colon (PCR suffix) or end of string.
+            let umi_region = &name[umi_start + 5..];
+            let umi_end = umi_region.find(':').unwrap_or(umi_region.len());
+            let umi = &umi_region[..umi_end];
+
+            // Only process duplexed UMIs that contain a '-' separator.
+            let Some(dash) = umi.find('-') else {
+                continue;
+            };
+            let half_a = &umi[..dash];
+            let half_b = &umi[dash + 1..];
+            let ba_umi = format!("{}-{}", half_b, half_a);
+
+            // Check that at least one read in the output carries the BA barcode.
+            let ba_exists = names
+                .iter()
+                .any(|n| n.contains(&format!(":UMI:{}", ba_umi)));
+            if ba_exists {
+                found_duplex_pair = true;
+                break;
+            }
+        }
+
+        assert!(
+            found_duplex_pair,
+            "duplex mode should produce at least one AB/BA read pair complement"
+        );
     }
 }

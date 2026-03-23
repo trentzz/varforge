@@ -84,7 +84,10 @@ fn preset_small() -> PresetOverlay {
                 snv_fraction: 0.80,
                 indel_fraction: 0.15,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_count: 0,
+            sv_signature: None,
         }),
         ..Default::default()
     }
@@ -105,7 +108,10 @@ fn preset_panel() -> PresetOverlay {
                 snv_fraction: 0.80,
                 indel_fraction: 0.15,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_count: 0,
+            sv_signature: None,
         }),
         umi: Some(UmiConfig {
             length: 8,
@@ -134,7 +140,10 @@ fn preset_wgs() -> PresetOverlay {
                 snv_fraction: 0.80,
                 indel_fraction: 0.15,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_count: 0,
+            sv_signature: None,
         }),
         ..Default::default()
     }
@@ -150,6 +159,8 @@ fn preset_cfdna() -> PresetOverlay {
             model: FragmentModel::Cfda,
             mean: 167.0,
             sd: 20.0,
+            long_read: None,
+            end_motif_model: None,
         }),
         purity: Some(0.02),
         mutations: Some(MutationConfig {
@@ -161,7 +172,10 @@ fn preset_cfdna() -> PresetOverlay {
                 snv_fraction: 0.80,
                 indel_fraction: 0.15,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_count: 0,
+            sv_signature: None,
         }),
         umi: Some(UmiConfig {
             length: 8,
@@ -196,7 +210,10 @@ fn preset_ffpe() -> PresetOverlay {
                 snv_fraction: 0.80,
                 indel_fraction: 0.15,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_count: 0,
+            sv_signature: None,
         }),
         ..Default::default()
     }
@@ -217,7 +234,10 @@ fn preset_umi() -> PresetOverlay {
                 snv_fraction: 0.80,
                 indel_fraction: 0.15,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_count: 0,
+            sv_signature: None,
         }),
         umi: Some(UmiConfig {
             length: 9,
@@ -304,6 +324,7 @@ pub fn apply_preset_to_config(config: &mut Config, overlay: &PresetOverlay) {
                 purity,
                 ploidy: 2,
                 clones: Vec::new(),
+                msi: false,
             });
         }
     }
@@ -358,6 +379,8 @@ mod tests {
                 bam: false,
                 truth_vcf: false,
                 manifest: false,
+                germline_vcf: false,
+                single_read_bam: false,
             },
             sample: SampleConfig::default(),
             fragment: FragmentConfig::default(),
@@ -375,6 +398,11 @@ mod tests {
             samples: None,
             capture: None,
             performance: Default::default(),
+            preset: None,
+            vafs: None,
+            germline: None,
+            paired: None,
+            contamination: None,
         };
 
         for name in all_names() {
@@ -410,6 +438,8 @@ mod tests {
                 bam: false,
                 truth_vcf: false,
                 manifest: false,
+                germline_vcf: false,
+                single_read_bam: false,
             },
             // User set coverage to 60x in YAML.
             sample: SampleConfig {
@@ -431,6 +461,11 @@ mod tests {
             samples: None,
             capture: None,
             performance: Default::default(),
+            preset: None,
+            vafs: None,
+            germline: None,
+            paired: None,
+            contamination: None,
         };
 
         let overlay = get("small").unwrap(); // small preset wants 1x

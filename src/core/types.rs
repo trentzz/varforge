@@ -26,6 +26,18 @@ impl Region {
     }
 }
 
+/// Records which variant a read pair carries, for FASTQ name annotation and sidecar output.
+// Fields are populated for future use; not yet consumed by any output path.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct VariantTag {
+    pub chrom: String,
+    pub pos: u64,
+    pub vartype: String,
+    pub vaf: f64,
+    pub clone_id: Option<String>,
+}
+
 /// A simulated read pair.
 #[derive(Debug, Clone)]
 pub struct ReadPair {
@@ -35,6 +47,8 @@ pub struct ReadPair {
     pub fragment_start: u64,
     pub fragment_length: usize,
     pub chrom: String,
+    /// Variants carried by this read pair, populated during spike-in.
+    pub variant_tags: Vec<VariantTag>,
 }
 
 /// A single read with sequence and qualities.
@@ -112,6 +126,11 @@ pub struct Variant {
     pub mutation: MutationType,
     pub expected_vaf: f64,
     pub clone_id: Option<String>,
+    /// Optional haplotype assignment (0 or 1).
+    ///
+    /// When set, the variant is only spiked into fragments sampled from the
+    /// matching haplotype. When `None`, the variant is applied regardless.
+    pub haplotype: Option<u8>,
 }
 
 #[cfg(test)]

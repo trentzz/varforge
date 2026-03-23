@@ -54,6 +54,34 @@ impl QualityModel for ParametricQualityModel {
     }
 }
 
+/// Sample per-base qualities for a PacBio HiFi read.
+///
+/// Produces a flat profile in the Q20–Q30 range with slight random variation.
+/// HiFi reads have ~99.9% accuracy (Q30), with few systematic error patterns.
+pub fn sample_pacbio_hifi_qualities<R: Rng>(length: usize, rng: &mut R) -> Vec<u8> {
+    (0..length)
+        .map(|_| {
+            // Sample from Q20 to Q30 with a mode around Q25.
+            let q: f64 = rng.gen_range(20.0..=30.0_f64);
+            q.round() as u8
+        })
+        .collect()
+}
+
+/// Sample per-base qualities for a Nanopore R10 read.
+///
+/// Produces a profile centred around Q20 with higher variance than HiFi.
+/// Nanopore R10 achieves approximately Q20–Q25 accuracy.
+pub fn sample_nanopore_r10_qualities<R: Rng>(length: usize, rng: &mut R) -> Vec<u8> {
+    (0..length)
+        .map(|_| {
+            // Q15–Q25 range; mode around Q20.
+            let q: f64 = rng.gen_range(15.0..=25.0_f64);
+            q.round() as u8
+        })
+        .collect()
+}
+
 /// Inject base-call errors consistent with quality scores.
 ///
 /// For each base, rolls a random number against the Phred error probability.
@@ -123,6 +151,48 @@ mod tests {
                 assert!((2..=41).contains(&q), "quality {} out of bounds", q);
             }
         }
+    }
+
+    #[test]
+    fn test_pacbio_hifi_quality_range() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let quals = sample_pacbio_hifi_qualities(1000, &mut rng);
+        assert_eq!(quals.len(), 1000);
+        for &q in &quals {
+            assert!(
+                (20..=30).contains(&q),
+                "PacBio HiFi quality {} out of range [20, 30]",
+                q
+            );
+        }
+        let mean = quals.iter().map(|&q| q as f64).sum::<f64>() / quals.len() as f64;
+        // Uniform over [20, 30] gives mean 25; allow ±1 with 1000 samples.
+        assert!(
+            (mean - 25.0).abs() < 1.5,
+            "PacBio HiFi mean quality {} not near 25",
+            mean
+        );
+    }
+
+    #[test]
+    fn test_nanopore_r10_quality_range() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let quals = sample_nanopore_r10_qualities(1000, &mut rng);
+        assert_eq!(quals.len(), 1000);
+        for &q in &quals {
+            assert!(
+                (15..=25).contains(&q),
+                "Nanopore R10 quality {} out of range [15, 25]",
+                q
+            );
+        }
+        let mean = quals.iter().map(|&q| q as f64).sum::<f64>() / quals.len() as f64;
+        // Uniform over [15, 25] gives mean 20; allow ±1 with 1000 samples.
+        assert!(
+            (mean - 20.0).abs() < 1.5,
+            "Nanopore R10 mean quality {} not near 20",
+            mean
+        );
     }
 
     #[test]

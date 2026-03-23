@@ -1,5 +1,6 @@
 pub mod capture;
 pub mod coverage;
+pub mod end_motifs;
 pub mod engine;
 pub mod error_profile;
 pub mod fragment;

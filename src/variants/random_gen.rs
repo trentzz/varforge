@@ -1,9 +1,14 @@
 use crate::core::types::{MutationType, Region, Variant};
+use crate::variants::signatures::{builtin_signature, sbs96_index, SignatureVec};
 use rand::Rng;
 
 const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
 
 /// Generate random mutations distributed across the given regions.
+///
+/// When `signature` is `Some`, SNV alt base selection is weighted by the SBS96
+/// probability vector for the trinucleotide context at each position.
+/// For indels and MNVs, alt bases are chosen uniformly regardless of signature.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_random_mutations<R: Rng>(
     regions: &[Region],
@@ -14,6 +19,7 @@ pub fn generate_random_mutations<R: Rng>(
     indel_fraction: f64,
     _mnv_fraction: f64,
     reference_lookup: &dyn Fn(&str, u64) -> Option<u8>,
+    signature: Option<&SignatureVec>,
     rng: &mut R,
 ) -> Vec<Variant> {
     let total_length: u64 = regions.iter().map(|r| r.len()).sum();
@@ -24,14 +30,14 @@ pub fn generate_random_mutations<R: Rng>(
     let mut variants = Vec::with_capacity(count);
 
     for _ in 0..count {
-        // Pick a random position within the regions
+        // Pick a random position within the regions.
         let rand_offset: u64 = rng.gen_range(0..total_length);
         let (chrom, pos) = offset_to_position(regions, rand_offset);
 
-        // Pick mutation type
+        // Pick mutation type.
         let type_roll: f64 = rng.gen();
         let mutation = if type_roll < snv_fraction {
-            generate_random_snv(&chrom, pos, reference_lookup, rng)
+            generate_random_snv(&chrom, pos, reference_lookup, signature, rng)
         } else if type_roll < snv_fraction + indel_fraction {
             generate_random_indel(&chrom, pos, reference_lookup, rng)
         } else {
@@ -45,11 +51,65 @@ pub fn generate_random_mutations<R: Rng>(
                 mutation,
                 expected_vaf: vaf,
                 clone_id: None,
+                haplotype: None,
             });
         }
     }
 
     variants
+}
+
+/// Resolve a named COSMIC SBS signature to its probability vector.
+///
+/// Returns `None` if the name is not recognised.
+pub fn resolve_signature(name: &str) -> Option<&'static SignatureVec> {
+    builtin_signature(name)
+}
+
+/// Choose an alt base using the SBS96 signature probabilities for the given context.
+///
+/// Returns the weighted alt base, or falls back to uniform selection if the
+/// signature or context is unavailable.
+pub fn signature_weighted_alt_base<R: Rng>(
+    ref_base: u8,
+    ctx_5p: u8,
+    ctx_3p: u8,
+    signature: &SignatureVec,
+    rng: &mut R,
+) -> u8 {
+    let alts: Vec<u8> = BASES
+        .iter()
+        .copied()
+        .filter(|&b| b != ref_base.to_ascii_uppercase())
+        .collect();
+
+    // For each alt, get the SBS96 weight.
+    let weights: Vec<f64> = alts
+        .iter()
+        .map(|&alt| {
+            if let Some(idx) = sbs96_index(ctx_5p, ref_base, alt, ctx_3p) {
+                signature[idx]
+            } else {
+                1.0 / 3.0 // uniform fallback
+            }
+        })
+        .collect();
+
+    let total: f64 = weights.iter().sum();
+    if total <= 0.0 {
+        // All weights zero: fall back to uniform.
+        return alts[rng.gen_range(0..alts.len())];
+    }
+
+    let r: f64 = rng.gen_range(0.0..total);
+    let mut cumulative = 0.0;
+    for (i, &w) in weights.iter().enumerate() {
+        cumulative += w;
+        if r < cumulative {
+            return alts[i];
+        }
+    }
+    *alts.last().unwrap()
 }
 
 fn offset_to_position(regions: &[Region], offset: u64) -> (String, u64) {
@@ -70,18 +130,38 @@ fn generate_random_snv<R: Rng>(
     _chrom: &str,
     pos: u64,
     reference_lookup: &dyn Fn(&str, u64) -> Option<u8>,
+    signature: Option<&SignatureVec>,
     rng: &mut R,
 ) -> Option<MutationType> {
     let ref_base = reference_lookup(_chrom, pos).unwrap_or(b'N');
     if ref_base == b'N' {
         return None;
     }
-    let alt_base = loop {
-        let b = BASES[rng.gen_range(0..4)];
-        if b != ref_base {
-            break b;
+
+    let alt_base = if let Some(sig) = signature {
+        // Fetch flanking bases for trinucleotide context.
+        let ctx_5p = reference_lookup(_chrom, pos.saturating_sub(1)).unwrap_or(b'N');
+        let ctx_3p = reference_lookup(_chrom, pos + 1).unwrap_or(b'N');
+        if ctx_5p != b'N' && ctx_3p != b'N' && pos > 0 {
+            signature_weighted_alt_base(ref_base, ctx_5p, ctx_3p, sig, rng)
+        } else {
+            // Context unavailable: fall back to uniform.
+            loop {
+                let b = BASES[rng.gen_range(0..4)];
+                if b != ref_base {
+                    break b;
+                }
+            }
+        }
+    } else {
+        loop {
+            let b = BASES[rng.gen_range(0..4)];
+            if b != ref_base {
+                break b;
+            }
         }
     };
+
     Some(MutationType::Snv {
         pos,
         ref_base,
@@ -163,6 +243,116 @@ fn generate_random_mnv<R: Rng>(
     })
 }
 
+/// Returns true if position `pos` in `seq` falls within a homopolymer run
+/// (four or more identical bases) or a dinucleotide repeat (three or more
+/// consecutive copies of a 2-mer).
+///
+/// Used to identify microsatellite-unstable loci for MSI indel generation.
+#[allow(dead_code)]
+pub fn is_repeat_locus(seq: &[u8], pos: usize) -> bool {
+    if seq.is_empty() || pos >= seq.len() {
+        return false;
+    }
+
+    // Check for a homopolymer run of length ≥ 4 that contains pos.
+    let base = seq[pos];
+    let run_start = seq[..pos]
+        .iter()
+        .rposition(|&b| b != base)
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let run_end = seq[pos..]
+        .iter()
+        .position(|&b| b != base)
+        .map(|i| i + pos)
+        .unwrap_or(seq.len());
+    if run_end - run_start >= 4 {
+        return true;
+    }
+
+    // Check for a dinucleotide repeat: the 2-mer starting at pos repeated ≥ 3 times.
+    if pos + 1 < seq.len() {
+        let di = [seq[pos], seq[pos + 1]];
+        let mut repeat_count = 1usize;
+        let mut check_pos = pos + 2;
+        while check_pos + 1 < seq.len() && seq[check_pos..check_pos + 2] == di {
+            repeat_count += 1;
+            check_pos += 2;
+        }
+        if repeat_count >= 3 {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Generate MSI-pattern indels: 1-bp insertions at homopolymer and
+/// dinucleotide repeat loci across the given regions.
+///
+/// Accepts up to `target_count` repeat-locus positions found within
+/// `max_attempts` random draws. Each variant is a 1-bp insertion that
+/// extends the repeat by one copy of the anchor base, at VAF 0.3.
+#[allow(dead_code)]
+pub fn generate_msi_indels<R: Rng>(
+    regions: &[Region],
+    reference_lookup: &dyn Fn(&str, u64) -> Option<u8>,
+    rng: &mut R,
+    target_count: usize,
+    max_attempts: usize,
+) -> Vec<Variant> {
+    let total_length: u64 = regions.iter().map(|r| r.len()).sum();
+    if total_length == 0 || target_count == 0 {
+        return Vec::new();
+    }
+
+    let mut variants = Vec::new();
+    let mut attempts = 0usize;
+
+    while variants.len() < target_count && attempts < max_attempts {
+        attempts += 1;
+
+        let rand_offset: u64 = rng.gen_range(0..total_length);
+        let (chrom, pos) = offset_to_position(regions, rand_offset);
+
+        // Fetch a small window around the position for repeat context detection.
+        let window_start = pos.saturating_sub(5);
+        let window_seq: Vec<u8> = (window_start..window_start + 12)
+            .filter_map(|p| reference_lookup(&chrom, p))
+            .collect();
+
+        let local_pos = (pos - window_start) as usize;
+        if local_pos >= window_seq.len() {
+            continue;
+        }
+
+        if !is_repeat_locus(&window_seq, local_pos) {
+            continue;
+        }
+
+        let ref_base = match reference_lookup(&chrom, pos) {
+            Some(b) if b != b'N' => b,
+            _ => continue,
+        };
+
+        // 1-bp insertion extending the repeat by one copy of the anchor base.
+        let alt_seq = vec![ref_base, ref_base];
+        variants.push(Variant {
+            chrom,
+            mutation: MutationType::Indel {
+                pos,
+                ref_seq: vec![ref_base],
+                alt_seq,
+            },
+            expected_vaf: 0.3,
+            clone_id: Some("msi".to_string()),
+            haplotype: None,
+        });
+    }
+
+    variants
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +378,7 @@ mod tests {
             0.15,
             0.05,
             &simple_ref_lookup,
+            None,
             &mut rng,
         );
         assert_eq!(variants.len(), 100);
@@ -206,6 +397,7 @@ mod tests {
             0.15,
             0.05,
             &simple_ref_lookup,
+            None,
             &mut rng,
         );
         for v in &variants {
@@ -227,6 +419,7 @@ mod tests {
             0.15,
             0.05,
             &simple_ref_lookup,
+            None,
             &mut rng,
         );
 
@@ -277,6 +470,7 @@ mod tests {
             0.0,
             0.0,
             &simple_ref_lookup,
+            None,
             &mut rng,
         );
         for v in &variants {
@@ -301,6 +495,7 @@ mod tests {
             0.15,
             0.05,
             &simple_ref_lookup,
+            None,
             &mut rng,
         );
         assert!(variants.is_empty());
@@ -321,6 +516,7 @@ mod tests {
             0.15,
             0.05,
             &simple_ref_lookup,
+            None,
             &mut rng1,
         );
         let v2 = generate_random_mutations(
@@ -332,6 +528,7 @@ mod tests {
             0.15,
             0.05,
             &simple_ref_lookup,
+            None,
             &mut rng2,
         );
 

@@ -116,7 +116,10 @@ fn preset_lung_adeno() -> PresetOverlay {
                 snv_fraction: 0.85,
                 indel_fraction: 0.10,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_signature: None,
+            sv_count: 0,
         }),
         ..Default::default()
     }
@@ -142,7 +145,10 @@ fn preset_colorectal() -> PresetOverlay {
                 snv_fraction: 0.82,
                 indel_fraction: 0.13,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_signature: None,
+            sv_count: 0,
         }),
         ..Default::default()
     }
@@ -168,7 +174,10 @@ fn preset_breast_tnbc() -> PresetOverlay {
                 snv_fraction: 0.75,
                 indel_fraction: 0.20,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_signature: None,
+            sv_count: 0,
         }),
         artifacts: Some(ArtifactConfig {
             ffpe_damage_rate: None,
@@ -200,7 +209,10 @@ fn preset_melanoma() -> PresetOverlay {
                 snv_fraction: 0.88,
                 indel_fraction: 0.05,
                 mnv_fraction: 0.07,
+                signature: None,
             }),
+            sv_signature: None,
+            sv_count: 0,
         }),
         ..Default::default()
     }
@@ -226,7 +238,10 @@ fn preset_aml() -> PresetOverlay {
                 snv_fraction: 0.80,
                 indel_fraction: 0.15,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_signature: None,
+            sv_count: 0,
         }),
         ..Default::default()
     }
@@ -251,7 +266,10 @@ fn preset_prostate() -> PresetOverlay {
                 snv_fraction: 0.82,
                 indel_fraction: 0.13,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_signature: None,
+            sv_count: 0,
         }),
         ..Default::default()
     }
@@ -276,7 +294,10 @@ fn preset_pancreatic() -> PresetOverlay {
                 snv_fraction: 0.82,
                 indel_fraction: 0.13,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_signature: None,
+            sv_count: 0,
         }),
         ..Default::default()
     }
@@ -301,7 +322,10 @@ fn preset_glioblastoma() -> PresetOverlay {
                 snv_fraction: 0.82,
                 indel_fraction: 0.13,
                 mnv_fraction: 0.05,
+                signature: None,
             }),
+            sv_signature: None,
+            sv_count: 0,
         }),
         ..Default::default()
     }
@@ -594,6 +618,8 @@ mod tests {
                 bam: false,
                 truth_vcf: false,
                 manifest: false,
+                germline_vcf: false,
+                single_read_bam: false,
             },
             sample: SampleConfig::default(),
             fragment: FragmentConfig::default(),
@@ -611,6 +637,11 @@ mod tests {
             samples: None,
             capture: None,
             performance: Default::default(),
+            preset: None,
+            vafs: None,
+            germline: None,
+            paired: None,
+            contamination: None,
         }
     }
 

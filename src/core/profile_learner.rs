@@ -420,6 +420,94 @@ fn read_length_from_header(header: &sam::Header) -> Option<usize> {
 }
 
 // ---------------------------------------------------------------------------
+// TSV serialisation / deserialisation
+// ---------------------------------------------------------------------------
+
+/// Serialise a quality-by-cycle matrix to a TSV file.
+///
+/// Rows correspond to read positions (cycles). Columns correspond to raw
+/// Phred quality values 0–93. Values are probability weights.
+/// The header row is: `cycle\tq0\tq1\t…\tq93`.
+pub fn write_quality_tsv(profile: &ProfileJson, path: &std::path::Path) -> anyhow::Result<()> {
+    use std::io::Write as _;
+    let f = std::fs::File::create(path)
+        .with_context(|| format!("failed to create profile TSV: {}", path.display()))?;
+    let mut w = std::io::BufWriter::new(f);
+
+    // Header.
+    let mut header = "cycle".to_string();
+    for q in 0u8..=93 {
+        header.push_str(&format!("\tq{}", q));
+    }
+    writeln!(w, "{}", header)?;
+
+    for (cycle, entries) in profile.quality_distribution.read1.iter().enumerate() {
+        // Build a dense weight array indexed by quality value.
+        let mut weights = vec![0.0f64; 94];
+        for entry in entries {
+            let q = entry[0] as usize;
+            if q < 94 {
+                weights[q] = entry[1];
+            }
+        }
+        let mut row = cycle.to_string();
+        for &wt in &weights {
+            row.push_str(&format!("\t{:.6}", wt));
+        }
+        writeln!(w, "{}", row)?;
+    }
+
+    w.flush()?;
+    Ok(())
+}
+
+/// Deserialise a quality-by-cycle TSV into a per-cycle distribution.
+///
+/// Returns a `Vec` of `[quality, weight]` entry lists per cycle, in the same
+/// format used by `ProfileJson.quality_distribution.read1`.
+/// Positions with no non-zero weight fall back to a single Q30 entry.
+pub fn read_quality_tsv(path: &std::path::Path) -> anyhow::Result<Vec<Vec<[f64; 2]>>> {
+    use std::io::BufRead as _;
+    let f = std::fs::File::open(path)
+        .with_context(|| format!("failed to open profile TSV: {}", path.display()))?;
+    let reader = std::io::BufReader::new(f);
+    let mut lines = reader.lines();
+
+    // Skip header row.
+    lines
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("profile TSV is empty"))??;
+
+    let mut distribution = Vec::new();
+    for line in lines {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        // fields[0] is the cycle index; fields[1..] are weights for q0..q93.
+        let mut entries: Vec<[f64; 2]> = fields[1..]
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| {
+                let w: f64 = s.trim().parse().unwrap_or(0.0);
+                if w > 0.0 {
+                    Some([i as f64, w])
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if entries.is_empty() {
+            entries.push([30.0, 1.0]); // fallback to Q30
+        }
+        distribution.push(entries);
+    }
+
+    Ok(distribution)
+}
+
+// ---------------------------------------------------------------------------
 // BAM builder helpers (used in tests)
 // ---------------------------------------------------------------------------
 
