@@ -20,3 +20,4 @@ These features cover the long tail of real tumour biology that basic SNV/indel s
 - T042: Add 4-mer end motif frequency table; implement rejection sampling in fragment generation
 - T048: Add `tumour.msi: true`; implement microsatellite-enriched indel generation
 - T049: Bundle hg38 microsatellite loci BED as an optional static asset
+- T067: Integrate ClonalTree into simulation engine (mutation inheritance, VAF validation)
