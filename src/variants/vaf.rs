@@ -140,4 +140,49 @@ mod tests {
             "binomial sampling should produce variable counts"
         );
     }
+
+    #[test]
+    fn test_ultra_low_vaf_unbiased_2000x() {
+        // At depth=2000, VAF=0.0001, the expected mean alt count is 0.2 per read.
+        // Verify the binomial sampler is unbiased at ultra-low VAF over 100,000 trials.
+        let mut rng = StdRng::seed_from_u64(42);
+        let n = 100_000u64;
+        let total: u64 = (0..n)
+            .map(|_| sample_alt_count(2000, 0.0001, &mut rng) as u64)
+            .sum();
+        let mean = total as f64 / n as f64;
+        assert!(
+            mean >= 0.15 && mean <= 0.25,
+            "mean {} should be 0.2 ± 0.05 for ultra-low VAF at 2000x",
+            mean
+        );
+    }
+
+    #[test]
+    fn test_ultra_low_vaf_unbiased_5000x() {
+        // At depth=5000, VAF=0.00001, the expected mean alt count is 0.05 per read.
+        // Verify the binomial sampler is unbiased at extremely low VAF over 100,000 trials.
+        let mut rng = StdRng::seed_from_u64(43);
+        let n = 100_000u64;
+        let total: u64 = (0..n)
+            .map(|_| sample_alt_count(5000, 0.00001, &mut rng) as u64)
+            .sum();
+        let mean = total as f64 / n as f64;
+        assert!(
+            mean >= 0.03 && mean <= 0.07,
+            "mean {} should be 0.05 ± 0.02 for ultra-low VAF at 5000x",
+            mean
+        );
+    }
+
+    #[test]
+    fn test_vaf_1_all_alt() {
+        // At VAF=1.0 every read must be an alt. The sampler should short-circuit and
+        // return total_depth without invoking the binomial distribution.
+        let mut rng = StdRng::seed_from_u64(44);
+        for _ in 0..100 {
+            let count = sample_alt_count(100, 1.0, &mut rng);
+            assert_eq!(count, 100, "VAF=1.0 must always yield all alt reads");
+        }
+    }
 }

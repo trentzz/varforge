@@ -283,6 +283,19 @@ impl BamWriter {
         let mut r2_qual_rev = pair.read2.qual.clone();
         r2_qual_rev.reverse();
 
+        // Compute MD strings. R1 compares forward read against forward reference.
+        // R2 is stored as RC, so the reference must also be RC for comparison.
+        let md_r1 = build_md_string(&pair.read1.seq, &pair.ref_seq_r1);
+        let ref_r2_rc = crate::seq_utils::reverse_complement(&pair.ref_seq_r2);
+        let md_r2 = build_md_string(&r2_seq_rc, &ref_r2_rc);
+
+        // Insert MD tags into the auxiliary data for each read.
+        let mut data_r1 = data_r1;
+        data_r1.insert(Tag::MISMATCHED_POSITIONS, Value::from(md_r1.as_str()));
+
+        let mut data_r2 = data_r2;
+        data_r2.insert(Tag::MISMATCHED_POSITIONS, Value::from(md_r2.as_str()));
+
         let r1 = build_record(
             &pair.name,
             flags_r1,
@@ -341,6 +354,46 @@ impl BamWriter {
             .write_alignment_record(header, record)
             .context("failed to write BAM record")
     }
+}
+
+/// Build the MD tag string for a single read.
+///
+/// The MD string encodes positions where the read differs from the reference.
+/// Matching bases are counted and emitted as integers. Each mismatch emits the
+/// current match count (even if zero) followed by the reference base at that
+/// position, then resets the count.
+///
+/// If `ref_seq` is empty, the function returns the read length as a decimal
+/// string, indicating all bases match (no reference available).
+///
+/// # Examples
+///
+/// - All 150 bp match: `"150"`
+/// - Mismatch at position 50 (ref base A): `"50A99"`
+/// - Mismatch at position 0 (ref base T): `"0T149"`
+pub fn build_md_string(read_seq: &[u8], ref_seq: &[u8]) -> String {
+    if ref_seq.is_empty() {
+        return read_seq.len().to_string();
+    }
+
+    let mut result = String::new();
+    let mut match_count: usize = 0;
+
+    for (&read_base, &ref_base) in read_seq.iter().zip(ref_seq.iter()) {
+        // Compare uppercase to handle any lowercase reference bases.
+        if read_base.eq_ignore_ascii_case(&ref_base) {
+            match_count += 1;
+        } else {
+            // Emit accumulated match count, then the mismatched reference base.
+            result.push_str(&match_count.to_string());
+            result.push(ref_base.to_ascii_uppercase() as char);
+            match_count = 0;
+        }
+    }
+
+    // Emit any trailing matches.
+    result.push_str(&match_count.to_string());
+    result
 }
 
 /// Parse a CIGAR string like `"150M"` or `"5M2I143M"` into a list of [`Op`]s.
@@ -647,6 +700,60 @@ mod tests {
         assert_eq!(ops[1].len(), 2);
         assert_eq!(ops[2].kind(), Kind::Match);
         assert_eq!(ops[2].len(), 143);
+    }
+
+    // --- MD tag unit tests ---
+
+    #[test]
+    fn test_md_all_match() {
+        // 50 bp read where every base matches the reference.
+        let seq = vec![b'A'; 50];
+        let ref_seq = vec![b'A'; 50];
+        assert_eq!(build_md_string(&seq, &ref_seq), "50");
+    }
+
+    #[test]
+    fn test_md_single_snv() {
+        // Read is all A's. Reference has T at position 5 (0-based).
+        // MD should be: 5 matches, ref base T, 5 more matches → "5T5".
+        let read = b"AAAAAAAAAAA";
+        let mut ref_seq = b"AAAAAAAAAAA".to_vec();
+        ref_seq[5] = b'T';
+        assert_eq!(build_md_string(read, &ref_seq), "5T5");
+    }
+
+    #[test]
+    fn test_md_empty_ref() {
+        // Empty reference: return read length as all-match string.
+        let read = vec![b'A'; 150];
+        assert_eq!(build_md_string(&read, &[]), "150");
+    }
+
+    #[test]
+    fn test_md_mismatch_at_start() {
+        // Mismatch at position 0: "0" + ref_base + remaining_matches.
+        let read = b"ACGT";
+        let ref_seq = b"TCGT";
+        assert_eq!(build_md_string(read, ref_seq), "0T3");
+    }
+
+    #[test]
+    fn test_md_mismatch_at_end() {
+        // Mismatch at last position.
+        let read = b"ACGT";
+        let ref_seq = b"ACGA";
+        assert_eq!(build_md_string(read, ref_seq), "3A0");
+    }
+
+    #[test]
+    fn test_md_multiple_mismatches() {
+        // Mismatches at positions 1 and 3.
+        // read:  A C G T
+        // ref:   A T G A
+        // MD:    1T1A0
+        let read = b"ACGT";
+        let ref_seq = b"ATGA";
+        assert_eq!(build_md_string(read, ref_seq), "1T1A0");
     }
 
     #[test]
