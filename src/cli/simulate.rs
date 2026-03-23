@@ -370,7 +370,7 @@ pub(crate) fn run_single_sample(
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0)
     });
-    let variants = build_variant_list(&cfg, &regions, &reference, seed)?;
+    let variants = build_variant_list(&cfg, &regions, &reference, seed, None)?;
     tracing::info!("prepared {} variants for spike-in", variants.len());
 
     // -----------------------------------------------------------------------
@@ -1084,6 +1084,25 @@ fn run_multi_sample(cfg: Config, reference: ReferenceGenome, start_time: Instant
         })?;
     }
 
+    // Generate shared germline variants once from the first sample's config.
+    // All samples in a multi-sample (longitudinal) run represent the same patient,
+    // so the germline must be identical across timepoints.
+    let shared_germline: Arc<Vec<Variant>> = if let Some(first) = resolved.first() {
+        let first_cfg = &first.config;
+        let first_chroms = build_chrom_list(first_cfg, &reference)?;
+        let first_regions = partition_regions(&first_chroms, DEFAULT_CHUNK_SIZE);
+        let seed = first_cfg.seed.unwrap_or(0);
+        let germ = build_germline_variant_list(first_cfg, &first_regions, &reference, seed)
+            .context("failed to generate shared germline variant list")?;
+        tracing::info!(
+            "generated {} shared germline variants for all samples",
+            germ.len()
+        );
+        Arc::new(germ)
+    } else {
+        Arc::new(Vec::new())
+    };
+
     // Simulate each sample in parallel.  rayon's work-stealing scheduler
     // handles the nested parallelism inside each `run_sample_simulation` call.
     let manifest_entries: Vec<SampleManifestEntry> = resolved
@@ -1103,8 +1122,11 @@ fn run_multi_sample(cfg: Config, reference: ReferenceGenome, start_time: Instant
 
             let ref_for_sample = reference.clone();
             let sample_start = Instant::now();
-            let (total_pairs, applied_count) =
-                run_sample_simulation(sample.config.clone(), ref_for_sample)?;
+            let (total_pairs, applied_count) = run_sample_simulation(
+                sample.config.clone(),
+                ref_for_sample,
+                Some(&shared_germline),
+            )?;
 
             tracing::info!(
                 "sample '{}' complete: {} read pairs, {} variants, {:.2}s",
@@ -1323,12 +1345,16 @@ fn write_batch_manifest(root_dir: &std::path::Path, rows: &[BatchManifestRow]) -
 }
 
 /// Run the simulation for one sample config and return (total_read_pairs, applied_variant_count).
-fn run_sample_simulation(cfg: Config, reference: ReferenceGenome) -> Result<(u64, usize)> {
+fn run_sample_simulation(
+    cfg: Config,
+    reference: ReferenceGenome,
+    shared_germline: Option<&[Variant]>,
+) -> Result<(u64, usize)> {
     let chrom_lengths = build_chrom_list(&cfg, &reference)?;
     let regions = partition_regions(&chrom_lengths, DEFAULT_CHUNK_SIZE);
 
     let seed = cfg.seed.unwrap_or(0);
-    let variants = build_variant_list(&cfg, &regions, &reference, seed)?;
+    let variants = build_variant_list(&cfg, &regions, &reference, seed, shared_germline)?;
 
     let capture_model: Option<Arc<CaptureModel>> = build_capture_model(&cfg)?;
 
@@ -1922,14 +1948,23 @@ fn build_germline_variant_list(
 }
 
 /// Build the full variant list (somatic + germline + contamination) from config.
+///
+/// If `shared_germline` is provided, it is used in place of generating germline
+/// variants from config. This allows multi-sample runs to share a single germline
+/// set across all timepoints, ensuring consistent germline positions.
 fn build_variant_list(
     cfg: &Config,
     regions: &[Region],
     reference: &ReferenceGenome,
     seed: u64,
+    shared_germline: Option<&[Variant]>,
 ) -> Result<Vec<Variant>> {
     let mut variants = build_somatic_variant_list(cfg, regions, reference, seed)?;
-    let germline = build_germline_variant_list(cfg, regions, reference, seed)?;
+    let germline = if let Some(germ) = shared_germline {
+        germ.to_vec()
+    } else {
+        build_germline_variant_list(cfg, regions, reference, seed)?
+    };
     variants.extend(germline);
 
     // Load contamination variants when the contamination block is configured.
