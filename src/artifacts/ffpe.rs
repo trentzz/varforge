@@ -180,4 +180,58 @@ mod tests {
             middle
         );
     }
+
+    // T064: Boundary tests for end_enrichment.
+
+    #[test]
+    fn test_end_enrichment_length_one() {
+        // The only position in a length-1 read must return a value in [0.0, 1.0+].
+        let v = end_enrichment(0, 1);
+        assert!(
+            v >= 0.0 && v.is_finite(),
+            "length=1, pos=0 must be finite: {v}"
+        );
+    }
+
+    #[test]
+    fn test_end_enrichment_start_is_maximum() {
+        // The start of the read should have maximum (or near-maximum) enrichment.
+        let v_start = end_enrichment(0, 100);
+        let v_mid = end_enrichment(50, 100);
+        assert!(
+            v_start > v_mid,
+            "pos=0 enrichment ({v_start}) should exceed interior ({v_mid})"
+        );
+    }
+
+    #[test]
+    fn test_end_enrichment_end_symmetric_to_start() {
+        // The function is symmetric: pos=0 and pos=length-1 should give the same value.
+        let v_start = end_enrichment(0, 100);
+        let v_end = end_enrichment(99, 100);
+        assert!(
+            (v_start - v_end).abs() < 1e-10,
+            "pos=0 ({v_start}) and pos=99 ({v_end}) should be equal by symmetry"
+        );
+    }
+
+    #[test]
+    fn test_end_enrichment_interior_is_minimum() {
+        // Interior position should have the lowest enrichment of all positions.
+        let v_mid = end_enrichment(50, 100);
+        let v_quarter = end_enrichment(25, 100);
+        assert!(
+            v_mid < v_quarter,
+            "interior ({v_mid}) should be less than quarter ({v_quarter})"
+        );
+    }
+
+    #[test]
+    fn test_end_enrichment_no_underflow() {
+        // Verify no panic at boundary positions.
+        let _ = end_enrichment(0, 100);
+        let _ = end_enrichment(99, 100);
+        let _ = end_enrichment(50, 100);
+        let _ = end_enrichment(0, 1);
+    }
 }

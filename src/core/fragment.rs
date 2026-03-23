@@ -116,12 +116,12 @@ pub fn sample_long_read_length<R: Rng>(cfg: &LongReadFragmentConfig, rng: &mut R
 }
 
 /// PCR family size sampler using a log-normal distribution.
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO(T104): remove once wired into UMI family generation
 pub struct PcrFamilySizeSampler {
     dist: LogNormal<f64>,
 }
 
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO(T104): remove once wired into UMI family generation
 impl PcrFamilySizeSampler {
     pub fn new(mean: f64, sd: f64) -> Self {
         // Convert mean/sd of the actual family size to log-space parameters
