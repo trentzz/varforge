@@ -22,7 +22,7 @@ use crate::io::config::{Config, FragmentModel};
 use crate::io::reference::ReferenceGenome;
 use crate::seq_utils::reverse_complement;
 use crate::umi::barcode::{generate_duplex_umi_pair, generate_umi};
-use crate::umi::families::{generate_pcr_copies, sample_family_size, UmiFamily};
+use crate::umi::families::{generate_pcr_copies, UmiFamily};
 use crate::variants::cnv::{adjusted_coverage, find_cn_region, CopyNumberRegion};
 use crate::variants::spike_in::spike_indel;
 use crate::variants::structural::{
@@ -686,6 +686,11 @@ impl SimulationEngine {
                 .and_then(|a| a.pcr_error_rate)
                 .unwrap_or(0.0);
 
+            // Construct sampler once; log-space conversion is non-trivial so
+            // avoid repeating it for every read pair.
+            let family_sampler =
+                crate::core::fragment::PcrFamilySizeSampler::new(family_mean, family_sd);
+
             let mut families: Vec<ReadPair> = Vec::new();
             for mut pair in read_pairs {
                 if is_duplex {
@@ -699,7 +704,7 @@ impl SimulationEngine {
 
                     // AB strand: original orientation.
                     pair.name = format!("{}:UMI:{}", pair.name, ab_str);
-                    let family_size = sample_family_size(family_mean, family_sd, &mut self.rng);
+                    let family_size = family_sampler.sample(&mut self.rng);
                     let ab_family = UmiFamily {
                         umi: umi_a,
                         original: pair.clone(),
@@ -737,7 +742,7 @@ impl SimulationEngine {
                         ref_seq_r1: pair.ref_seq_r2.iter().copied().rev().collect(),
                         ref_seq_r2: pair.ref_seq_r1.iter().copied().rev().collect(),
                     };
-                    let ba_family_size = sample_family_size(family_mean, family_sd, &mut self.rng);
+                    let ba_family_size = family_sampler.sample(&mut self.rng);
                     let ba_family = UmiFamily {
                         umi: umi_b,
                         original: ba_pair,
@@ -751,7 +756,7 @@ impl SimulationEngine {
                     let umi_str = String::from_utf8_lossy(&umi).into_owned();
                     pair.name = format!("{}:UMI:{}", pair.name, umi_str);
 
-                    let family_size = sample_family_size(family_mean, family_sd, &mut self.rng);
+                    let family_size = family_sampler.sample(&mut self.rng);
                     let family = UmiFamily {
                         umi,
                         original: pair,
