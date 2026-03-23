@@ -1053,6 +1053,50 @@ pub(crate) fn run_single_sample(
             });
         }
 
+        // Capture uniformity metrics (T111).
+        // achieved_coverage_cv is the theoretical CV of the LogNormal model
+        // parameterised by coverage_uniformity (σ): CV = sqrt(exp(σ²) - 1).
+        // achieved_on_target_fraction is 1.0 - off_target_fraction.
+        if let Some(ref cap_cfg) = cfg.capture {
+            if cap_cfg.enabled {
+                let uniformity = cap_cfg.coverage_uniformity;
+                let achieved_cv = (f64::exp(uniformity * uniformity) - 1.0).sqrt();
+                let achieved_cv_rounded = (achieved_cv * 10000.0).round() / 10000.0;
+                let achieved_on_target = (1.0 - cap_cfg.off_target_fraction).clamp(0.0, 1.0);
+                let achieved_on_target_rounded = (achieved_on_target * 10000.0).round() / 10000.0;
+
+                // Warn if either target is not met.
+                if let Some(cv_target) = cap_cfg.coverage_cv_target {
+                    if achieved_cv > cv_target {
+                        tracing::warn!(
+                            "capture coverage CV {:.4} exceeds target {:.4}; \
+                             reduce coverage_uniformity to improve uniformity",
+                            achieved_cv,
+                            cv_target,
+                        );
+                    }
+                }
+                if let Some(ot_target) = cap_cfg.on_target_fraction_target {
+                    if achieved_on_target < ot_target {
+                        tracing::warn!(
+                            "on-target fraction {:.4} is below target {:.4}; \
+                             reduce off_target_fraction to improve enrichment",
+                            achieved_on_target,
+                            ot_target,
+                        );
+                    }
+                }
+
+                report["capture"] = serde_json::json!({
+                    "enabled": true,
+                    "achieved_coverage_cv": achieved_cv_rounded,
+                    "achieved_on_target_fraction": achieved_on_target_rounded,
+                    "coverage_cv_target": cap_cfg.coverage_cv_target,
+                    "on_target_fraction_target": cap_cfg.on_target_fraction_target,
+                });
+            }
+        }
+
         let report_path = out_dir.join("sim_report.json");
         let report_pretty =
             serde_json::to_string_pretty(&report).context("failed to serialise sim_report")?;
@@ -2939,5 +2983,33 @@ mod tests {
         assert_eq!(entries[2].0.chrom, "chr2");
         assert_eq!(entries[2].0.start, 0);
         assert_eq!(entries[2].0.end, 1000);
+    }
+
+    // -----------------------------------------------------------------------
+    // Capture CV formula tests (T111)
+    //
+    // The achieved coverage CV is sqrt(exp(σ²) - 1) where σ is
+    // coverage_uniformity.  At σ=0 the CV must be exactly 0.0 (perfectly
+    // uniform); at σ=0.5 it must be well above 0.1.
+    // -----------------------------------------------------------------------
+
+    fn capture_cv(uniformity: f64) -> f64 {
+        (f64::exp(uniformity * uniformity) - 1.0).sqrt()
+    }
+
+    #[test]
+    fn test_capture_cv_zero_uniformity_gives_zero_cv() {
+        let cv = capture_cv(0.0);
+        assert_eq!(cv, 0.0, "CV must be exactly 0.0 at uniformity=0.0");
+    }
+
+    #[test]
+    fn test_capture_cv_half_uniformity_exceeds_threshold() {
+        let cv = capture_cv(0.5);
+        assert!(
+            cv > 0.1,
+            "CV at uniformity=0.5 should be > 0.1, got {:.4}",
+            cv
+        );
     }
 }
