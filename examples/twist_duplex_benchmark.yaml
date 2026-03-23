@@ -1,0 +1,105 @@
+# twist_duplex_benchmark.yaml — Twist Biosciences duplex benchmarking scenario
+#
+# Reference benchmark configuration for evaluating duplex consensus pipelines
+# (fgbio, HUMID) and low-VAF variant callers (Mutect2, VarDict, Strelka2) on
+# Twist Biosciences hybrid-capture duplex UMI sequencing data.
+#
+# Sequencing model (Twist Comprehensive Exome Panel parameters):
+#   - 2 000× raw coverage → ~500× duplex consensus depth
+#   - 9 bp inline dual UMIs with duplex orientation encoding
+#   - Fragment sizes centred at 170 bp, SD 30 bp (plasma-compatible)
+#   - PCR amplification: 10 cycles, mean family size 3.5×
+#
+# Variant load:
+#   - 50 SNVs at VAF 0.001–0.05 (ctDNA-relevant ultra-low frequency)
+#   - 10 indels at VAF 0.005–0.05
+#   - 5 HRD-signature SVs at VAF 0.01–0.1
+#
+# Success criteria (see docs/features/twist-duplex-benchmarking.md):
+#   - Duplex conversion rate  >= 90 %
+#   - AB/BA strand concordance >= 95 % per variant
+#   - VAF accuracy: |observed - expected| < 20 % of expected VAF
+#   - On-target fraction >= 95 %
+#   - Coverage CV <= 0.25 across targets
+#
+# Run:
+#   varforge simulate --config examples/twist_duplex_benchmark.yaml \
+#     --set reference=/path/to/hg38.fa \
+#     --set output_dir=/path/to/output \
+#     --set targets_bed=examples/twist_duplex_benchmark_targets.bed
+#
+# Downstream consensus calling (fgbio example):
+#   fgbio GroupReadsByUmi \
+#     --input=output/TWIST_DUPLEX.bam \
+#     --strategy=adjacency --edits=1 \
+#     --output=grouped.bam
+#   fgbio CallDuplexConsensusReads \
+#     --input=grouped.bam --output=consensus.bam \
+#     --min-reads=1 1 1
+
+reference: ${reference}
+
+output:
+  directory: ${output_dir}
+  fastq: true
+  bam: true
+  truth_vcf: true
+  manifest: true
+
+sample:
+  name: TWIST_DUPLEX
+  read_length: 150
+  coverage: 2000.0
+  platform: illumina
+
+fragment:
+  model: normal
+  mean: 170.0
+  sd: 30.0
+
+quality:
+  mean_quality: 37
+  tail_decay: 0.002
+
+tumour:
+  purity: 1.0
+  ploidy: 2
+
+mutations:
+  random:
+    # 60 small mutations: ~50 SNVs (83 %) and ~10 indels (17 %).
+    # VAF range 0.001–0.05 covers the ultra-low ctDNA detection window
+    # targeted by Twist duplex sequencing (LOD ~0.1 % at 2000x raw coverage).
+    count: 60
+    vaf_min: 0.001
+    vaf_max: 0.05
+    snv_fraction: 0.833
+    indel_fraction: 0.167
+    mnv_fraction: 0.0
+  # HRD-signature SVs: large deletions characteristic of BRCA1/2 and HR-deficient
+  # tumours. VAF 0.01–0.1 tests SV caller sensitivity in duplex data.
+  sv_signature: HRD
+  sv_count: 5
+
+umi:
+  length: 9
+  duplex: true
+  pcr_cycles: 10
+  family_size_mean: 3.5
+  family_size_sd: 1.5
+  inline: true
+
+capture:
+  enabled: true
+  # Provide a BED file of capture targets. The example file contains 100
+  # synthetic targets on chr1. Replace with the actual panel BED for
+  # production benchmarking.
+  targets_bed: ${targets_bed}
+  off_target_fraction: 0.03
+  coverage_uniformity: 0.15
+  edge_dropoff_bases: 50
+  coverage_cv_target: 0.25
+  on_target_fraction_target: 0.95
+
+seed: 2024
+threads: 8
