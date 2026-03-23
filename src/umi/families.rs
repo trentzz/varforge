@@ -1,5 +1,4 @@
 use rand::Rng;
-use rand_distr::{Distribution, LogNormal};
 
 use crate::core::types::ReadPair;
 
@@ -54,16 +53,6 @@ fn inject_pcr_errors(seq: &mut [u8], rate: f64, rng: &mut impl Rng) {
             }
         }
     }
-}
-
-/// Sample a family size from a log-normal distribution.
-pub fn sample_family_size(mean: f64, sd: f64, rng: &mut impl Rng) -> usize {
-    let variance = sd * sd;
-    let mu = (mean * mean / (mean * mean + variance).sqrt()).ln();
-    let sigma = (1.0 + variance / (mean * mean)).ln().sqrt();
-    let dist = LogNormal::new(mu, sigma).expect("invalid lognormal params");
-    let size = dist.sample(rng).round() as usize;
-    size.max(1)
 }
 
 #[cfg(test)]
@@ -144,13 +133,13 @@ mod tests {
     }
 
     #[test]
-    fn test_sample_family_size() {
+    fn test_pcr_family_size_sampler() {
+        use crate::core::fragment::PcrFamilySizeSampler;
+        let sampler = PcrFamilySizeSampler::new(3.0, 1.5);
         let mut rng = StdRng::seed_from_u64(42);
-        let sizes: Vec<usize> = (0..10000)
-            .map(|_| sample_family_size(3.0, 1.5, &mut rng))
-            .collect();
+        let sizes: Vec<usize> = (0..10000).map(|_| sampler.sample(&mut rng)).collect();
 
-        assert!(sizes.iter().all(|&s| s >= 1));
+        assert!(sizes.iter().all(|&s| s >= 1), "no family size should be 0");
         let mean = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;
         assert!((mean - 3.0).abs() < 1.0, "mean {} too far from 3.0", mean);
     }
