@@ -36,6 +36,12 @@ pub struct RegionOutput {
     pub read_pairs: Vec<ReadPair>,
     /// Variants that were actually spiked into at least one read.
     pub applied_variants: Vec<AppliedVariant>,
+    /// Total molecules (original read pairs) that entered the duplex UMI path.
+    /// Zero when duplex mode is not active.
+    pub duplex_total_molecules: u64,
+    /// Molecules for which both AB and BA strand families were produced.
+    /// In simulation this always equals duplex_total_molecules (no library losses).
+    pub duplex_molecules_with_both_strands: u64,
 }
 
 /// Tracks actual alt and total depths for a spiked variant.
@@ -673,6 +679,9 @@ impl SimulationEngine {
         }
 
         // ---- UMI / PCR families ----
+        let mut duplex_total_molecules: u64 = 0;
+        let mut duplex_molecules_with_both_strands: u64 = 0;
+
         if let Some(ref umi_cfg) = self.config.umi {
             let umi_len = umi_cfg.length;
             let family_mean = umi_cfg.family_size_mean;
@@ -694,6 +703,10 @@ impl SimulationEngine {
             let mut families: Vec<ReadPair> = Vec::new();
             for mut pair in read_pairs {
                 if is_duplex {
+                    // Track molecule counts for duplex conversion rate (T108).
+                    duplex_total_molecules += 1;
+                    duplex_molecules_with_both_strands += 1; // always both strands in simulation
+
                     // Generate an AB/BA duplex pair.
                     // AB UMI is "AAAA-BBBB"; BA UMI is the halves swapped.
                     let (umi_a, umi_b) = generate_duplex_umi_pair(umi_len, &mut self.rng);
@@ -815,6 +828,8 @@ impl SimulationEngine {
         Ok(RegionOutput {
             read_pairs,
             applied_variants,
+            duplex_total_molecules,
+            duplex_molecules_with_both_strands,
         })
     }
 }

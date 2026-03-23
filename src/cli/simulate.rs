@@ -32,6 +32,8 @@ struct RegionBatch {
     region: Region,
     read_pairs: Vec<ReadPair>,
     applied_variants: Vec<AppliedVariant>,
+    duplex_total_molecules: u64,
+    duplex_molecules_with_both_strands: u64,
 }
 
 /// Statistics returned by the writer thread.
@@ -46,6 +48,10 @@ struct WriterStats {
     // Collected for future use; not yet surfaced in output.
     #[allow(dead_code)]
     duplicate_rate: f64,
+    /// Total duplex molecules simulated (T108).
+    duplex_total_molecules: u64,
+    /// Duplex molecules where both AB and BA strands were generated (T108).
+    duplex_molecules_with_both_strands: u64,
 }
 
 /// Default chunk size for partitioning regions (~1 Mbp).
@@ -497,6 +503,8 @@ pub(crate) fn run_single_sample(
     let writer_handle = std::thread::spawn(move || -> Result<WriterStats> {
         let mut total_read_pairs: u64 = 0;
         let mut all_applied: Vec<AppliedVariant> = Vec::new();
+        let mut duplex_total_molecules: u64 = 0;
+        let mut duplex_molecules_with_both_strands: u64 = 0;
         // Accumulate read pairs per chromosome for coverage computation.
         let mut chrom_read_pairs: std::collections::HashMap<String, u64> =
             std::collections::HashMap::new();
@@ -616,6 +624,8 @@ pub(crate) fn run_single_sample(
                 .entry(batch.region.chrom.clone())
                 .or_insert(0) += batch_pairs;
             all_applied.extend(batch.applied_variants);
+            duplex_total_molecules += batch.duplex_total_molecules;
+            duplex_molecules_with_both_strands += batch.duplex_molecules_with_both_strands;
         }
 
         // Compute mean coverage per chromosome from accumulated pair counts.
@@ -656,6 +666,8 @@ pub(crate) fn run_single_sample(
             all_applied,
             chrom_coverage,
             duplicate_rate,
+            duplex_total_molecules,
+            duplex_molecules_with_both_strands,
         })
     });
 
@@ -682,6 +694,8 @@ pub(crate) fn run_single_sample(
                 region: region.clone(),
                 read_pairs: output.read_pairs,
                 applied_variants: output.applied_variants,
+                duplex_total_molecules: output.duplex_total_molecules,
+                duplex_molecules_with_both_strands: output.duplex_molecules_with_both_strands,
             })
             .map_err(|e| anyhow::anyhow!("writer channel closed: {}", e))?;
             pb_ref.inc(1);
@@ -702,6 +716,8 @@ pub(crate) fn run_single_sample(
     let all_applied = stats.all_applied;
     let chrom_coverage = stats.chrom_coverage;
     let duplicate_rate = stats.duplicate_rate;
+    let duplex_total_molecules = stats.duplex_total_molecules;
+    let duplex_molecules_with_both_strands = stats.duplex_molecules_with_both_strands;
 
     // -----------------------------------------------------------------------
     // Write truth VCF with all applied variants
@@ -947,17 +963,77 @@ pub(crate) fn run_single_sample(
             }
         }
 
+        // Duplex conversion rate: fraction of molecules for which both AB and
+        // BA strand families were generated (T108). In simulation this is always
+        // 1.0 when duplex is active; the field is included so downstream tools
+        // can parse a consistent schema.
+        let duplex_conversion_rate: Option<f64> =
+            if cfg.umi.as_ref().map(|u| u.duplex).unwrap_or(false) && duplex_total_molecules > 0 {
+                let rate =
+                    duplex_molecules_with_both_strands as f64 / duplex_total_molecules as f64;
+                Some((rate * 10000.0).round() / 10000.0)
+            } else {
+                None
+            };
+
         let umi_obj = if let Some(ref umi) = cfg.umi {
             serde_json::json!({
                 "enabled": true,
                 "estimated_duplicate_rate": (duplicate_rate * 10000.0).round() / 10000.0,
                 "family_size_mean": umi.family_size_mean,
+                "duplex_total_molecules": duplex_total_molecules,
+                "duplex_conversion_rate": duplex_conversion_rate,
             })
         } else {
             serde_json::json!({ "enabled": false })
         };
 
-        let report = serde_json::json!({
+        // Compute per-variant strand concordance (T107).
+        // strand_concordance = duplex_alt_count / actual_alt_count (duplex mode only).
+        let is_duplex = cfg.umi.as_ref().map(|u| u.duplex).unwrap_or(false);
+        let variants_arr: serde_json::Value = if is_duplex {
+            let variant_entries: Vec<serde_json::Value> = all_applied
+                .iter()
+                .map(|av| {
+                    let concordance = if av.actual_alt_count > 0 {
+                        av.duplex_alt_count as f64 / av.actual_alt_count as f64
+                    } else {
+                        1.0
+                    };
+                    serde_json::json!({
+                        "chrom": av.variant.chrom,
+                        "pos": av.variant.pos(),
+                        "n_alt_mol": av.actual_alt_count,
+                        "n_duplex_alt": av.duplex_alt_count,
+                        "strand_concordance": (concordance * 10000.0).round() / 10000.0,
+                    })
+                })
+                .collect();
+            serde_json::Value::Array(variant_entries)
+        } else {
+            serde_json::Value::Null
+        };
+
+        // Overall strand concordance: weighted mean across all variants.
+        let overall_strand_concordance: Option<f64> = if is_duplex {
+            let total_alt: u64 = all_applied
+                .iter()
+                .map(|av| av.actual_alt_count as u64)
+                .sum();
+            let total_duplex: u64 = all_applied
+                .iter()
+                .map(|av| av.duplex_alt_count as u64)
+                .sum();
+            if total_alt > 0 {
+                Some((total_duplex as f64 / total_alt as f64 * 10000.0).round() / 10000.0)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let mut report = serde_json::json!({
             "total_read_pairs": total_read_pairs,
             "sample_name": sample_name,
             "target_coverage": cfg.sample.coverage,
@@ -969,6 +1045,13 @@ pub(crate) fn run_single_sample(
             },
             "umi": umi_obj,
         });
+
+        if is_duplex {
+            report["strand_concordance"] = serde_json::json!({
+                "per_variant": variants_arr,
+                "overall": overall_strand_concordance,
+            });
+        }
 
         let report_path = out_dir.join("sim_report.json");
         let report_pretty =
@@ -1419,6 +1502,8 @@ fn run_sample_simulation(
     let writer_handle = std::thread::spawn(move || -> Result<WriterStats> {
         let mut total_read_pairs: u64 = 0;
         let mut all_applied: Vec<AppliedVariant> = Vec::new();
+        let mut duplex_total_molecules: u64 = 0;
+        let mut duplex_molecules_with_both_strands: u64 = 0;
         // Accumulate read pairs per chromosome for coverage computation.
         let mut chrom_read_pairs: std::collections::HashMap<String, u64> =
             std::collections::HashMap::new();
@@ -1538,6 +1623,8 @@ fn run_sample_simulation(
                 .entry(batch.region.chrom.clone())
                 .or_insert(0) += batch_pairs;
             all_applied.extend(batch.applied_variants);
+            duplex_total_molecules += batch.duplex_total_molecules;
+            duplex_molecules_with_both_strands += batch.duplex_molecules_with_both_strands;
         }
 
         // Compute mean coverage per chromosome from accumulated pair counts.
@@ -1578,6 +1665,8 @@ fn run_sample_simulation(
             all_applied,
             chrom_coverage,
             duplicate_rate,
+            duplex_total_molecules,
+            duplex_molecules_with_both_strands,
         })
     });
 
@@ -1600,6 +1689,8 @@ fn run_sample_simulation(
                 region: region.clone(),
                 read_pairs: output.read_pairs,
                 applied_variants: output.applied_variants,
+                duplex_total_molecules: output.duplex_total_molecules,
+                duplex_molecules_with_both_strands: output.duplex_molecules_with_both_strands,
             })
             .map_err(|e| anyhow::anyhow!("writer channel closed: {}", e))?;
             Ok::<(), anyhow::Error>(())
