@@ -18,7 +18,7 @@
 # Run:
 #   varforge simulate --config examples/high_depth.yaml
 
-reference: /data/ref/hg38.fa
+reference: ${reference}  # set with --set reference=/path/to/hg38.fa
 
 output:
   directory: out/high_depth
@@ -71,7 +71,7 @@ chromosomes:
 
 capture:
   enabled: true
-  targets_bed: /data/panels/hotspot_panel.bed
+  targets_bed: ${targets_bed}  # set with --set targets_bed=/path/to/panel.bed
   off_target_fraction: 0.05
   coverage_uniformity: 0.25
   edge_dropoff_bases: 30

@@ -450,7 +450,7 @@ impl SimulationEngine {
                     }
                 }
                 // Check if this fragment overlaps the variant position.
-                let var_pos = variant_position(variant);
+                let var_pos = variant.pos();
                 if var_pos < frag_start || var_pos >= frag_end {
                     continue;
                 }
@@ -911,18 +911,8 @@ fn variant_overlaps_region(variant: &Variant, region: &Region) -> bool {
     if variant.chrom != region.chrom {
         return false;
     }
-    let pos = variant_position(variant);
+    let pos = variant.pos();
     pos >= region.start && pos < region.end
-}
-
-/// Extract the primary genomic position from a variant.
-fn variant_position(variant: &Variant) -> u64 {
-    match &variant.mutation {
-        MutationType::Snv { pos, .. } => *pos,
-        MutationType::Indel { pos, .. } => *pos,
-        MutationType::Mnv { pos, .. } => *pos,
-        MutationType::Sv { start, .. } => *start,
-    }
 }
 
 /// Apply a variant's mutation to a fragment sequence in-place.
@@ -1498,7 +1488,7 @@ mod tests {
         let in_region_applied = output
             .applied_variants
             .iter()
-            .find(|av| variant_position(&av.variant) == 100);
+            .find(|av| av.variant.pos() == 100);
 
         // Variant at pos 100 with 50x coverage and VAF=0.3 should be applied.
         if let Some(av) = in_region_applied {
@@ -1513,7 +1503,7 @@ mod tests {
         let out_applied = output
             .applied_variants
             .iter()
-            .any(|av| variant_position(&av.variant) == 999);
+            .any(|av| av.variant.pos() == 999);
         assert!(!out_applied, "out-of-region variant should not be applied");
     }
 

@@ -126,79 +126,13 @@ impl BamWriter {
         cigar_r1: &str,
         cigar_r2: &str,
     ) -> Result<()> {
-        // Positions in noodles are 1-based
-        let pos1 = Position::new(pos as usize + 1)
-            .ok_or_else(|| anyhow::anyhow!("invalid alignment position"))?;
-
-        // For read 2 we place it after read 1's span on the reference
-        let r1_ref_span = cigar_ref_span(cigar_r1);
-        let pos2_val = pos as usize + r1_ref_span + 1;
-        let pos2 = Position::new(pos2_val)
-            .ok_or_else(|| anyhow::anyhow!("invalid mate alignment position"))?;
-
-        let mapq = MappingQuality::new(60).expect("60 is a valid mapping quality");
-        let template_len = pair.fragment_length as i32;
-
-        // Build data fields shared by both reads
         let data_r1: Data = [(Tag::READ_GROUP, Value::from(self.sample_name.as_str()))]
             .into_iter()
             .collect();
-
         let data_r2: Data = [(Tag::READ_GROUP, Value::from(self.sample_name.as_str()))]
             .into_iter()
             .collect();
-
-        // Flags for R1: paired, properly segmented, mate reverse, first segment
-        let flags_r1 = Flags::SEGMENTED
-            | Flags::PROPERLY_SEGMENTED
-            | Flags::MATE_REVERSE_COMPLEMENTED
-            | Flags::FIRST_SEGMENT;
-
-        // Flags for R2: paired, properly segmented, reverse complemented, last segment
-        let flags_r2 = Flags::SEGMENTED
-            | Flags::PROPERLY_SEGMENTED
-            | Flags::REVERSE_COMPLEMENTED
-            | Flags::LAST_SEGMENT;
-
-        let cigar_ops_r1 =
-            parse_cigar(cigar_r1).with_context(|| format!("failed to parse CIGAR: {cigar_r1}"))?;
-        let cigar_ops_r2 =
-            parse_cigar(cigar_r2).with_context(|| format!("failed to parse CIGAR: {cigar_r2}"))?;
-
-        let r1 = RecordBuf::builder()
-            .set_name(pair.name.as_str())
-            .set_flags(flags_r1)
-            .set_reference_sequence_id(ref_id)
-            .set_alignment_start(pos1)
-            .set_mapping_quality(mapq)
-            .set_cigar(cigar_ops_r1.into_iter().collect::<Cigar>())
-            .set_mate_reference_sequence_id(ref_id)
-            .set_mate_alignment_start(pos2)
-            .set_template_length(template_len)
-            .set_sequence(Sequence::from(pair.read1.seq.as_slice()))
-            .set_quality_scores(QualityScores::from(pair.read1.qual.clone()))
-            .set_data(data_r1)
-            .build();
-
-        let r2 = RecordBuf::builder()
-            .set_name(pair.name.as_str())
-            .set_flags(flags_r2)
-            .set_reference_sequence_id(ref_id)
-            .set_alignment_start(pos2)
-            .set_mapping_quality(mapq)
-            .set_cigar(cigar_ops_r2.into_iter().collect::<Cigar>())
-            .set_mate_reference_sequence_id(ref_id)
-            .set_mate_alignment_start(pos1)
-            .set_template_length(-template_len)
-            .set_sequence(Sequence::from(pair.read2.seq.as_slice()))
-            .set_quality_scores(QualityScores::from(pair.read2.qual.clone()))
-            .set_data(data_r2)
-            .build();
-
-        self.emit(&r1)?;
-        self.emit(&r2)?;
-
-        Ok(())
+        self.write_pair_inner(pair, ref_id, pos, cigar_r1, cigar_r2, data_r1, data_r2)
     }
 
     /// Write a single aligned read to the BAM file.
@@ -264,10 +198,44 @@ impl BamWriter {
         umi: &str,
         family_id: i32,
     ) -> Result<()> {
-        // Positions in noodles are 1-based
+        let data_r1: Data = [
+            (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
+            (Tag::UMI_SEQUENCE, Value::from(umi)),
+            (Tag::UMI_ID, Value::from(family_id)),
+        ]
+        .into_iter()
+        .collect();
+        let data_r2: Data = [
+            (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
+            (Tag::UMI_SEQUENCE, Value::from(umi)),
+            (Tag::UMI_ID, Value::from(family_id)),
+        ]
+        .into_iter()
+        .collect();
+        self.write_pair_inner(pair, ref_id, pos, cigar_r1, cigar_r2, data_r1, data_r2)
+    }
+
+    /// Build and emit a paired-end read pair with caller-supplied per-read data fields.
+    ///
+    /// This is the single place that sets alignment positions, flags, CIGAR, sequence,
+    /// and quality scores for a pair. Both `write_pair` and `write_pair_with_umi`
+    /// delegate here, passing only the data fields that differ between them.
+    #[allow(clippy::too_many_arguments)]
+    fn write_pair_inner(
+        &mut self,
+        pair: &crate::core::types::ReadPair,
+        ref_id: usize,
+        pos: u64,
+        cigar_r1: &str,
+        cigar_r2: &str,
+        data_r1: Data,
+        data_r2: Data,
+    ) -> Result<()> {
+        // Positions in noodles are 1-based.
         let pos1 = Position::new(pos as usize + 1)
             .ok_or_else(|| anyhow::anyhow!("invalid alignment position"))?;
 
+        // Place read 2 immediately after read 1's reference span.
         let r1_ref_span = cigar_ref_span(cigar_r1);
         let pos2_val = pos as usize + r1_ref_span + 1;
         let pos2 = Position::new(pos2_val)
@@ -276,11 +244,13 @@ impl BamWriter {
         let mapq = MappingQuality::new(60).expect("60 is a valid mapping quality");
         let template_len = pair.fragment_length as i32;
 
+        // Flags for R1: paired, properly segmented, mate reverse, first segment.
         let flags_r1 = Flags::SEGMENTED
             | Flags::PROPERLY_SEGMENTED
             | Flags::MATE_REVERSE_COMPLEMENTED
             | Flags::FIRST_SEGMENT;
 
+        // Flags for R2: paired, properly segmented, reverse complemented, last segment.
         let flags_r2 = Flags::SEGMENTED
             | Flags::PROPERLY_SEGMENTED
             | Flags::REVERSE_COMPLEMENTED
@@ -291,51 +261,33 @@ impl BamWriter {
         let cigar_ops_r2 =
             parse_cigar(cigar_r2).with_context(|| format!("failed to parse CIGAR: {cigar_r2}"))?;
 
-        let data_r1: Data = [
-            (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
-            (Tag::UMI_SEQUENCE, Value::from(umi)),
-            (Tag::UMI_ID, Value::from(family_id)),
-        ]
-        .into_iter()
-        .collect();
+        let r1 = build_record(
+            &pair.name,
+            flags_r1,
+            ref_id,
+            pos1,
+            pos2,
+            mapq,
+            cigar_ops_r1,
+            template_len,
+            &pair.read1.seq,
+            pair.read1.qual.clone(),
+            data_r1,
+        );
 
-        let data_r2: Data = [
-            (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
-            (Tag::UMI_SEQUENCE, Value::from(umi)),
-            (Tag::UMI_ID, Value::from(family_id)),
-        ]
-        .into_iter()
-        .collect();
-
-        let r1 = RecordBuf::builder()
-            .set_name(pair.name.as_str())
-            .set_flags(flags_r1)
-            .set_reference_sequence_id(ref_id)
-            .set_alignment_start(pos1)
-            .set_mapping_quality(mapq)
-            .set_cigar(cigar_ops_r1.into_iter().collect::<Cigar>())
-            .set_mate_reference_sequence_id(ref_id)
-            .set_mate_alignment_start(pos2)
-            .set_template_length(template_len)
-            .set_sequence(Sequence::from(pair.read1.seq.as_slice()))
-            .set_quality_scores(QualityScores::from(pair.read1.qual.clone()))
-            .set_data(data_r1)
-            .build();
-
-        let r2 = RecordBuf::builder()
-            .set_name(pair.name.as_str())
-            .set_flags(flags_r2)
-            .set_reference_sequence_id(ref_id)
-            .set_alignment_start(pos2)
-            .set_mapping_quality(mapq)
-            .set_cigar(cigar_ops_r2.into_iter().collect::<Cigar>())
-            .set_mate_reference_sequence_id(ref_id)
-            .set_mate_alignment_start(pos1)
-            .set_template_length(-template_len)
-            .set_sequence(Sequence::from(pair.read2.seq.as_slice()))
-            .set_quality_scores(QualityScores::from(pair.read2.qual.clone()))
-            .set_data(data_r2)
-            .build();
+        let r2 = build_record(
+            &pair.name,
+            flags_r2,
+            ref_id,
+            pos2,
+            pos1,
+            mapq,
+            cigar_ops_r2,
+            -template_len,
+            &pair.read2.seq,
+            pair.read2.qual.clone(),
+            data_r2,
+        );
 
         self.emit(&r1)?;
         self.emit(&r2)?;
@@ -412,6 +364,54 @@ fn cigar_ref_span(cigar_str: &str) -> usize {
         .iter()
         .filter_map(|op| op.kind().consumes_reference().then_some(op.len()))
         .sum()
+}
+
+/// Build a single SAM/BAM alignment record.
+///
+/// Centralises all record construction so that `write_pair_inner` does not
+/// repeat the builder chain twice. The caller is responsible for choosing the
+/// correct flags, positions, CIGAR ops, and data fields for each read in the
+/// pair.
+///
+/// - `name`: read name (QNAME)
+/// - `flags`: SAM flags for this read
+/// - `ref_id`: 0-based reference sequence index
+/// - `align_start`: 1-based alignment start position (noodles convention)
+/// - `mate_start`: 1-based mate alignment start position
+/// - `mapq`: mapping quality
+/// - `cigar_ops`: parsed CIGAR operations
+/// - `template_len`: signed template length (negative for R2)
+/// - `seq`: read sequence as raw bytes
+/// - `qual`: base quality scores
+/// - `data`: auxiliary data fields (RG, RX, MI, …)
+#[allow(clippy::too_many_arguments)]
+fn build_record(
+    name: &str,
+    flags: Flags,
+    ref_id: usize,
+    align_start: Position,
+    mate_start: Position,
+    mapq: MappingQuality,
+    cigar_ops: Vec<Op>,
+    template_len: i32,
+    seq: &[u8],
+    qual: Vec<u8>,
+    data: Data,
+) -> RecordBuf {
+    RecordBuf::builder()
+        .set_name(name)
+        .set_flags(flags)
+        .set_reference_sequence_id(ref_id)
+        .set_alignment_start(align_start)
+        .set_mapping_quality(mapq)
+        .set_cigar(cigar_ops.into_iter().collect::<Cigar>())
+        .set_mate_reference_sequence_id(ref_id)
+        .set_mate_alignment_start(mate_start)
+        .set_template_length(template_len)
+        .set_sequence(Sequence::from(seq))
+        .set_quality_scores(QualityScores::from(qual))
+        .set_data(data)
+        .build()
 }
 
 #[cfg(test)]

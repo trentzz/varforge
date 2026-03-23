@@ -1032,8 +1032,59 @@ pub fn validate(config: &Config) -> Result<()> {
         }
     }
 
+    // T083: warn when reads are longer than fragments (produces artifactual overlapping pairs).
+    if config.sample.read_length > config.fragment.mean as usize {
+        tracing::warn!(
+            read_length = config.sample.read_length,
+            fragment_mean = config.fragment.mean,
+            "read_length exceeds fragment mean: reads will overlap, \
+             producing artifactual paired-end overlap"
+        );
+    }
+
+    // T084: capture BED path existence check.
+    if let Some(ref capture) = config.capture {
+        if let Some(ref bed) = capture.targets_bed {
+            anyhow::ensure!(
+                bed.exists(),
+                "capture targets_bed file not found: {}",
+                bed.display()
+            );
+        }
+    }
+
+    // T085: UMI length must be less than read length.
     if let Some(umi) = &config.umi {
         anyhow::ensure!(umi.length > 0, "UMI length must be > 0");
+        anyhow::ensure!(
+            umi.length < config.sample.read_length,
+            "UMI length ({}) must be less than read_length ({})",
+            umi.length,
+            config.sample.read_length
+        );
+    }
+
+    // T086: validate copy number region strings.
+    if let Some(ref cn_regions) = config.copy_number {
+        for cn in cn_regions {
+            parse_region(&cn.region).with_context(|| {
+                format!(
+                    "invalid copy_number region '{}': must be chrom:start-end",
+                    cn.region
+                )
+            })?;
+        }
+    }
+
+    // T088: mutations VCF path existence check.
+    if let Some(ref mutations) = config.mutations {
+        if let Some(ref vcf_path) = mutations.vcf {
+            anyhow::ensure!(
+                vcf_path.exists(),
+                "mutations vcf file not found: {}",
+                vcf_path.display()
+            );
+        }
     }
 
     if let Some(vafs) = &config.vafs {

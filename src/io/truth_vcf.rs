@@ -220,7 +220,12 @@ impl TruthVcfWriter {
 impl Variant {
     /// 0-based genomic position of the variant.
     pub fn pos(&self) -> u64 {
-        variant_pos(self)
+        match &self.mutation {
+            MutationType::Snv { pos, .. } => *pos,
+            MutationType::Indel { pos, .. } => *pos,
+            MutationType::Mnv { pos, .. } => *pos,
+            MutationType::Sv { start, .. } => *start,
+        }
     }
 
     /// Variant type string for the VARTYPE INFO field.
@@ -231,16 +236,6 @@ impl Variant {
             MutationType::Mnv { .. } => "MNV",
             MutationType::Sv { .. } => "SV",
         }
-    }
-}
-
-/// Free-function equivalent of `Variant::pos()` for use in other modules.
-pub fn variant_pos(v: &Variant) -> u64 {
-    match &v.mutation {
-        MutationType::Snv { pos, .. } => *pos,
-        MutationType::Indel { pos, .. } => *pos,
-        MutationType::Mnv { pos, .. } => *pos,
-        MutationType::Sv { start, .. } => *start,
     }
 }
 

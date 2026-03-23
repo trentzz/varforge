@@ -14,7 +14,7 @@
 # Run:
 #   varforge simulate --config examples/ffpe_artifacts.yaml
 
-reference: /data/ref/hg38.fa
+reference: ${reference}  # set with --set reference=/path/to/hg38.fa
 
 output:
   directory: out/ffpe_artifacts

@@ -1,19 +1,21 @@
 # tumor_normal.yaml — Matched tumour/normal pair
 #
-# Generates a two-sample matched pair: one tumour sample and one germline
-# normal.  The normal has no somatic mutations (tumour_fraction: 0.0),
-# while the tumour carries all configured somatic variants.
+# Uses multi-sample mode (samples: key) to generate two samples from a
+# shared clonal architecture: one tumour and one germline normal.
 #
-# This is the standard input format for paired variant callers such as
-# Mutect2, Strelka2, and VarDict in somatic mode.
+# The normal sample sets tumour_fraction: 0.0, so it receives no somatic
+# mutations. The tumour sample sets tumour_fraction: 1.0 to apply the full
+# configured purity.
 #
-# Both samples are produced in the same output directory, each in its own
-# sub-directory.  The manifest.tsv lists both samples with their roles.
+# Both samples are written to the same output directory, each in its own
+# sub-directory. The manifest.tsv lists both samples with their roles.
+# This layout is the standard input for paired somatic variant callers such
+# as Mutect2, Strelka2, and VarDict.
 #
 # Run:
 #   varforge simulate --config examples/tumor_normal.yaml
 
-reference: /data/ref/hg38.fa
+reference: ${reference}  # set with --set reference=/path/to/hg38.fa
 
 output:
   directory: out/tumor_normal
@@ -48,7 +50,7 @@ mutations:
     indel_fraction: 0.15
     mnv_fraction: 0.05
 
-# Two-sample series: tumour and matched normal.
+# Multi-sample series: tumour and matched normal.
 samples:
   - name: TUMOUR
     coverage: 60.0

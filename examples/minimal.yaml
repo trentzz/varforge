@@ -12,7 +12,7 @@
 # Run:
 #   varforge simulate --config examples/minimal.yaml
 
-reference: /data/ref/hg38.fa
+reference: ${reference}  # set with --set reference=/path/to/hg38.fa
 
 output:
   directory: out/minimal

@@ -18,7 +18,7 @@
 # To generate a suitable VCF, see the COSMIC cancer gene census or
 # download ClinVar pathogenic somatic variants.
 
-reference: /data/ref/hg38.fa
+reference: ${reference}  # set with --set reference=/path/to/hg38.fa
 
 output:
   directory: out/custom_mutations
@@ -50,9 +50,9 @@ tumour:
       ccf: 1.0
 
 # VCF-based mutation injection.
-# The file must be bgzip-compressed and tabix-indexed for large inputs.
+# Plain VCF files are accepted directly. No bgzip compression or tabix index required.
 mutations:
-  vcf: /data/mutations/hotspot_panel.vcf.gz
+  vcf: ${mutations_vcf}  # set with --set mutations_vcf=/path/to/variants.vcf
   # Optional: also add random background mutations on top of the VCF variants.
   # Remove or comment out the block below to use VCF only.
   random:

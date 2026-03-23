@@ -12,7 +12,7 @@
 # Run:
 #   varforge simulate --config examples/panel_umi.yaml
 
-reference: /data/ref/hg38.fa
+reference: ${reference}  # set with --set reference=/path/to/hg38.fa
 
 output:
   directory: out/panel_umi
@@ -59,7 +59,7 @@ umi:
 
 capture:
   enabled: true
-  targets_bed: /data/panels/cancer_panel_v2.bed
+  targets_bed: ${targets_bed}  # set with --set targets_bed=/path/to/panel.bed
   off_target_fraction: 0.05
   coverage_uniformity: 0.3
   edge_dropoff_bases: 50
