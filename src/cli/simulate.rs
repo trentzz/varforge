@@ -27,6 +27,40 @@ use crate::variants::random_gen::{
 };
 use crate::variants::structural::StructuralVariant;
 
+/// Extract the UMI barcode from a read name that contains `:UMI:<barcode>`.
+///
+/// Read names produced by the engine follow the pattern:
+///   `<base>:UMI:<barcode>:pcr:<n>`
+///
+/// This function returns the barcode segment between the first `:UMI:` marker
+/// and the next `:` (or the end of the string). Returns `None` when no UMI
+/// marker is present.
+fn extract_umi_from_name(name: &str) -> Option<&str> {
+    let start = name.find(":UMI:")?;
+    let umi_region = &name[start + 5..];
+    let end = umi_region.find(':').unwrap_or(umi_region.len());
+    Some(&umi_region[..end])
+}
+
+/// Derive a stable molecular family ID from a read name.
+///
+/// All PCR copies of the same original molecule share the same base name
+/// (everything before the `:pcr:N` suffix). Assigning the same family ID to
+/// all copies allows downstream tools to group them as one UMI family.
+///
+/// The family ID is assigned from the `family_ids` map: if the base name has
+/// not been seen before, a new sequential ID is allocated and stored.
+fn family_id_for(name: &str, family_ids: &mut std::collections::HashMap<String, i32>) -> i32 {
+    // Strip the `:pcr:N` suffix to get the base name shared by all copies.
+    let base = if let Some(pos) = name.rfind(":pcr:") {
+        &name[..pos]
+    } else {
+        name
+    };
+    let next_id = family_ids.len() as i32;
+    *family_ids.entry(base.to_string()).or_insert(next_id)
+}
+
 /// A batch of generated reads for one region, sent through the streaming channel.
 struct RegionBatch {
     region: Region,
@@ -511,6 +545,10 @@ pub(crate) fn run_single_sample(
         // Accumulate read pairs per chromosome for coverage computation.
         let mut chrom_read_pairs: std::collections::HashMap<String, u64> =
             std::collections::HashMap::new();
+        // Track molecular family IDs for UMI-tagged BAM output. All PCR
+        // copies of the same original molecule share one entry in this map.
+        let mut family_ids: std::collections::HashMap<String, i32> =
+            std::collections::HashMap::new();
 
         // Primer trim amount: only active in amplicon mode.
         let primer_trim = writer_cfg
@@ -565,6 +603,7 @@ pub(crate) fn run_single_sample(
                     .position(|(name, _)| *name == batch.region.chrom)
                     .unwrap_or(0);
                 let read_len = writer_cfg.sample.read_length;
+                let umi_enabled = writer_cfg.umi.is_some();
                 if writer_cfg.output.single_read_bam {
                     // Long-read mode: write one record per read pair (read1 only).
                     for pair in &batch.read_pairs {
@@ -582,6 +621,34 @@ pub(crate) fn run_single_sample(
                         };
                         bam.write_single_read(pair, ref_id, pair.fragment_start, &cigar)
                             .context("failed to write BAM single read record")?;
+                    }
+                } else if umi_enabled {
+                    // UMI mode: write RX and MI auxiliary tags on every record.
+                    for pair in &batch.read_pairs {
+                        let actual_len = pair.read1.seq.len();
+                        let cigar = if primer_trim > 0 && actual_len > 2 * primer_trim + 10 {
+                            // Soft-clip primer bases at both ends.
+                            format!(
+                                "{}S{}M{}S",
+                                primer_trim,
+                                actual_len - 2 * primer_trim,
+                                primer_trim
+                            )
+                        } else {
+                            format!("{}M", read_len)
+                        };
+                        let umi = extract_umi_from_name(&pair.name).unwrap_or("");
+                        let fid = family_id_for(&pair.name, &mut family_ids);
+                        bam.write_pair_with_umi(
+                            pair,
+                            ref_id,
+                            pair.fragment_start,
+                            &cigar,
+                            &cigar,
+                            umi,
+                            fid,
+                        )
+                        .context("failed to write BAM record")?;
                     }
                 } else {
                     for pair in &batch.read_pairs {
@@ -737,10 +804,6 @@ pub(crate) fn run_single_sample(
         let mut agg: std::collections::HashMap<String, (crate::core::types::Variant, u32, u32)> =
             std::collections::HashMap::new();
         for av in &all_applied {
-            // Skip contamination variants: they are not ground-truth somatic events.
-            if av.variant.clone_id.as_deref() == Some("contamination") {
-                continue;
-            }
             let key = variant_key(&av.variant);
             let entry = agg.entry(key).or_insert_with(|| (av.variant.clone(), 0, 0));
             entry.1 = entry.1.saturating_add(av.actual_alt_count);
@@ -1559,6 +1622,10 @@ fn run_sample_simulation(
         // Accumulate read pairs per chromosome for coverage computation.
         let mut chrom_read_pairs: std::collections::HashMap<String, u64> =
             std::collections::HashMap::new();
+        // Track molecular family IDs for UMI-tagged BAM output. All PCR
+        // copies of the same original molecule share one entry in this map.
+        let mut family_ids: std::collections::HashMap<String, i32> =
+            std::collections::HashMap::new();
 
         // Primer trim amount: only active in amplicon mode.
         let primer_trim = writer_cfg
@@ -1613,6 +1680,7 @@ fn run_sample_simulation(
                     .position(|(name, _)| *name == batch.region.chrom)
                     .unwrap_or(0);
                 let read_len = writer_cfg.sample.read_length;
+                let umi_enabled = writer_cfg.umi.is_some();
                 if writer_cfg.output.single_read_bam {
                     // Long-read mode: write one record per read pair (read1 only).
                     for pair in &batch.read_pairs {
@@ -1630,6 +1698,34 @@ fn run_sample_simulation(
                         };
                         bam.write_single_read(pair, ref_id, pair.fragment_start, &cigar)
                             .context("failed to write BAM single read record")?;
+                    }
+                } else if umi_enabled {
+                    // UMI mode: write RX and MI auxiliary tags on every record.
+                    for pair in &batch.read_pairs {
+                        let actual_len = pair.read1.seq.len();
+                        let cigar = if primer_trim > 0 && actual_len > 2 * primer_trim + 10 {
+                            // Soft-clip primer bases at both ends.
+                            format!(
+                                "{}S{}M{}S",
+                                primer_trim,
+                                actual_len - 2 * primer_trim,
+                                primer_trim
+                            )
+                        } else {
+                            format!("{}M", read_len)
+                        };
+                        let umi = extract_umi_from_name(&pair.name).unwrap_or("");
+                        let fid = family_id_for(&pair.name, &mut family_ids);
+                        bam.write_pair_with_umi(
+                            pair,
+                            ref_id,
+                            pair.fragment_start,
+                            &cigar,
+                            &cigar,
+                            umi,
+                            fid,
+                        )
+                        .context("failed to write BAM record")?;
                     }
                 } else {
                     for pair in &batch.read_pairs {
@@ -2093,7 +2189,7 @@ fn build_germline_variant_list(
     Ok(variants)
 }
 
-/// Build the full variant list (somatic + germline + contamination) from config.
+/// Build the full variant list (somatic + germline) from config.
 ///
 /// If `shared_germline` is provided, it is used in place of generating germline
 /// variants from config. This allows multi-sample runs to share a single germline
@@ -2112,91 +2208,6 @@ fn build_variant_list(
         build_germline_variant_list(cfg, regions, reference, seed)?
     };
     variants.extend(germline);
-
-    // Load contamination variants when the contamination block is configured.
-    if let Some(ref cont_cfg) = cfg.contamination {
-        if cont_cfg.fraction > 0.0 {
-            if let Some(ref vcf_path) = cont_cfg.vcf {
-                // T040: VCF-source contamination.
-                // Load donor SNPs and override each variant's VAF with the
-                // contamination fraction.
-                let chrom_lengths = reference.chromosome_lengths();
-                let known_chroms: Vec<String> = chrom_lengths.keys().cloned().collect();
-                let result = vcf_input::parse_vcf(vcf_path, Some(&known_chroms), None)
-                    .with_context(|| {
-                        format!("failed to parse contamination VCF: {}", vcf_path.display())
-                    })?;
-
-                let cont_fraction = cont_cfg.fraction;
-                let contamination_variants: Vec<Variant> = result
-                    .variants
-                    .into_iter()
-                    .map(|mut v| {
-                        v.expected_vaf = cont_fraction;
-                        v.clone_id = Some("contamination".to_string());
-                        v
-                    })
-                    .collect();
-
-                tracing::info!(
-                    "loaded {} contamination variants at fraction {:.4}",
-                    contamination_variants.len(),
-                    cont_fraction
-                );
-
-                variants.extend(contamination_variants);
-            } else {
-                // T041: BAM-source contamination.
-                // Generate random donor-like SNVs at a sparse density to
-                // represent cross-sample contamination without a specific donor.
-                use rand::rngs::StdRng;
-                use rand::SeedableRng;
-
-                let total_bp: u64 = regions.iter().map(|r| r.len()).sum();
-                // Approximate number of contamination SNVs: keep the list
-                // sparse so the variant engine is not overwhelmed.
-                let approx_count = ((total_bp as f64 * cfg.sample.coverage * cont_cfg.fraction
-                    / cfg.sample.read_length as f64
-                    / 100.0) as usize)
-                    .clamp(1, 1000);
-
-                let mut cont_rng = StdRng::seed_from_u64(seed.wrapping_add(10));
-                let lookup = |chrom: &str, pos: u64| -> Option<u8> {
-                    let region = Region::new(chrom, pos, pos + 1);
-                    reference
-                        .sequence(&region)
-                        .ok()
-                        .and_then(|seq| seq.into_iter().next())
-                };
-
-                let cont_fraction = cont_cfg.fraction;
-                let mut cont_variants = generate_random_mutations(
-                    regions,
-                    approx_count,
-                    cont_fraction,
-                    cont_fraction + 1e-9,
-                    1.0,
-                    0.0,
-                    0.0,
-                    &lookup,
-                    None,
-                    &mut cont_rng,
-                );
-
-                for v in &mut cont_variants {
-                    v.clone_id = Some("contamination".to_string());
-                }
-
-                tracing::info!(
-                    "generated {} random contamination variants at fraction {:.4}",
-                    cont_variants.len(),
-                    cont_fraction
-                );
-
-                variants.extend(cont_variants);
-            }
-        }
-    }
 
     Ok(variants)
 }
@@ -2698,7 +2709,6 @@ mod tests {
             vafs: None,
             germline: None,
             paired: None,
-            contamination: None,
         };
 
         let master_seed = 42u64;
@@ -2811,7 +2821,6 @@ mod tests {
             vafs: None,
             germline: None,
             paired: None,
-            contamination: None,
         }
     }
 

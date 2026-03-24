@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::io::Write;
-use std::path::Path;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use noodles_bgzf as bgzf;
@@ -8,6 +9,20 @@ use crate::core::types::{MutationType, Variant};
 use crate::variants::structural::StructuralVariant;
 use crate::variants::structural::{sv_vcf_alt, sv_vcf_info};
 
+/// A buffered record waiting to be written.
+///
+/// Records are sorted by (chrom_index, pos) before output so that the
+/// resulting VCF is coordinate-sorted and can be tabix-indexed without a
+/// separate sort step.
+struct PendingRecord {
+    /// Index into the contig list — used as the primary sort key.
+    chrom_index: usize,
+    /// 1-based genomic position — used as the secondary sort key.
+    pos_1based: u64,
+    /// Fully formatted VCF line (without trailing newline).
+    line: String,
+}
+
 /// Writer for truth VCF files produced by VarForge.
 ///
 /// Outputs a bgzip-compressed VCF 4.3 file containing every variant spiked
@@ -15,27 +30,57 @@ use crate::variants::structural::{sv_vcf_alt, sv_vcf_info};
 /// variant type, and cancer-cell fraction.  The file is intended as a
 /// ground-truth reference for benchmarking variant callers.
 ///
-/// The output is bgzip-compressed so standard tools (bcftools, IGV) can read
-/// it directly.  To build a tabix index, run `tabix -p vcf output.vcf.gz`
-/// after generation.
+/// Records are buffered in memory and written in coordinate order when
+/// `finish` is called.  This guarantees a sorted output that can be
+/// tabix-indexed directly with `tabix -p vcf output.vcf.gz`.
 pub struct TruthVcfWriter {
-    writer: bgzf::Writer<std::fs::File>,
+    /// Destination path — the bgzip writer is opened in `finish`.
+    path: PathBuf,
+    /// Sample name written to the column header.
+    sample_name: String,
+    /// Contig list written as `##contig` meta-lines.  Also used to determine
+    /// chromosome sort order: the index of a chromosome in this list is its
+    /// primary sort key.
+    contigs: Vec<(String, u64)>,
+    /// Map from chromosome name to its index in `contigs`.
+    chrom_index: HashMap<String, usize>,
+    /// Pending records, accumulated until `finish` is called.
+    pending: Vec<PendingRecord>,
 }
 
 impl TruthVcfWriter {
-    /// Create a new bgzip-compressed truth VCF at `path`.
+    /// Create a new buffered truth VCF writer targeting `path`.
     ///
-    /// Writes the complete VCF header immediately, including:
-    /// - `##fileformat`, `##source`, INFO meta-lines, contig lines, FORMAT line.
-    /// - A single-sample column named `sample_name`.
-    ///
-    /// `contigs` is a slice of `(name, length)` pairs that will be emitted as
-    /// `##contig=<ID=…,length=…>` lines.
-    pub fn new(path: &Path, sample_name: &str, contigs: &[(String, u64)]) -> Result<Self> {
-        let file = std::fs::File::create(path)
-            .with_context(|| format!("failed to create truth VCF: {}", path.display()))?;
-        let mut writer = bgzf::Writer::new(file);
+    /// The header is written when `finish` is called alongside the sorted
+    /// records.  `contigs` is a slice of `(name, length)` pairs that will be
+    /// emitted as `##contig=<ID=…,length=…>` lines and determine chromosome
+    /// sort order.
+    pub fn new(
+        path: &std::path::Path,
+        sample_name: &str,
+        contigs: &[(String, u64)],
+    ) -> Result<Self> {
+        let chrom_index: HashMap<String, usize> = contigs
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| (name.clone(), i))
+            .collect();
 
+        Ok(Self {
+            path: path.to_path_buf(),
+            sample_name: sample_name.to_string(),
+            contigs: contigs.to_vec(),
+            chrom_index,
+            pending: Vec::new(),
+        })
+    }
+
+    /// Write the VCF header to an open bgzip writer.
+    fn write_header(
+        writer: &mut bgzf::Writer<std::fs::File>,
+        sample_name: &str,
+        contigs: &[(String, u64)],
+    ) -> Result<()> {
         // File-format and source
         writeln!(writer, "##fileformat=VCFv4.3")?;
         writeln!(writer, "##source=VarForge")?;
@@ -95,7 +140,7 @@ impl TruthVcfWriter {
             "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{sample_name}"
         )?;
 
-        Ok(Self { writer })
+        Ok(())
     }
 
     /// Select the VCF genotype string for a variant.
@@ -116,7 +161,7 @@ impl TruthVcfWriter {
         }
     }
 
-    /// Write a single variant record.
+    /// Buffer a single variant record for sorted output.
     ///
     /// - `ref_allele` / `alt_allele` are the REF and ALT byte sequences.
     /// - `n_alt_mol` is the number of read pairs (molecule families) carrying the alt allele.
@@ -126,6 +171,8 @@ impl TruthVcfWriter {
     /// - QUAL is `.`, FILTER is `PASS`.
     /// - GT is `1/1` for homozygous variants (VAF >= 0.99 or clone_id contains "hom"),
     ///   `0/1` otherwise.
+    ///
+    /// Records are not written immediately.  Call `finish` to sort and flush.
     pub fn write_variant(
         &mut self,
         variant: &Variant,
@@ -152,17 +199,29 @@ impl TruthVcfWriter {
              N_ALT_MOL={n_alt_mol};N_DUPLEX_ALT={n_duplex_alt}"
         );
 
-        writeln!(
-            self.writer,
+        let line = format!(
             "{chrom}\t{pos}\t.\t{ref_str}\t{alt_str}\t.\tPASS\t{info}\tGT\t{gt}",
             chrom = variant.chrom,
             pos = pos_1based,
-        )?;
+        );
+
+        // Chromosomes not found in the contig list sort after all known contigs.
+        let chrom_index = self
+            .chrom_index
+            .get(&variant.chrom)
+            .copied()
+            .unwrap_or(usize::MAX);
+
+        self.pending.push(PendingRecord {
+            chrom_index,
+            pos_1based,
+            line,
+        });
 
         Ok(())
     }
 
-    /// Write a structural variant record.
+    /// Buffer a structural variant record for sorted output.
     ///
     /// The ALT uses symbolic alleles (`<DEL>`, `<INS>`, `<INV>`, `<DUP>`) or
     /// BND notation for translocations.  The INFO field includes SVTYPE, END,
@@ -170,6 +229,8 @@ impl TruthVcfWriter {
     ///
     /// - `expected_vaf` is the target allele frequency.
     /// - `clone_id` is the clone assignment (used to select GT and annotate CLONE).
+    ///
+    /// Records are not written immediately.  Call `finish` to sort and flush.
     #[allow(dead_code)]
     pub fn write_sv(
         &mut self,
@@ -194,19 +255,43 @@ impl TruthVcfWriter {
              VARTYPE=SV;CCF={expected_vaf:.6};N_ALT_MOL=0;N_DUPLEX_ALT=0"
         );
 
-        writeln!(
-            self.writer,
-            "{chrom}\t{pos_1based}\t.\tN\t{alt}\t.\tPASS\t{info}\tGT\t{gt}",
-        )?;
+        let line = format!("{chrom}\t{pos_1based}\t.\tN\t{alt}\t.\tPASS\t{info}\tGT\t{gt}",);
+
+        // Chromosomes not found in the contig list sort after all known contigs.
+        let chrom_index = self.chrom_index.get(chrom).copied().unwrap_or(usize::MAX);
+
+        self.pending.push(PendingRecord {
+            chrom_index,
+            pos_1based,
+            line,
+        });
 
         Ok(())
     }
 
-    /// Flush and close the bgzip writer.
+    /// Sort all buffered records by (chromosome index, position) and write
+    /// them to the bgzip-compressed output file, then close the writer.
+    ///
+    /// Chromosome order follows the order of the `contigs` slice passed to
+    /// `new`.  Variants on chromosomes absent from that list sort last.
+    /// Within a chromosome, records are sorted by ascending 1-based position.
     ///
     /// To build a tabix index after generation, run: `tabix -p vcf output.vcf.gz`
     pub fn finish(mut self) -> Result<()> {
-        self.writer
+        // Sort by chromosome index, then by position.
+        self.pending.sort_by_key(|r| (r.chrom_index, r.pos_1based));
+
+        let file = std::fs::File::create(&self.path)
+            .with_context(|| format!("failed to create truth VCF: {}", self.path.display()))?;
+        let mut writer = bgzf::Writer::new(file);
+
+        Self::write_header(&mut writer, &self.sample_name, &self.contigs)?;
+
+        for record in &self.pending {
+            writeln!(writer, "{}", record.line)?;
+        }
+
+        writer
             .try_finish()
             .context("failed to finish bgzip truth VCF")?;
         Ok(())
@@ -526,14 +611,14 @@ mod tests {
         let contigs = default_contigs();
         let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
 
-        // Write three variants; caller is responsible for sort order.
+        // Write in non-sorted order: chr2 before chr1, chr1 out of position order.
         let v1 = snv_variant("chr1", 100, 0.5, None);
         let v2 = snv_variant("chr1", 200, 0.3, None);
         let v3 = snv_variant("chr2", 50, 0.1, None);
 
-        writer.write_variant(&v1, b"A", b"C", 10, 0).unwrap();
-        writer.write_variant(&v2, b"G", b"T", 6, 0).unwrap();
         writer.write_variant(&v3, b"C", b"A", 1, 0).unwrap();
+        writer.write_variant(&v2, b"G", b"T", 6, 0).unwrap();
+        writer.write_variant(&v1, b"A", b"C", 10, 0).unwrap();
         writer.finish().unwrap();
 
         let vcf = read_vcf(tmp.path());
@@ -541,13 +626,73 @@ mod tests {
 
         assert_eq!(data_lines.len(), 3, "expected 3 data records");
 
-        // Order preserved as written
+        // Output must be sorted: chr1:101, chr1:201, chr2:51
+        let chrom0 = data_lines[0].split('\t').next().unwrap();
         let pos0: u64 = data_lines[0].split('\t').nth(1).unwrap().parse().unwrap();
+        let chrom1 = data_lines[1].split('\t').next().unwrap();
         let pos1: u64 = data_lines[1].split('\t').nth(1).unwrap().parse().unwrap();
+        let chrom2 = data_lines[2].split('\t').next().unwrap();
         let pos2: u64 = data_lines[2].split('\t').nth(1).unwrap().parse().unwrap();
+
+        assert_eq!(chrom0, "chr1");
         assert_eq!(pos0, 101);
+        assert_eq!(chrom1, "chr1");
         assert_eq!(pos1, 201);
+        assert_eq!(chrom2, "chr2");
         assert_eq!(pos2, 51);
+    }
+
+    // ------------------------------------------------------------------
+    // test_sorted_output (T114)
+    // ------------------------------------------------------------------
+    /// Verify that records submitted in arbitrary order are written in
+    /// coordinate-sorted order, matching tabix requirements.
+    #[test]
+    fn test_sorted_output() {
+        let tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
+        let contigs = default_contigs();
+        let mut writer = TruthVcfWriter::new(tmp.path(), "SAMPLE", &contigs).unwrap();
+
+        // Submit in reverse chromosome and position order.
+        let v_chr2 = snv_variant("chr2", 1000, 0.3, None);
+        let v_chr1_late = snv_variant("chr1", 5000, 0.2, None);
+        let v_chr1_early = snv_variant("chr1", 100, 0.4, None);
+
+        writer.write_variant(&v_chr2, b"A", b"T", 3, 0).unwrap();
+        writer
+            .write_variant(&v_chr1_late, b"C", b"G", 5, 0)
+            .unwrap();
+        writer
+            .write_variant(&v_chr1_early, b"G", b"A", 4, 0)
+            .unwrap();
+        writer.finish().unwrap();
+
+        let vcf = read_vcf(tmp.path());
+        let data_lines: Vec<&str> = vcf.lines().filter(|l| !l.starts_with('#')).collect();
+
+        assert_eq!(data_lines.len(), 3);
+
+        let chrom_pos: Vec<(&str, u64)> = data_lines
+            .iter()
+            .map(|l| {
+                let mut cols = l.split('\t');
+                let chrom = cols.next().unwrap();
+                let pos: u64 = cols.next().unwrap().parse().unwrap();
+                (chrom, pos)
+            })
+            .collect();
+
+        assert_eq!(chrom_pos[0], ("chr1", 101), "first record must be chr1:101");
+        assert_eq!(
+            chrom_pos[1],
+            ("chr1", 5001),
+            "second record must be chr1:5001"
+        );
+        assert_eq!(
+            chrom_pos[2],
+            ("chr2", 1001),
+            "third record must be chr2:1001"
+        );
     }
 
     // ------------------------------------------------------------------
