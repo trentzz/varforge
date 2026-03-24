@@ -611,6 +611,7 @@ fn variant_alleles(v: &Variant) -> (Vec<u8>, Vec<u8>) {
 /// Group record indices by UMI family (MI tag).
 ///
 /// Returns a map from family_id to Vec<record_index>.
+// Called only in tests; future UMI-collapse logic will use this in production.
 #[allow(dead_code)]
 pub fn group_by_umi_family(records: &[RecordBuf]) -> HashMap<i64, Vec<usize>> {
     let mut families: HashMap<i64, Vec<usize>> = HashMap::new();
@@ -691,7 +692,6 @@ mod tests {
             .collect()
     }
 
-    #[allow(dead_code)]
     fn write_and_reload(
         records: Vec<RecordBuf>,
         header: &sam::Header,

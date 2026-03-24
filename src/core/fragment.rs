@@ -1,3 +1,5 @@
+//! Fragment size sampling: Gaussian WGS, cfDNA nucleosomal, log-normal long-read, and PCR family size models.
+
 use rand::Rng;
 use rand_distr::{Distribution, LogNormal, Normal};
 

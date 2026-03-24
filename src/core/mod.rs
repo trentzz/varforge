@@ -1,3 +1,5 @@
+//! Core simulation primitives: types, coverage, fragment sampling, quality models, and the read engine.
+
 pub mod capture;
 pub mod coverage;
 pub mod end_motifs;

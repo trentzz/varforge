@@ -1,3 +1,5 @@
+//! PCR duplicate simulation: selects reads for duplication and creates copies with identical alignment coordinates.
+
 use crate::core::types::ReadPair;
 use rand::Rng;
 

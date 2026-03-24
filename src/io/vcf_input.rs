@@ -103,6 +103,7 @@ pub fn parse_from_reader<R: BufRead>(
 }
 
 /// Parse variants from a string (convenience wrapper for tests).
+// Called only in tests.
 #[allow(dead_code)]
 pub fn parse_vcf_str(
     input: &str,

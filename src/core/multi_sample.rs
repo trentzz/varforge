@@ -149,12 +149,14 @@ impl MultiSamplePlan {
     }
 
     /// Return the number of samples in this plan.
+    // Not yet called from production code; retained as a standard collection API method.
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.samples.len()
     }
 
     /// Return `true` if the plan has no samples.
+    // Not yet called from production code; retained as a standard collection API method.
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.samples.is_empty()

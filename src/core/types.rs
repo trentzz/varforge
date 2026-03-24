@@ -1,3 +1,5 @@
+//! Shared data types: genomic regions, read pairs, mutations, and variants.
+
 /// A genomic region defined by chromosome, start, and end positions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Region {
@@ -81,6 +83,7 @@ impl Read {
     }
 
     #[must_use]
+    // Companion to len(); required by Clippy's len_without_is_empty lint convention.
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.seq.is_empty()
@@ -106,6 +109,7 @@ pub enum MutationType {
         alt_seq: Vec<u8>,
     },
     /// Structural variant (>50 bp) with breakend notation for truth VCF.
+    // Variant is constructed by the SV pipeline; retain to avoid breaking match arms.
     #[allow(dead_code)]
     Sv {
         sv_type: SvType,
@@ -115,6 +119,8 @@ pub enum MutationType {
     },
 }
 
+// These methods are not yet called from production code but document the
+// intended access pattern for callers that inspect mutation metadata.
 #[allow(dead_code)]
 impl MutationType {
     /// Return the primary 0-based genomic position of this mutation.
@@ -139,6 +145,7 @@ impl MutationType {
 }
 
 /// Structural variant type classifications.
+// Variants are produced by StructuralVariant::sv_type(); retain all arms.
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SvType {

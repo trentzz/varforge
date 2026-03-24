@@ -1,11 +1,13 @@
 use std::fs::File;
 use std::num::NonZeroUsize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use noodles_bam as bam;
 use noodles_bgzf as bgzf;
 use noodles_core::Position;
+use noodles_csi::binning_index::index::reference_sequence::bin::Chunk;
+use noodles_csi::binning_index::Indexer as CsiIndexer;
 use noodles_sam::{
     self as sam,
     alignment::{
@@ -34,6 +36,8 @@ pub struct BamWriter {
     sample_name: String,
     /// Mapping quality written to every record.
     mapq: u8,
+    /// Path to the BAM file, used to write the `.bai` index after finishing.
+    path: PathBuf,
 }
 
 impl BamWriter {
@@ -126,6 +130,7 @@ impl BamWriter {
             header,
             sample_name,
             mapq,
+            path: path.to_path_buf(),
         })
     }
 
@@ -355,10 +360,19 @@ impl BamWriter {
     }
 
     /// Finalize and flush the BAM file.
+    /// Finalise and flush the BAM file, then write a `.bai` index alongside it.
+    ///
+    /// The BAM must be coordinate-sorted (the header is written with `SO:coordinate`)
+    /// so that the index is valid. After the bgzip stream is closed, the file is
+    /// re-opened, scanned sequentially, and a BAI index is written to `<path>.bai`.
     pub fn finish(mut self) -> Result<()> {
         self.writer
             .try_finish()
             .context("failed to finalize BAM file")?;
+
+        build_bai_index(&self.path, &self.header)
+            .with_context(|| format!("failed to write BAI index for {}", self.path.display()))?;
+
         Ok(())
     }
 
@@ -378,6 +392,71 @@ impl BamWriter {
             .write_alignment_record(header, record)
             .context("failed to write BAM record")
     }
+}
+
+/// Build and write a BAI index for the BAM file at `bam_path`.
+///
+/// Opens the BAM, reads all records in order, and uses
+/// [`noodles_csi::binning_index::Indexer`] to build the index. Writes the
+/// result to `<bam_path>.bai`.
+///
+/// The BAM must be coordinate-sorted. Records that lack an alignment position
+/// or reference sequence are counted as unplaced unmapped.
+fn build_bai_index(bam_path: &Path, header: &sam::Header) -> Result<()> {
+    use noodles_sam::alignment::Record as _;
+
+    let bai_path = bam_path.with_extension("bam.bai");
+
+    let mut reader = File::open(bam_path)
+        .map(bam::io::Reader::new)
+        .with_context(|| format!("failed to open BAM for indexing: {}", bam_path.display()))?;
+
+    // Read (and discard) the header. We already have it, but the reader must
+    // advance past it before we can read records.
+    reader
+        .read_header()
+        .context("failed to read BAM header during indexing")?;
+
+    let mut record = bam::Record::default();
+    let mut builder = CsiIndexer::default();
+    let mut start_position = reader.get_ref().virtual_position();
+
+    loop {
+        let bytes_read = reader
+            .read_record(&mut record)
+            .context("failed to read BAM record during indexing")?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        let end_position = reader.get_ref().virtual_position();
+        let chunk = Chunk::new(start_position, end_position);
+
+        let alignment_context = match (
+            record.reference_sequence_id().transpose()?,
+            record.alignment_start().transpose()?,
+            record.alignment_end().transpose()?,
+        ) {
+            (Some(id), Some(start), Some(end)) => {
+                let is_mapped = !record.flags().is_unmapped();
+                Some((id, start, end, is_mapped))
+            }
+            _ => None,
+        };
+
+        builder
+            .add_record(alignment_context, chunk)
+            .context("failed to add record to BAI indexer")?;
+
+        start_position = end_position;
+    }
+
+    let index = builder.build(header.reference_sequences().len());
+
+    bam::bai::write(&bai_path, &index)
+        .with_context(|| format!("failed to write BAI index: {}", bai_path.display()))?;
+
+    Ok(())
 }
 
 /// Build the MD tag string for a single read.
@@ -527,16 +606,6 @@ pub fn parse_cigar(cigar_str: &str) -> Result<Vec<Op>> {
     }
 
     Ok(ops)
-}
-
-/// Calculate the reference span consumed by a CIGAR string.
-#[allow(dead_code)]
-fn cigar_ref_span(cigar_str: &str) -> usize {
-    parse_cigar(cigar_str)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|op| op.kind().consumes_reference().then_some(op.len()))
-        .sum()
 }
 
 /// Build a single SAM/BAM alignment record.
@@ -1065,5 +1134,33 @@ mod tests {
             .get(&pg_tag::VERSION)
             .expect("VN field missing from @PG");
         assert!(!vn.is_empty(), "VN field should not be empty");
+    }
+
+    #[test]
+    fn test_bai_index_created() {
+        // After finish(), a .bai index file must exist alongside the BAM.
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let bam_path = dir.path().join("test.bam");
+        let bai_path = dir.path().join("test.bam.bai");
+
+        let refs = ref_seqs();
+        let cfg = make_sample_config("SAMPLE");
+        let pair = make_read_pair("idx_test", 100);
+
+        let mut writer = BamWriter::new(&bam_path, &refs, &cfg, 60).unwrap();
+        writer.write_pair(&pair, 0, 1000, "100M", "100M").unwrap();
+        writer.finish().unwrap();
+
+        assert!(
+            bai_path.exists(),
+            ".bai index was not created at {:?}",
+            bai_path
+        );
+        assert!(
+            bai_path.metadata().unwrap().len() > 0,
+            ".bai index file is empty"
+        );
     }
 }

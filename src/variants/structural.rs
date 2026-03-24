@@ -38,7 +38,6 @@ pub enum StructuralVariant {
 
 impl StructuralVariant {
     /// Return the primary chromosome of the SV.
-    #[allow(dead_code)]
     pub fn chrom(&self) -> &str {
         match self {
             Self::Deletion { chrom, .. } => chrom,
@@ -50,6 +49,7 @@ impl StructuralVariant {
     }
 
     /// Return the `SvType` tag for use in `MutationType::Sv`.
+    // Not called yet; retained for callers that need to inspect the SV class programmatically.
     #[allow(dead_code)]
     pub fn sv_type(&self) -> SvType {
         match self {
@@ -62,7 +62,6 @@ impl StructuralVariant {
     }
 
     /// Return the left-most breakpoint position (0-based).
-    #[allow(dead_code)]
     pub fn start(&self) -> u64 {
         match self {
             Self::Deletion { start, .. } => *start,
@@ -75,7 +74,6 @@ impl StructuralVariant {
 
     /// Return the right-most breakpoint position (0-based, exclusive for range types).
     /// For point events (Insertion, Translocation) this equals `start() + 1`.
-    #[allow(dead_code)]
     pub fn end(&self) -> u64 {
         match self {
             Self::Deletion { end, .. } => *end,
@@ -338,6 +336,7 @@ pub fn apply_translocation(
 /// Decide, for each read in `total_depth`, whether it should carry the SV
 /// allele.  Returns the number of alt reads to generate using binomial
 /// sampling (same model as small variants).
+// Called only in tests.
 #[allow(dead_code)]
 pub fn sample_sv_alt_count<R: Rng>(total_depth: u32, expected_vaf: f64, rng: &mut R) -> u32 {
     sample_alt_count(total_depth, expected_vaf, rng)
@@ -355,7 +354,6 @@ pub fn sample_sv_alt_count<R: Rng>(total_depth: u32, expected_vaf: f64, rng: &mu
 /// - BND (translocation): `SVTYPE=BND` on two separate records (caller
 ///   handles record splitting).  Returns the ALT allele string in BND format:
 ///   `N]chrom2:pos2]`
-#[allow(dead_code)]
 pub fn sv_vcf_info(sv: &StructuralVariant) -> String {
     match sv {
         StructuralVariant::Deletion { start, end, .. } => {
@@ -386,7 +384,6 @@ pub fn sv_vcf_info(sv: &StructuralVariant) -> String {
 ///
 /// Standard symbolic alleles: `<DEL>`, `<INS>`, `<INV>`, `<DUP>`.
 /// Translocations use BND mate notation: `N]chrom2:pos2]`.
-#[allow(dead_code)]
 pub fn sv_vcf_alt(sv: &StructuralVariant) -> String {
     match sv {
         StructuralVariant::Deletion { .. } => "<DEL>".to_string(),
