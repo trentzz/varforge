@@ -188,10 +188,9 @@ impl TruthVcfWriter {
         let vartype = variant.vartype();
         let clone_id = variant.clone_id.as_deref().unwrap_or(".");
         let vaf = variant.expected_vaf;
-        // CCF is not stored directly on Variant; use expected_vaf as a proxy when
-        // no richer tumour model is present.  Callers that have a full ClonalTree
-        // should populate a CCF field on Variant in a future iteration.
-        let ccf = vaf;
+        // Use the true CCF from the clonal tree when available. Fall back to
+        // expected_vaf as a proxy when no clonal tree model is in use.
+        let ccf = variant.ccf.unwrap_or(vaf);
         let gt = Self::genotype(variant);
 
         let info = format!(

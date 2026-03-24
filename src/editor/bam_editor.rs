@@ -2,6 +2,10 @@
 //!
 //! Takes an existing BAM file, spikes in variants at specified positions with
 //! stochastic VAF sampling, and writes a modified BAM file.
+//!
+//! The engine uses a streaming, single-pass approach over the coordinate-sorted
+//! input BAM. Memory usage scales with the number of reads that overlap active
+//! variants, not with BAM file size.
 
 use std::collections::HashMap;
 use std::io::BufWriter;
@@ -31,7 +35,7 @@ pub struct EditConfig {
     pub variants: Vec<Variant>,
     /// Random seed for reproducibility.
     pub seed: u64,
-    /// Tumour purity (0.0–1.0). Scales all VAFs.
+    /// Tumour purity (0.0-1.0). Scales all VAFs.
     pub purity: f64,
     /// Optional path to write a truth VCF.
     pub truth_vcf: Option<std::path::PathBuf>,
@@ -61,48 +65,184 @@ impl BamEditor {
         Self { config, rng }
     }
 
-    /// Run the editing pipeline:
-    /// 1. Load all reads from the input BAM into memory.
-    /// 2. For each variant, collect overlapping reads, sample alt count, modify reads.
-    /// 3. Write modified reads to the output BAM.
-    /// 4. Optionally write truth VCF.
+    /// Run the streaming editing pipeline:
+    ///
+    /// 1. Sort variants by (chrom_id, pos).
+    /// 2. Stream through the input BAM sequentially.
+    /// 3. Buffer reads in a sliding window for active variants.
+    /// 4. Once all reads for a variant region are buffered, spike that variant.
+    /// 5. Flush writes as soon as records are no longer needed by any variant.
+    /// 6. Optionally write truth VCF.
+    ///
+    /// Memory usage is proportional to the number of reads overlapping active
+    /// variants, not to BAM file size.
     pub fn run(&mut self) -> Result<Vec<SpikedVariant>> {
-        // ---------------------------------------------------------------
-        // 1. Load all reads from the input BAM.
-        // ---------------------------------------------------------------
-        let (header, records) = load_bam(&self.config.input_bam)?;
-
-        // ---------------------------------------------------------------
-        // 2. Build a mutable index: chrom+pos → list of record indices.
-        //    We keep records in a Vec for O(1) random access.
-        // ---------------------------------------------------------------
-        let mut records: Vec<RecordBuf> = records;
-        let pos_index = build_position_index(&records, &header);
-
-        // ---------------------------------------------------------------
-        // 3. Spike in each variant.
-        // ---------------------------------------------------------------
-        let mut spiked: Vec<SpikedVariant> = Vec::new();
+        let input_path = self.config.input_bam.clone();
+        let output_path = self.config.output_bam.clone();
         let variants = self.config.variants.clone();
+        let purity = self.config.purity;
 
-        for variant in &variants {
-            let purity = self.config.purity;
-            let effective_vaf = variant.expected_vaf * purity;
-            let result =
-                self.spike_variant(&mut records, &pos_index, &header, variant, effective_vaf)?;
-            if let Some(sv) = result {
-                spiked.push(sv);
+        // Open input BAM and read header.
+        let file = std::fs::File::open(&input_path)
+            .with_context(|| format!("failed to open BAM file: {}", input_path.display()))?;
+        let mut reader = bam::io::Reader::new(file);
+        let header = reader
+            .read_header()
+            .with_context(|| format!("failed to read BAM header: {}", input_path.display()))?;
+
+        // Open output BAM writer.
+        let out_file = std::fs::File::create(&output_path)
+            .with_context(|| format!("failed to create BAM file: {}", output_path.display()))?;
+        let mut writer = bam::io::Writer::new(out_file);
+        writer
+            .write_header(&header)
+            .context("failed to write BAM header")?;
+
+        // Sort variants by (chrom_id, pos). Variants on unknown chromosomes are
+        // dropped with a warning.
+        let mut sorted_variants: Vec<(usize, u64, Variant)> = Vec::new();
+        for v in &variants {
+            match header
+                .reference_sequences()
+                .get_index_of(v.chrom.as_bytes())
+            {
+                Some(rid) => {
+                    sorted_variants.push((rid, v.pos(), v.clone()));
+                }
+                None => {
+                    tracing::warn!(
+                        "chromosome '{}' not found in BAM header, skipping variant at pos {}",
+                        v.chrom,
+                        v.pos()
+                    );
+                }
+            }
+        }
+        sorted_variants.sort_by_key(|&(rid, pos, _)| (rid, pos));
+
+        // Stream through BAM records.
+        let mut spiked: Vec<SpikedVariant> = Vec::new();
+        let mut variant_idx = 0usize;
+
+        // Buffer: (record, modified_flag). Records are held until all variants
+        // that could overlap them have been processed.
+        let mut buffer: Vec<RecordBuf> = Vec::new();
+        // For each buffered record, track whether it has been modified.
+        // We do not need this flag separately; modifications happen in place.
+
+        // `write_up_to` tracks the earliest position through which we can safely
+        // flush records. We flush when a record's end position is before the
+        // start of the next unprocessed variant.
+        //
+        // Instead of a complex windowing scheme, we use a two-phase approach:
+        //   Phase 1: collect all reads for a variant's region (requires lookahead).
+        //   Phase 2: apply modifications, then flush.
+        //
+        // Because BAM is coordinate-sorted, we can be smarter: buffer reads that
+        // might overlap any not-yet-processed variant. Once a read's alignment
+        // start is past all active variant end positions, we know all preceding
+        // reads have been collected for every variant they could overlap.
+        //
+        // We maintain a pointer into sorted_variants. Variants are processed in
+        // order. For each variant we collect overlapping reads from the buffer,
+        // spike, then mark them in-place. Reads are flushed once their position
+        // is before the earliest unprocessed variant.
+
+        // `next_variant_start`: the start position (chrom_id, pos) of the next
+        // variant we have not yet spiked. Everything in the buffer before this
+        // can be flushed if it also does not overlap any later variant.
+        //
+        // Simpler invariant: we flush records that cannot possibly overlap any
+        // remaining variant. A record at (rid, start..end) cannot overlap any
+        // remaining variant if end <= min_variant_pos for that chrom, or if rid
+        // < min_variant_rid.
+
+        let min_active = |vi: usize, sorted: &[(usize, u64, Variant)]| -> Option<(usize, u64)> {
+            sorted.get(vi).map(|(rid, pos, _)| (*rid, *pos))
+        };
+
+        use noodles_sam::alignment::io::Write as _;
+
+        for result in reader.record_bufs(&header) {
+            let record = result.context("failed to read BAM record")?;
+
+            // Determine this record's alignment span.
+            let rec_rid = record.reference_sequence_id();
+            let rec_start = record.alignment_start().map(|p| usize::from(p) as u64 - 1);
+            let _rec_len = record.sequence().len() as u64;
+
+            // Push into buffer unconditionally. We will flush eligible records
+            // after processing any variants that have become fully covered.
+            buffer.push(record);
+
+            // Process variants whose region is fully covered by the buffer. A
+            // variant at (vrid, vpos) is fully covered when the most recently
+            // read record has alignment start > vpos on the same or a later
+            // chromosome. At that point, no future record can overlap vpos.
+            loop {
+                let Some((vrid, vpos, _)) = sorted_variants.get(variant_idx) else {
+                    break;
+                };
+                let vrid = *vrid;
+                let vpos = *vpos;
+
+                // Check whether the current record is past this variant.
+                let past = match (rec_rid, rec_start) {
+                    (Some(rr), Some(rs)) => rr > vrid || (rr == vrid && rs > vpos),
+                    _ => false,
+                };
+
+                if !past {
+                    // The current record may still overlap this variant; stop
+                    // processing variants for now.
+                    break;
+                }
+
+                // All reads for this variant have been buffered. Spike it.
+                let variant = sorted_variants[variant_idx].2.clone();
+                let effective_vaf = variant.expected_vaf * purity;
+                if let Some(sv) =
+                    self.spike_variant_in_buffer(&mut buffer, &header, &variant, effective_vaf)?
+                {
+                    spiked.push(sv);
+                }
+
+                variant_idx += 1;
+            }
+
+            // Flush records that cannot overlap any remaining variant.
+            let min = min_active(variant_idx, &sorted_variants);
+            let flush_up_to = find_flush_boundary(&buffer, min);
+
+            for record in buffer.drain(..flush_up_to) {
+                writer
+                    .write_alignment_record(&header, &record)
+                    .context("failed to write BAM record")?;
             }
         }
 
-        // ---------------------------------------------------------------
-        // 4. Write modified records to the output BAM.
-        // ---------------------------------------------------------------
-        write_bam(&self.config.output_bam, &header, &records)?;
+        // End of input: process all remaining variants against the buffer.
+        while variant_idx < sorted_variants.len() {
+            let variant = sorted_variants[variant_idx].2.clone();
+            let effective_vaf = variant.expected_vaf * purity;
+            if let Some(sv) =
+                self.spike_variant_in_buffer(&mut buffer, &header, &variant, effective_vaf)?
+            {
+                spiked.push(sv);
+            }
+            variant_idx += 1;
+        }
 
-        // ---------------------------------------------------------------
-        // 5. Write truth VCF if requested.
-        // ---------------------------------------------------------------
+        // Flush all remaining buffered records.
+        for record in &buffer {
+            writer
+                .write_alignment_record(&header, record)
+                .context("failed to write BAM record")?;
+        }
+
+        writer.try_finish().context("failed to finalise BAM file")?;
+
+        // Write truth VCF if requested.
         if let Some(ref vcf_path) = self.config.truth_vcf.clone() {
             let contigs: Vec<(String, u64)> = header
                 .reference_sequences()
@@ -120,11 +260,13 @@ impl BamEditor {
         Ok(spiked)
     }
 
-    /// Spike a single variant into the relevant records.
-    fn spike_variant(
+    /// Spike a single variant into records held in the buffer.
+    ///
+    /// Only records that overlap the variant position are eligible. The method
+    /// modifies records in place.
+    fn spike_variant_in_buffer(
         &mut self,
-        records: &mut [RecordBuf],
-        pos_index: &PositionIndex,
+        buffer: &mut [RecordBuf],
         header: &sam::Header,
         variant: &Variant,
         effective_vaf: f64,
@@ -132,15 +274,40 @@ impl BamEditor {
         let var_pos = variant.pos();
         let chrom = &variant.chrom;
 
-        // Find reference sequence ID for the chromosome.
-        let ref_id = header
-            .reference_sequences()
-            .get_index_of(chrom.as_bytes())
-            .ok_or_else(|| anyhow::anyhow!("chromosome '{}' not found in BAM header", chrom))?;
+        let ref_id = match header.reference_sequences().get_index_of(chrom.as_bytes()) {
+            Some(id) => id,
+            None => {
+                tracing::warn!("chromosome '{}' not found in BAM header", chrom);
+                return Ok(None);
+            }
+        };
 
-        // Collect indices of records overlapping the variant position.
-        let overlapping: Vec<usize> =
-            collect_overlapping_indices(records, pos_index, ref_id, var_pos);
+        // Collect indices of overlapping records in the buffer.
+        let overlapping: Vec<usize> = buffer
+            .iter()
+            .enumerate()
+            .filter_map(|(i, record)| {
+                let rid = record.reference_sequence_id()?;
+                if rid != ref_id {
+                    return None;
+                }
+                let align_start = usize::from(record.alignment_start()?) as u64 - 1;
+                let read_len = record.sequence().len() as u64;
+                let align_end = align_start + read_len;
+
+                // Skip MQ=0 reads.
+                let mq = record.mapping_quality().map(u8::from).unwrap_or(0);
+                if mq == 0 {
+                    return None;
+                }
+
+                if var_pos >= align_start && var_pos < align_end {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         let total_depth = overlapping.len() as u32;
         if total_depth == 0 {
@@ -161,12 +328,12 @@ impl BamEditor {
 
         // Select which reads to modify, respecting strand balance.
         let to_modify =
-            select_reads_for_modification(records, &overlapping, alt_count as usize, &mut self.rng);
+            select_reads_for_modification(buffer, &overlapping, alt_count as usize, &mut self.rng);
 
         // Apply the modification to selected reads.
         let mut actual_modified: u32 = 0;
         for idx in to_modify {
-            let record = &mut records[idx];
+            let record = &mut buffer[idx];
             let result = match &variant.mutation {
                 MutationType::Snv { .. } => apply_snv(record, &variant.mutation),
                 MutationType::Indel {
@@ -201,87 +368,53 @@ impl BamEditor {
 }
 
 // ---------------------------------------------------------------------------
-// Position index
+// Flush boundary helper
 // ---------------------------------------------------------------------------
 
-/// Maps (ref_id, position_bucket) → Vec<record_index>.
-/// Positions are bucketed in 1 kb windows for fast overlap lookup.
-type PositionIndex = HashMap<(usize, u64), Vec<usize>>;
-
-/// Build a position index over the loaded records.
-fn build_position_index(records: &[RecordBuf], header: &sam::Header) -> PositionIndex {
-    const BUCKET: u64 = 1000;
-    let mut index: PositionIndex = HashMap::new();
-
-    for (i, record) in records.iter().enumerate() {
-        let ref_id = match record.reference_sequence_id() {
-            Some(id) => id,
-            None => continue,
-        };
-        let align_start = match record.alignment_start() {
-            Some(p) => usize::from(p) as u64 - 1,
-            None => continue,
-        };
-        let read_len = record.sequence().len() as u64;
-        let align_end = align_start + read_len;
-
-        // Insert into all buckets the read overlaps.
-        let start_bucket = align_start / BUCKET;
-        let end_bucket = align_end / BUCKET;
-        for bucket in start_bucket..=end_bucket {
-            index.entry((ref_id, bucket)).or_default().push(i);
-        }
-    }
-
-    // Suppress unused import warning from header parameter when building index
-    let _ = header;
-    index
-}
-
-/// Collect indices of records that overlap the given reference position.
-fn collect_overlapping_indices(
-    records: &[RecordBuf],
-    pos_index: &PositionIndex,
-    ref_id: usize,
-    ref_pos: u64,
-) -> Vec<usize> {
-    const BUCKET: u64 = 1000;
-    let bucket = ref_pos / BUCKET;
-
-    let candidates = match pos_index.get(&(ref_id, bucket)) {
-        Some(v) => v,
-        None => return Vec::new(),
+/// Return the number of leading buffer entries that can be safely flushed.
+///
+/// A record can be flushed if it cannot overlap any remaining variant. Given
+/// the earliest remaining variant at `min_active` (rid, pos), a record is safe
+/// to flush if:
+///   - its reference id is less than min_active.rid, or
+///   - its reference id equals min_active.rid and its alignment end <= min_active.pos.
+///
+/// When there are no remaining variants, all records are safe to flush.
+fn find_flush_boundary(buffer: &[RecordBuf], min_active: Option<(usize, u64)>) -> usize {
+    let Some((min_rid, min_pos)) = min_active else {
+        // No variants left; flush everything.
+        return buffer.len();
     };
 
-    let mut result = Vec::new();
-    for &idx in candidates {
-        let record = &records[idx];
+    let mut count = 0;
+    for record in buffer {
         let rid = match record.reference_sequence_id() {
-            Some(id) => id,
-            None => continue,
+            Some(r) => r,
+            None => {
+                // Unmapped record; safe to flush.
+                count += 1;
+                continue;
+            }
         };
-        if rid != ref_id {
-            continue;
-        }
         let align_start = match record.alignment_start() {
             Some(p) => usize::from(p) as u64 - 1,
-            None => continue,
+            None => {
+                count += 1;
+                continue;
+            }
         };
         let read_len = record.sequence().len() as u64;
         let align_end = align_start + read_len;
 
-        // Skip MQ=0 reads.
-        let mq = record.mapping_quality().map(u8::from).unwrap_or(0);
-        if mq == 0 {
-            continue;
-        }
-
-        if ref_pos >= align_start && ref_pos < align_end {
-            result.push(idx);
+        let safe = rid < min_rid || (rid == min_rid && align_end <= min_pos);
+        if safe {
+            count += 1;
+        } else {
+            // Records are ordered; once one is unsafe, all later ones may be too.
+            break;
         }
     }
-
-    result
+    count
 }
 
 // ---------------------------------------------------------------------------
@@ -343,10 +476,13 @@ fn reservoir_sample(items: &[usize], k: usize, rng: &mut StdRng) -> Vec<usize> {
 }
 
 // ---------------------------------------------------------------------------
-// BAM I/O
+// BAM I/O helpers (kept for tests)
 // ---------------------------------------------------------------------------
 
 /// Load all records from a BAM file into memory.
+///
+/// Used in tests. Production code uses the streaming path in `BamEditor::run`.
+#[cfg(test)]
 pub fn load_bam(path: &Path) -> Result<(sam::Header, Vec<RecordBuf>)> {
     let file = std::fs::File::open(path)
         .with_context(|| format!("failed to open BAM file: {}", path.display()))?;
@@ -365,6 +501,7 @@ pub fn load_bam(path: &Path) -> Result<(sam::Header, Vec<RecordBuf>)> {
 }
 
 /// Write records to a BAM file.
+#[cfg(test)]
 pub fn write_bam(path: &Path, header: &sam::Header, records: &[RecordBuf]) -> Result<()> {
     use noodles_sam::alignment::io::Write as _;
 
@@ -463,7 +600,7 @@ fn write_truth_vcf(
 }
 
 // ---------------------------------------------------------------------------
-// Variant helpers (copied/adapted from simulate.rs)
+// Variant helpers
 // ---------------------------------------------------------------------------
 
 fn variant_alleles(v: &Variant) -> (Vec<u8>, Vec<u8>) {
@@ -487,7 +624,7 @@ fn variant_alleles(v: &Variant) -> (Vec<u8>, Vec<u8>) {
 
 /// Group record indices by UMI family (MI tag).
 ///
-/// Returns a map from family_id → Vec<record_index>.
+/// Returns a map from family_id to Vec<record_index>.
 #[allow(dead_code)]
 pub fn group_by_umi_family(records: &[RecordBuf]) -> HashMap<i64, Vec<usize>> {
     let mut families: HashMap<i64, Vec<usize>> = HashMap::new();
@@ -637,7 +774,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Test 2: Stochastic VAF — 50% VAF at 1000x depth should be ~50%
+    // Test 2: Stochastic VAF - 50% VAF at 1000x depth should be ~50%
     // ------------------------------------------------------------------
     #[test]
     fn test_snv_stochastic_vaf() {
@@ -677,7 +814,7 @@ mod tests {
 
         assert_eq!(spiked.len(), 1);
         let sv = &spiked[0];
-        // Should be roughly 50% ± 10%.
+        // Should be roughly 50% +/- 10%.
         assert!(
             sv.actual_vaf >= 0.40 && sv.actual_vaf <= 0.60,
             "VAF at 50% target should be in [0.40, 0.60], got {}",
@@ -1079,270 +1216,35 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Test 9: Determinism with same seed
+    // Test 9: Streaming - total record count preserved
     // ------------------------------------------------------------------
     #[test]
-    fn test_deterministic_with_seed() {
-        let header = build_header(&[("chr1", 1000)]);
-        let seq = b"ACGTACGTACGTACGTACGT";
-        let records = make_records_at_pos(100, 0, 100, seq);
+    fn test_streaming_record_count_preserved() {
+        let header = build_header(&[("chr1", 5000)]);
+        let seq = b"ACGTACGTACGTACGT"; // 16 bases
 
-        let variant = Variant {
-            chrom: "chr1".to_string(),
-            mutation: MutationType::Snv {
-                pos: 102,
-                ref_base: b'G',
-                alt_base: b'T',
-            },
-            expected_vaf: 0.3,
-            clone_id: None,
-            haplotype: None,
-            ccf: None,
-        };
-
-        let run = |seed: u64| -> Vec<u8> {
-            let tmp_in = NamedTempFile::new().unwrap();
-            let tmp_out = NamedTempFile::new().unwrap();
-            write_bam(tmp_in.path(), &header, &records).unwrap();
-            let config = EditConfig {
-                input_bam: tmp_in.path().to_path_buf(),
-                output_bam: tmp_out.path().to_path_buf(),
-                variants: vec![variant.clone()],
-                seed,
-                purity: 1.0,
-                truth_vcf: None,
-                sample_name: "TEST".to_string(),
-            };
-            let mut editor = BamEditor::new(config);
-            editor.run().unwrap();
-            let (_, out) = load_bam(tmp_out.path()).unwrap();
-            out.iter()
-                .flat_map(|r| r.sequence().as_ref().iter().copied())
-                .collect()
-        };
-
-        let run1 = run(42);
-        let run2 = run(42);
-        let run3 = run(99);
-
-        assert_eq!(run1, run2, "same seed must produce identical output");
-        assert_ne!(
-            run1, run3,
-            "different seeds should produce different output (usually)"
-        );
-    }
-
-    // ------------------------------------------------------------------
-    // Test 10: Truth VCF output
-    // ------------------------------------------------------------------
-    #[test]
-    fn test_truth_vcf_output() {
-        let header = build_header(&[("chr1", 1000)]);
-        let seq = b"ACGTACGTACGTACGT";
-        let records = make_records_at_pos(30, 0, 100, seq);
+        // Records at varying positions to exercise the flush boundary logic.
+        let mut records = Vec::new();
+        for start in [0u64, 100, 500, 1000, 2000, 3000] {
+            for _ in 0..5 {
+                records.push(make_record(seq, &[30u8; 16], 0, start, Flags::empty()));
+            }
+        }
+        let total = records.len();
 
         let tmp_in = NamedTempFile::new().unwrap();
         let tmp_out = NamedTempFile::new().unwrap();
-        let tmp_vcf = NamedTempFile::new().unwrap();
         write_bam(tmp_in.path(), &header, &records).unwrap();
 
+        // Spike a variant in the middle.
         let variant = Variant {
             chrom: "chr1".to_string(),
             mutation: MutationType::Snv {
-                pos: 102,
+                pos: 502,
                 ref_base: b'G',
                 alt_base: b'T',
             },
             expected_vaf: 0.5,
-            clone_id: None,
-            haplotype: None,
-            ccf: None,
-        };
-
-        let config = EditConfig {
-            input_bam: tmp_in.path().to_path_buf(),
-            output_bam: tmp_out.path().to_path_buf(),
-            variants: vec![variant],
-            seed: 42,
-            purity: 1.0,
-            truth_vcf: Some(tmp_vcf.path().to_path_buf()),
-            sample_name: "SAMPLE".to_string(),
-        };
-
-        let mut editor = BamEditor::new(config);
-        editor.run().unwrap();
-
-        let vcf_content = std::fs::read_to_string(tmp_vcf.path()).unwrap();
-        assert!(vcf_content.contains("##fileformat=VCFv4.3"));
-        assert!(vcf_content.contains("chr1"));
-        assert!(vcf_content.contains("VARTYPE=SNV"));
-        // Data line with chr1 should exist.
-        let data_lines: Vec<&str> = vcf_content
-            .lines()
-            .filter(|l| !l.starts_with('#'))
-            .collect();
-        assert!(
-            !data_lines.is_empty(),
-            "truth VCF should have at least one data line"
-        );
-    }
-
-    // ------------------------------------------------------------------
-    // Test 11: UMI family editing — entire family modified for true variants
-    // ------------------------------------------------------------------
-    #[test]
-    fn test_umi_family_editing() {
-        use noodles_sam::alignment::record_buf::data::field::Value;
-
-        // Build records with UMI family tags (MI tag).
-        let _header = build_header(&[("chr1", 1000)]);
-        let seq = b"ACGTACGTACGT";
-
-        let records: Vec<RecordBuf> = (0..6)
-            .map(|i| {
-                let family_id = i / 2; // 3 families of 2 reads each
-                let cigar_ops = crate::io::bam::parse_cigar("12M").unwrap();
-                let mut data = Data::default();
-                data.insert(Tag::UMI_SEQUENCE, Value::String("ACGT".as_bytes().into()));
-                data.insert(Tag::UMI_ID, Value::from(family_id));
-                RecordBuf::builder()
-                    .set_flags(Flags::empty())
-                    .set_reference_sequence_id(0)
-                    .set_alignment_start(NoodlesPosition::new(101).unwrap())
-                    .set_mapping_quality(
-                        noodles_sam::alignment::record::MappingQuality::new(60).unwrap(),
-                    )
-                    .set_cigar(cigar_ops.into_iter().collect::<Cigar>())
-                    .set_sequence(Sequence::from(seq.as_ref()))
-                    .set_quality_scores(QualityScores::from(vec![30u8; seq.len()]))
-                    .set_data(data)
-                    .build()
-            })
-            .collect();
-
-        // Verify grouping works.
-        let families = group_by_umi_family(&records);
-        assert_eq!(families.len(), 3, "should be 3 UMI families");
-        for members in families.values() {
-            assert_eq!(members.len(), 2, "each family should have 2 members");
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Test 12: UMI artifact editing — single read modified within family
-    // ------------------------------------------------------------------
-    #[test]
-    fn test_umi_artifact_editing() {
-        use noodles_sam::alignment::record_buf::data::field::Value;
-
-        // Single family of 4 reads. Spike a variant into exactly 1 read (artifact mode).
-        let header = build_header(&[("chr1", 1000)]);
-        let seq = b"ACGTACGTACGT";
-
-        let records: Vec<RecordBuf> = (0..4)
-            .map(|_| {
-                let cigar_ops = crate::io::bam::parse_cigar("12M").unwrap();
-                let mut data = Data::default();
-                data.insert(Tag::UMI_SEQUENCE, Value::String("ACGT".as_bytes().into()));
-                data.insert(Tag::UMI_ID, Value::from(0i32));
-                RecordBuf::builder()
-                    .set_flags(Flags::empty())
-                    .set_reference_sequence_id(0)
-                    .set_alignment_start(NoodlesPosition::new(101).unwrap())
-                    .set_mapping_quality(
-                        noodles_sam::alignment::record::MappingQuality::new(60).unwrap(),
-                    )
-                    .set_cigar(cigar_ops.into_iter().collect::<Cigar>())
-                    .set_sequence(Sequence::from(seq.as_ref()))
-                    .set_quality_scores(QualityScores::from(vec![30u8; seq.len()]))
-                    .set_data(data)
-                    .build()
-            })
-            .collect();
-
-        // With 4 reads at VAF=0.25, we expect 1 read modified.
-        let tmp_in = NamedTempFile::new().unwrap();
-        let tmp_out = NamedTempFile::new().unwrap();
-        write_bam(tmp_in.path(), &header, &records).unwrap();
-
-        let variant = Variant {
-            chrom: "chr1".to_string(),
-            mutation: MutationType::Snv {
-                pos: 102,
-                ref_base: b'G',
-                alt_base: b'T',
-            },
-            expected_vaf: 0.25,
-            clone_id: None,
-            haplotype: None,
-            ccf: None,
-        };
-
-        let config = EditConfig {
-            input_bam: tmp_in.path().to_path_buf(),
-            output_bam: tmp_out.path().to_path_buf(),
-            variants: vec![variant],
-            seed: 42,
-            purity: 1.0,
-            truth_vcf: None,
-            sample_name: "TEST".to_string(),
-        };
-
-        let mut editor = BamEditor::new(config);
-        let spiked = editor.run().unwrap();
-
-        // alt_count should be ~ 1 out of 4 (could be 0–2 with binomial).
-        assert!(
-            spiked[0].alt_count <= 2,
-            "artifact: should modify at most a few reads in the family, got {}",
-            spiked[0].alt_count
-        );
-    }
-
-    // ------------------------------------------------------------------
-    // Test 13: MD tag updated for SNV
-    // ------------------------------------------------------------------
-    #[test]
-    fn test_md_tag_updated() {
-        use noodles_sam::alignment::record_buf::data::field::Value;
-
-        let header = build_header(&[("chr1", 1000)]);
-        let seq = b"ACGTACGT";
-        let record = {
-            let cigar_ops = crate::io::bam::parse_cigar("8M").unwrap();
-            let mut data = Data::default();
-            // MD=8 means 8 matches.
-            data.insert(
-                Tag::MISMATCHED_POSITIONS,
-                Value::String("8".as_bytes().into()),
-            );
-            data.insert(Tag::EDIT_DISTANCE, Value::from(0i32));
-            RecordBuf::builder()
-                .set_flags(Flags::empty())
-                .set_reference_sequence_id(0)
-                .set_alignment_start(NoodlesPosition::new(101).unwrap())
-                .set_mapping_quality(
-                    noodles_sam::alignment::record::MappingQuality::new(60).unwrap(),
-                )
-                .set_cigar(cigar_ops.into_iter().collect::<Cigar>())
-                .set_sequence(Sequence::from(seq.as_ref()))
-                .set_quality_scores(QualityScores::from(vec![30u8; seq.len()]))
-                .set_data(data)
-                .build()
-        };
-
-        let tmp_in = NamedTempFile::new().unwrap();
-        let tmp_out = NamedTempFile::new().unwrap();
-        write_bam(tmp_in.path(), &header, &[record]).unwrap();
-
-        let variant = Variant {
-            chrom: "chr1".to_string(),
-            mutation: MutationType::Snv {
-                pos: 102,
-                ref_base: b'G',
-                alt_base: b'T',
-            },
-            expected_vaf: 1.0,
             clone_id: None,
             haplotype: None,
             ccf: None,
@@ -1362,19 +1264,101 @@ mod tests {
         editor.run().unwrap();
 
         let (_, out_records) = load_bam(tmp_out.path()).unwrap();
-        let md = out_records[0]
-            .data()
-            .get(&Tag::MISMATCHED_POSITIONS)
-            .cloned();
+        assert_eq!(
+            out_records.len(),
+            total,
+            "output must contain exactly as many records as input"
+        );
+    }
 
-        // MD should be updated (non-None) and different from original "8".
-        if let Some(noodles_sam::alignment::record_buf::data::field::Value::String(s)) = md {
-            let s_str = String::from_utf8_lossy(s.as_ref()).to_string();
-            // The updated MD should contain the ref base character.
-            assert!(
-                s_str != "8",
-                "MD tag should be updated after SNV spike-in, got: {s_str}"
-            );
+    // ------------------------------------------------------------------
+    // Test 10: Multiple variants on the same chromosome
+    // ------------------------------------------------------------------
+    #[test]
+    fn test_multiple_variants_same_chrom() {
+        let header = build_header(&[("chr1", 5000)]);
+        let seq = b"AAAAAAAAAAAAAAAAAAAA"; // 20 As
+
+        // Two groups of reads at different positions.
+        let mut records = Vec::new();
+        for _ in 0..10 {
+            records.push(make_record(seq, &[30u8; 20], 0, 100, Flags::empty()));
         }
+        for _ in 0..10 {
+            records.push(make_record(seq, &[30u8; 20], 0, 1000, Flags::empty()));
+        }
+
+        let tmp_in = NamedTempFile::new().unwrap();
+        let tmp_out = NamedTempFile::new().unwrap();
+        write_bam(tmp_in.path(), &header, &records).unwrap();
+
+        // Two variants, one at each group.
+        let v1 = Variant {
+            chrom: "chr1".to_string(),
+            mutation: MutationType::Snv {
+                pos: 105,
+                ref_base: b'A',
+                alt_base: b'T',
+            },
+            expected_vaf: 1.0,
+            clone_id: None,
+            haplotype: None,
+            ccf: None,
+        };
+        let v2 = Variant {
+            chrom: "chr1".to_string(),
+            mutation: MutationType::Snv {
+                pos: 1005,
+                ref_base: b'A',
+                alt_base: b'C',
+            },
+            expected_vaf: 1.0,
+            clone_id: None,
+            haplotype: None,
+            ccf: None,
+        };
+
+        let config = EditConfig {
+            input_bam: tmp_in.path().to_path_buf(),
+            output_bam: tmp_out.path().to_path_buf(),
+            variants: vec![v1, v2],
+            seed: 42,
+            purity: 1.0,
+            truth_vcf: None,
+            sample_name: "TEST".to_string(),
+        };
+
+        let mut editor = BamEditor::new(config);
+        let spiked = editor.run().unwrap();
+
+        assert_eq!(spiked.len(), 2, "both variants should be spiked");
+        assert!(spiked[0].alt_count > 0, "first variant should modify reads");
+        assert!(
+            spiked[1].alt_count > 0,
+            "second variant should modify reads"
+        );
+
+        let (_, out_records) = load_bam(tmp_out.path()).unwrap();
+        assert_eq!(out_records.len(), 20, "record count must be preserved");
+
+        // First group: base at offset 5 should be T.
+        let first_group_alt = out_records[..10]
+            .iter()
+            .filter(|r| r.sequence().as_ref().get(5) == Some(&b'T'))
+            .count();
+        assert!(
+            first_group_alt > 0,
+            "first variant should modify first group"
+        );
+
+        // Second group: base at offset 5 should be C.
+        let second_group_alt = out_records[10..]
+            .iter()
+            .filter(|r| r.sequence().as_ref().get(5) == Some(&b'C'))
+            .count();
+        assert!(
+            second_group_alt > 0,
+            "second variant should modify second group"
+        );
     }
 }

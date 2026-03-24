@@ -2,7 +2,6 @@ use anyhow::{bail, Result};
 use std::collections::HashMap;
 
 /// A clone in the tumour's clonal architecture.
-#[allow(dead_code)] // TODO(T067): remove once ClonalTree is integrated into engine
 #[derive(Debug, Clone)]
 pub struct Clone {
     pub id: String,
@@ -14,14 +13,12 @@ pub struct Clone {
 ///
 /// The root clone has CCF = 1.0 (all tumour cells carry its mutations).
 /// Subclones have CCF <= parent CCF.
-#[allow(dead_code)] // TODO(T067): remove once ClonalTree is integrated into engine
 #[derive(Debug, Clone)]
 pub struct ClonalTree {
     clones: Vec<Clone>,
     children: HashMap<String, Vec<String>>,
 }
 
-#[allow(dead_code)] // TODO(T067): remove once ClonalTree is integrated into engine
 impl ClonalTree {
     /// Build and validate a clonal tree from a list of clones.
     pub fn new(clones: Vec<Clone>) -> Result<Self> {
@@ -83,6 +80,7 @@ impl ClonalTree {
     }
 
     /// Get the root clone.
+    #[allow(dead_code)]
     pub fn root(&self) -> &Clone {
         self.clones.iter().find(|c| c.parent.is_none()).unwrap()
     }
@@ -102,6 +100,7 @@ impl ClonalTree {
 
     /// Get all ancestor clone IDs for a given clone (including itself).
     /// Mutations are inherited from all ancestors.
+    #[allow(dead_code)]
     pub fn ancestors(&self, clone_id: &str) -> Vec<String> {
         let mut result = Vec::new();
         let mut current = Some(clone_id.to_string());

@@ -414,6 +414,7 @@ samples:
             random: None,
             sv_count: 0,
             sv_signature: None,
+            include_driver_mutations: false,
         });
         cfg.samples = Some(vec![
             SampleEntry {

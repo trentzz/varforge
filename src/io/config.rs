@@ -290,6 +290,15 @@ pub struct MutationConfig {
     /// Number of SVs to generate for the configured signature (default: 10).
     #[serde(default = "default_sv_count")]
     pub sv_count: usize,
+    /// When true, inject canonical driver mutations from the active cancer
+    /// preset into the variant list.  Only mutations with fully specified
+    /// genomic coordinates are injected; structural or fusion events with
+    /// missing allele fields are silently skipped.
+    ///
+    /// Set automatically to `true` when a `cancer:` preset is applied.
+    /// Has no effect when `preset` is not a cancer preset.
+    #[serde(default)]
+    pub include_driver_mutations: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
