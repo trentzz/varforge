@@ -3,9 +3,12 @@
 //! Takes an existing BAM file, spikes in variants at specified positions with
 //! stochastic VAF sampling, and writes a modified BAM file.
 //!
-//! The engine uses a streaming, single-pass approach over the coordinate-sorted
-//! input BAM. Memory usage scales with the number of reads that overlap active
-//! variants, not with BAM file size.
+//! The engine reads all records into memory, sorts them by
+//! (reference_sequence_id, alignment_start), then processes them with a
+//! single-pass sliding-window approach. Sorting up front makes the editor
+//! robust to unsorted or partially sorted input, which the simulator does
+//! not guarantee. This is acceptable because the BAM editor targets small,
+//! targeted BAMs rather than whole-genome files.
 
 use std::collections::HashMap;
 use std::io::BufWriter;
@@ -65,17 +68,15 @@ impl BamEditor {
         Self { config, rng }
     }
 
-    /// Run the streaming editing pipeline:
+    /// Run the editing pipeline:
     ///
-    /// 1. Sort variants by (chrom_id, pos).
-    /// 2. Stream through the input BAM sequentially.
-    /// 3. Buffer reads in a sliding window for active variants.
-    /// 4. Once all reads for a variant region are buffered, spike that variant.
-    /// 5. Flush writes as soon as records are no longer needed by any variant.
-    /// 6. Optionally write truth VCF.
-    ///
-    /// Memory usage is proportional to the number of reads overlapping active
-    /// variants, not to BAM file size.
+    /// 1. Read all records from the input BAM into memory.
+    /// 2. Sort records by (reference_sequence_id, alignment_start).
+    /// 3. Sort variants by (chrom_id, pos).
+    /// 4. Process records in order with a sliding window for active variants.
+    /// 5. Once all reads for a variant region are buffered, spike that variant.
+    /// 6. Flush writes as soon as records are no longer needed by any variant.
+    /// 7. Optionally write truth VCF.
     pub fn run(&mut self) -> Result<Vec<SpikedVariant>> {
         let input_path = self.config.input_bam.clone();
         let output_path = self.config.output_bam.clone();
@@ -120,56 +121,41 @@ impl BamEditor {
         }
         sorted_variants.sort_by_key(|&(rid, pos, _)| (rid, pos));
 
-        // Stream through BAM records.
+        // Read all records into memory, then sort by (rid, alignment_start).
+        // This makes the editor robust to unsorted input from the simulator.
+        let mut all_records: Vec<RecordBuf> = Vec::new();
+        for result in reader.record_bufs(&header) {
+            let record = result.context("failed to read BAM record")?;
+            all_records.push(record);
+        }
+        all_records.sort_by(|a, b| {
+            let rid_a = a.reference_sequence_id();
+            let rid_b = b.reference_sequence_id();
+            let start_a = a.alignment_start().map(|p| usize::from(p) as u64);
+            let start_b = b.alignment_start().map(|p| usize::from(p) as u64);
+            rid_a.cmp(&rid_b).then(start_a.cmp(&start_b))
+        });
+
+        // Process sorted records with a sliding-window approach.
         let mut spiked: Vec<SpikedVariant> = Vec::new();
         let mut variant_idx = 0usize;
 
-        // Buffer: (record, modified_flag). Records are held until all variants
-        // that could overlap them have been processed.
+        // Buffer holds records until all variants that could overlap them have
+        // been processed. Modifications happen in place.
         let mut buffer: Vec<RecordBuf> = Vec::new();
-        // For each buffered record, track whether it has been modified.
-        // We do not need this flag separately; modifications happen in place.
 
-        // `write_up_to` tracks the earliest position through which we can safely
-        // flush records. We flush when a record's end position is before the
-        // start of the next unprocessed variant.
-        //
-        // Instead of a complex windowing scheme, we use a two-phase approach:
-        //   Phase 1: collect all reads for a variant's region (requires lookahead).
-        //   Phase 2: apply modifications, then flush.
-        //
-        // Because BAM is coordinate-sorted, we can be smarter: buffer reads that
-        // might overlap any not-yet-processed variant. Once a read's alignment
-        // start is past all active variant end positions, we know all preceding
-        // reads have been collected for every variant they could overlap.
-        //
-        // We maintain a pointer into sorted_variants. Variants are processed in
-        // order. For each variant we collect overlapping reads from the buffer,
-        // spike, then mark them in-place. Reads are flushed once their position
-        // is before the earliest unprocessed variant.
-
-        // `next_variant_start`: the start position (chrom_id, pos) of the next
-        // variant we have not yet spiked. Everything in the buffer before this
-        // can be flushed if it also does not overlap any later variant.
-        //
-        // Simpler invariant: we flush records that cannot possibly overlap any
-        // remaining variant. A record at (rid, start..end) cannot overlap any
-        // remaining variant if end <= min_variant_pos for that chrom, or if rid
-        // < min_variant_rid.
-
+        // `min_active` returns the (rid, pos) of the earliest unprocessed variant.
+        // Records that cannot overlap any remaining variant can be flushed.
         let min_active = |vi: usize, sorted: &[(usize, u64, Variant)]| -> Option<(usize, u64)> {
             sorted.get(vi).map(|(rid, pos, _)| (*rid, *pos))
         };
 
         use noodles_sam::alignment::io::Write as _;
 
-        for result in reader.record_bufs(&header) {
-            let record = result.context("failed to read BAM record")?;
-
+        for record in all_records {
             // Determine this record's alignment span.
             let rec_rid = record.reference_sequence_id();
             let rec_start = record.alignment_start().map(|p| usize::from(p) as u64 - 1);
-            let _rec_len = record.sequence().len() as u64;
 
             // Push into buffer unconditionally. We will flush eligible records
             // after processing any variants that have become fully covered.
