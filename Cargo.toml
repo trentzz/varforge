@@ -58,6 +58,8 @@ indicatif = "0.17"
 
 # Error handling
 anyhow = "1"
+noodles-tabix = "0.61.0"
+noodles-csi = "0.39.0"
 
 [dev-dependencies]
 tempfile = "3"

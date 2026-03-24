@@ -1,9 +1,12 @@
+//! Variant allele frequency (VAF) calculation and stochastic alt-read sampling via binomial draws.
+
 use rand::Rng;
 use rand_distr::{Binomial, Distribution};
 
 /// Compute expected VAF from tumour model parameters.
 ///
 /// VAF = CCF * multiplicity * purity / (purity * CN_tumour + (1 - purity) * CN_normal)
+// Called from tests and from vaf_in_amplified_region in cnv.rs (also test-only).
 #[must_use]
 #[allow(dead_code)]
 pub fn expected_vaf(

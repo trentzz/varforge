@@ -101,6 +101,7 @@ pub fn adjusted_coverage(
 /// - For a het SNP on the major allele this is the expected VAF.
 ///
 /// Returns `None` if the region has no allele-specific CN information.
+// Called only in tests.
 #[allow(dead_code)]
 pub fn loh_vaf(purity: f64, major_cn: u32, minor_cn: u32, normal_cn: u32) -> f64 {
     let total_tumor_cn = major_cn + minor_cn;
@@ -121,6 +122,7 @@ pub fn loh_vaf(purity: f64, major_cn: u32, minor_cn: u32, normal_cn: u32) -> f64
 ///   VAF = CCF × multiplicity × purity / (purity × cn_tumor + (1-purity) × cn_normal)
 ///
 /// With CCF=1.0 (clonal) and provided multiplicity.
+// Called only in tests.
 #[allow(dead_code)]
 pub fn vaf_in_amplified_region(
     purity: f64,

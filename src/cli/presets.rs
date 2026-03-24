@@ -65,7 +65,6 @@ pub fn get(name: &str) -> anyhow::Result<PresetOverlay> {
 /// Return the names of all built-in presets (base presets only; cancer presets
 /// are accessible via the `cancer:` prefix — see
 /// [`crate::cli::cancer_presets::all_names`]).
-#[allow(dead_code)]
 pub fn all_names() -> &'static [&'static str] {
     &["small", "panel", "wgs", "cfdna", "ffpe", "umi", "twist"]
 }

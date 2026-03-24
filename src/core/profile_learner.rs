@@ -217,6 +217,7 @@ impl ProfileLearner {
 
     /// Learn a profile directly from in-memory [`RecordBuf`] records (useful for testing
     /// without writing a full BAM to disk).
+    // Called only in tests; production entry point is learn_from_bam.
     #[allow(dead_code)]
     pub fn learn_from_records(
         &self,
@@ -515,6 +516,8 @@ pub fn read_quality_tsv(path: &std::path::Path) -> anyhow::Result<Vec<Vec<[f64; 
 ///
 /// - `is_r2`: sets LAST_SEGMENT flag
 /// - `template_len`: SAM TLEN field (positive for R1, negative for R2 in practice)
+// Lives outside the test module so it can be called across test functions without
+// visibility issues; not used in production code.
 #[allow(dead_code)]
 pub fn make_test_record(
     seq: &[u8],
@@ -569,6 +572,7 @@ pub fn make_test_record(
 }
 
 /// Write a list of [`RecordBuf`]s to a BAM file and return the path.
+// Lives outside the test module for the same reason as make_test_record.
 #[allow(dead_code)]
 pub fn write_test_bam(
     path: &Path,

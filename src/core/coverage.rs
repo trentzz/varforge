@@ -1,3 +1,5 @@
+//! Coverage utilities: read pair count estimation, region partitioning, and target intersection.
+
 use super::types::Region;
 
 /// Calculate the number of read pairs needed for a target coverage.

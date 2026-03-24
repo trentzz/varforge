@@ -1,3 +1,6 @@
+//! FFPE and oxidative damage artifacts: C>T deamination and G>T oxoG transversions with
+//! position-dependent enrichment near fragment ends.
+
 use rand::Rng;
 
 /// Inject FFPE (formalin-fixed, paraffin-embedded) deamination artifacts.

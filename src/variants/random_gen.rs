@@ -1,3 +1,6 @@
+//! Random variant generation: produces SNVs, indels, MNVs, and MSI indels distributed
+//! across genomic regions, with optional mutational signature weighting.
+
 use crate::core::types::{MutationType, Region, Variant};
 use crate::variants::signatures::{builtin_signature, sbs96_index, SignatureVec};
 use rand::Rng;
@@ -249,7 +252,6 @@ fn generate_random_mnv<R: Rng>(
 /// consecutive copies of a 2-mer).
 ///
 /// Used to identify microsatellite-unstable loci for MSI indel generation.
-#[allow(dead_code)]
 pub fn is_repeat_locus(seq: &[u8], pos: usize) -> bool {
     if seq.is_empty() || pos >= seq.len() {
         return false;
@@ -294,7 +296,6 @@ pub fn is_repeat_locus(seq: &[u8], pos: usize) -> bool {
 /// Accepts up to `target_count` repeat-locus positions found within
 /// `max_attempts` random draws. Each variant is a 1-bp insertion that
 /// extends the repeat by one copy of the anchor base, at VAF 0.3.
-#[allow(dead_code)]
 pub fn generate_msi_indels<R: Rng>(
     regions: &[Region],
     reference_lookup: &dyn Fn(&str, u64) -> Option<u8>,

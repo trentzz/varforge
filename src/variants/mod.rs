@@ -1,3 +1,5 @@
+//! Variant generation and spike-in: SNVs, indels, MNVs, SVs, CNVs, and mutational signatures.
+
 pub mod cnv;
 pub mod germline;
 pub mod random_gen;

@@ -86,6 +86,7 @@ pub struct EmpiricalQualityModel {
     /// Context sequences (as byte vecs) → quality penalty.
     context_effects: HashMap<Vec<u8>, ContextEffect>,
     /// Original platform string (for diagnostics).
+    // Stored for future diagnostic output; not yet read by any caller.
     #[allow(dead_code)]
     pub platform: Option<String>,
 }
@@ -292,6 +293,7 @@ impl QualityModel for EmpiricalQualityModel {
 /// Return an `EmpiricalQualityModel` if `profile_path` is `Some`, else `None`.
 ///
 /// `None` signals the caller to fall back to `ParametricQualityModel`.
+// Called only in tests; production code uses `build_empirical_quality` in engine.rs.
 #[allow(dead_code)]
 pub fn load_from_config(profile_path: Option<&Path>) -> Result<Option<EmpiricalQualityModel>> {
     match profile_path {

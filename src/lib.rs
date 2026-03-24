@@ -1,3 +1,8 @@
+//! VarForge: synthetic cancer sequencing data generator.
+//!
+//! Generates realistic FASTQ and BAM files with controlled mutations, tumour parameters,
+//! UMI tags, and cfDNA fragment profiles for benchmarking bioinformatics tools.
+
 pub mod artifacts;
 pub mod cli;
 pub mod core;

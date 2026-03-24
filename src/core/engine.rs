@@ -1,3 +1,6 @@
+//! Read simulation engine: generates read pairs for a genomic region, applies variants,
+//! artifacts, UMI families, and quality models.
+
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -48,6 +51,7 @@ pub struct RegionOutput {
 pub struct AppliedVariant {
     pub variant: Variant,
     pub actual_alt_count: u32,
+    // Not yet surfaced in truth VCF output; retained for future depth reporting.
     #[allow(dead_code)]
     pub actual_total_count: u32,
     /// Number of duplex (AB+BA) family pairs carrying the alt allele.
@@ -74,6 +78,7 @@ impl SimulationEngine {
     ///
     /// If `config.seed` is set that seed is used; otherwise entropy is drawn
     /// from the OS.
+    // Called only in tests; production code uses new_with_shared_config.
     #[allow(dead_code)]
     pub fn new(config: Config, reference: ReferenceGenome) -> Self {
         let config = Arc::new(config);
@@ -99,6 +104,7 @@ impl SimulationEngine {
     ///
     /// This is used for parallel region simulation where the same reference
     /// is shared across multiple engines running on different threads.
+    // Not called in production yet; retained as an alternative constructor for future callers.
     #[allow(dead_code)]
     pub fn new_with_shared_reference(config: Config, reference: Arc<ReferenceGenome>) -> Self {
         let config = Arc::new(config);
@@ -157,6 +163,8 @@ impl SimulationEngine {
     /// - Thread scheduling does not affect determinism.
     ///
     /// If `master_seed` is `None`, per-region entropy is drawn from the OS.
+    // Not called in production yet; retained as a convenience constructor for parallel
+    // pipelines that operate per-region rather than per-config.
     #[allow(dead_code)]
     pub fn new_for_region(
         config: Config,

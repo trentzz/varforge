@@ -126,6 +126,7 @@ impl CaptureModel {
     ///
     /// `mean_coverage` is the experiment-wide mean coverage.
     /// `target_multiplier` is the per-target LogNormal sample for this target.
+    // Called only in tests; production code calls coverage_multiplier directly.
     #[allow(dead_code)]
     pub fn on_target_coverage(
         &self,
@@ -137,6 +138,7 @@ impl CaptureModel {
     }
 
     /// Effective coverage for a position that is **off-target**.
+    // Called only in tests; production code calls coverage_multiplier directly.
     #[allow(dead_code)]
     pub fn off_target_coverage(&self, mean_coverage: f64) -> f64 {
         mean_coverage * self.off_target_fraction

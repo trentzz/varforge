@@ -94,6 +94,7 @@ pub fn run(opts: LearnProfileOpts, _threads: Option<usize>) -> Result<()> {
 ///
 /// This is a convenience wrapper used by the engine when `quality.profile_path`
 /// points to a `.tsv` file.
+// Not yet called from production code; reserved for a future engine hook.
 #[allow(dead_code)]
 pub fn load_quality_tsv(path: &std::path::Path) -> Result<Vec<Vec<[f64; 2]>>> {
     read_quality_tsv(path)

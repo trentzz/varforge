@@ -1,3 +1,5 @@
+//! UMI family simulation: groups reads by molecule and generates PCR duplicate copies with optional error injection.
+
 use rand::Rng;
 
 use crate::core::types::ReadPair;
@@ -5,6 +7,7 @@ use crate::core::types::ReadPair;
 /// A UMI family: one original molecule and its PCR duplicates.
 #[derive(Debug, Clone)]
 pub struct UmiFamily {
+    // Stored for downstream family-aware collapsing; not yet read by generate_pcr_copies.
     #[allow(dead_code)]
     pub umi: Vec<u8>,
     pub original: ReadPair,

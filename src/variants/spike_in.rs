@@ -1,8 +1,11 @@
+//! Read-level variant spike-in: applies SNVs, MNVs, and indels to individual reads.
+
 use crate::core::types::{MutationType, Read};
 
 /// Apply a mutation to a read if it overlaps the mutation position.
 ///
 /// Returns true if the read was modified.
+// Used only in tests; not yet called from production code.
 #[allow(dead_code)]
 pub fn spike_snv(read: &mut Read, read_start: u64, mutation: &MutationType) -> bool {
     match mutation {
@@ -27,6 +30,7 @@ pub fn spike_snv(read: &mut Read, read_start: u64, mutation: &MutationType) -> b
 
 /// Apply an MNV (multi-nucleotide variant) to a read.
 /// All bases must be on the same read — never partially spike.
+// Used only in tests; not yet called from production code.
 #[allow(dead_code)]
 pub fn spike_mnv(read: &mut Read, read_start: u64, mutation: &MutationType) -> bool {
     match mutation {

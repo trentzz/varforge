@@ -1,3 +1,5 @@
+//! Quality score models and error injection for Illumina, PacBio HiFi, and Nanopore R10 reads.
+
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
 

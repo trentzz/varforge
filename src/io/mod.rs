@@ -1,3 +1,6 @@
+//! Input and output: YAML config parsing, FASTQ and BAM writers, reference genome access,
+//! VCF reading and writing, and the simulation manifest.
+
 pub mod bam;
 pub mod config;
 pub mod fastq;

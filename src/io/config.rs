@@ -1,3 +1,5 @@
+//! YAML configuration structs for all simulation parameters, with serde deserialisation and validation.
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -905,7 +907,6 @@ fn substitute_vars(text: &str, vars: &std::collections::HashMap<String, String>)
 /// Returns `(chrom, start, end)` on success. Returns an error if the string
 /// is missing a colon, missing a dash, or if the coordinates are not valid
 /// integers.
-#[allow(dead_code)]
 pub fn parse_region(s: &str) -> Result<(String, u64, u64)> {
     let colon = s
         .find(':')
