@@ -469,7 +469,6 @@ mod tests {
             vafs: None,
             germline: None,
             paired: None,
-            contamination: None,
         };
 
         for name in all_names() {
@@ -533,7 +532,6 @@ mod tests {
             vafs: None,
             germline: None,
             paired: None,
-            contamination: None,
         };
 
         let overlay = get("small").unwrap(); // small preset wants 1x

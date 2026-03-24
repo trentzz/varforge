@@ -343,7 +343,6 @@ mod tests {
             vafs: None,
             germline: None,
             paired: None,
-            contamination: None,
         }
     }
 

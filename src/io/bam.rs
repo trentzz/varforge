@@ -18,7 +18,9 @@ use noodles_sam::{
         RecordBuf,
     },
     header::record::value::{
-        map::{self, header::Version, ReadGroup, ReferenceSequence},
+        map::{
+            self, header::Version, program::tag as pg_tag, Program, ReadGroup, ReferenceSequence,
+        },
         Map,
     },
 };
@@ -49,11 +51,13 @@ impl BamWriter {
         let file = File::create(path)
             .with_context(|| format!("failed to create BAM file: {}", path.display()))?;
 
+        // Normalise to uppercase so values like "illumina" satisfy GATK's
+        // requirement that PL tags use uppercase platform names.
         let platform = sample_config
             .platform
             .as_deref()
             .unwrap_or("ILLUMINA")
-            .to_string();
+            .to_uppercase();
 
         let sample_name = sample_config.name.clone();
 
@@ -100,7 +104,17 @@ impl BamWriter {
                 .insert(lb_tag, sample_name.as_str().into());
         }
 
-        let header = builder.add_read_group(sample_name.as_str(), rg).build();
+        // Build @PG with PN and VN fields.
+        let mut pg = Map::<Program>::default();
+        pg.other_fields_mut()
+            .insert(pg_tag::NAME, "varforge".into());
+        pg.other_fields_mut()
+            .insert(pg_tag::VERSION, env!("CARGO_PKG_VERSION").into());
+
+        let header = builder
+            .add_read_group(sample_name.as_str(), rg)
+            .add_program("varforge", pg)
+            .build();
 
         let mut writer = bam::io::Writer::new(file);
         writer
@@ -130,16 +144,21 @@ impl BamWriter {
         cigar_r1: &str,
         cigar_r2: &str,
     ) -> Result<()> {
-        // NM=0: simulated reads with no injected variants have zero mismatches.
+        // Compute NM from read vs reference and CIGAR for each read.
+        let nm_r1 = compute_nm(&pair.read1.seq, &pair.ref_seq_r1, cigar_r1);
+        let r2_seq_rc = crate::seq_utils::reverse_complement(&pair.read2.seq);
+        let ref_r2_rc = crate::seq_utils::reverse_complement(&pair.ref_seq_r2);
+        let nm_r2 = compute_nm(&r2_seq_rc, &ref_r2_rc, cigar_r2);
+
         let data_r1: Data = [
             (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
-            (Tag::EDIT_DISTANCE, Value::from(0i32)),
+            (Tag::EDIT_DISTANCE, Value::from(nm_r1 as i32)),
         ]
         .into_iter()
         .collect();
         let data_r2: Data = [
             (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
-            (Tag::EDIT_DISTANCE, Value::from(0i32)),
+            (Tag::EDIT_DISTANCE, Value::from(nm_r2 as i32)),
         ]
         .into_iter()
         .collect();
@@ -193,11 +212,10 @@ impl BamWriter {
         self.emit(&record)
     }
 
-    /// Write a read pair with optional UMI tags (RX and MI).
+    /// Write a read pair with UMI tags (RX and MI).
     ///
     /// - `umi`: UMI barcode sequence string (written as `RX:Z:...`)
     /// - `family_id`: molecular family identifier (written as `MI:i:...`)
-    #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)]
     pub fn write_pair_with_umi(
         &mut self,
@@ -209,11 +227,17 @@ impl BamWriter {
         umi: &str,
         family_id: i32,
     ) -> Result<()> {
+        // Compute NM from read vs reference and CIGAR for each read.
+        let nm_r1 = compute_nm(&pair.read1.seq, &pair.ref_seq_r1, cigar_r1);
+        let r2_seq_rc = crate::seq_utils::reverse_complement(&pair.read2.seq);
+        let ref_r2_rc = crate::seq_utils::reverse_complement(&pair.ref_seq_r2);
+        let nm_r2 = compute_nm(&r2_seq_rc, &ref_r2_rc, cigar_r2);
+
         let data_r1: Data = [
             (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
             (Tag::UMI_SEQUENCE, Value::from(umi)),
             (Tag::UMI_ID, Value::from(family_id)),
-            (Tag::EDIT_DISTANCE, Value::from(0i32)),
+            (Tag::EDIT_DISTANCE, Value::from(nm_r1 as i32)),
         ]
         .into_iter()
         .collect();
@@ -221,7 +245,7 @@ impl BamWriter {
             (Tag::READ_GROUP, Value::from(self.sample_name.as_str())),
             (Tag::UMI_SEQUENCE, Value::from(umi)),
             (Tag::UMI_ID, Value::from(family_id)),
-            (Tag::EDIT_DISTANCE, Value::from(0i32)),
+            (Tag::EDIT_DISTANCE, Value::from(nm_r2 as i32)),
         ]
         .into_iter()
         .collect();
@@ -396,6 +420,79 @@ pub fn build_md_string(read_seq: &[u8], ref_seq: &[u8]) -> String {
     result
 }
 
+/// Compute the NM (edit distance) value for a single read.
+///
+/// NM is defined per the SAM specification as the number of mismatches plus
+/// the total length of all insertions and deletions relative to the reference.
+///
+/// The function walks the CIGAR operations, consuming bases from `read_seq`
+/// and `ref_seq` as each operation dictates:
+///
+/// - Match (`M`): compare bases; count mismatches.
+/// - Insertion (`I`): consume read bases; add the insertion length to NM.
+/// - Deletion (`D`): consume reference bases; add the deletion length to NM.
+/// - Soft clip (`S`): consume read bases; no contribution to NM.
+/// - Hard clip (`H`), skip (`N`), pad (`P`): no bases consumed from either.
+///
+/// If `ref_seq` is empty (no reference available), NM falls back to zero.
+///
+/// # Arguments
+///
+/// - `read_seq`: the read sequence as written in the BAM record (forward strand
+///   for R1; reverse-complemented for R2).
+/// - `ref_seq`: the corresponding reference slice in the same orientation.
+/// - `cigar_str`: the CIGAR string for this read.
+pub fn compute_nm(read_seq: &[u8], ref_seq: &[u8], cigar_str: &str) -> usize {
+    if ref_seq.is_empty() {
+        return 0;
+    }
+
+    let ops = match parse_cigar(cigar_str) {
+        Ok(ops) => ops,
+        Err(_) => return 0,
+    };
+
+    let mut nm: usize = 0;
+    let mut read_pos: usize = 0;
+    let mut ref_pos: usize = 0;
+
+    for op in &ops {
+        let len = op.len();
+        match op.kind() {
+            Kind::Match | Kind::SequenceMatch | Kind::SequenceMismatch => {
+                // Compare bases one by one and count mismatches.
+                for i in 0..len {
+                    let rp = read_pos + i;
+                    let fp = ref_pos + i;
+                    if rp < read_seq.len()
+                        && fp < ref_seq.len()
+                        && !read_seq[rp].eq_ignore_ascii_case(&ref_seq[fp])
+                    {
+                        nm += 1;
+                    }
+                }
+                read_pos += len;
+                ref_pos += len;
+            }
+            Kind::Insertion => {
+                nm += len;
+                read_pos += len;
+            }
+            Kind::Deletion | Kind::Skip => {
+                nm += len;
+                ref_pos += len;
+            }
+            Kind::SoftClip => {
+                read_pos += len;
+            }
+            // Hard clip and pad do not consume bases from either sequence.
+            Kind::HardClip | Kind::Pad => {}
+        }
+    }
+
+    nm
+}
+
 /// Parse a CIGAR string like `"150M"` or `"5M2I143M"` into a list of [`Op`]s.
 pub fn parse_cigar(cigar_str: &str) -> Result<Vec<Op>> {
     let mut ops = Vec::new();
@@ -506,6 +603,15 @@ mod tests {
         }
     }
 
+    fn make_sample_config_with_platform(name: &str, platform: &str) -> SampleConfig {
+        SampleConfig {
+            name: name.to_string(),
+            read_length: 150,
+            coverage: 30.0,
+            platform: Some(platform.to_string()),
+        }
+    }
+
     fn make_read_pair(name: &str, len: usize) -> ReadPair {
         let seq = vec![b'A'; len];
         let qual = vec![30u8; len];
@@ -560,6 +666,32 @@ mod tests {
         // @RG line
         assert_eq!(header.read_groups().len(), 1);
         assert!(header.read_groups().contains_key(&b"SAMPLE"[..]));
+    }
+
+    #[test]
+    fn test_platform_normalised_to_uppercase() {
+        // Passing "illumina" (lowercase) must produce "ILLUMINA" in the PL tag.
+        let tmp = NamedTempFile::new().unwrap();
+        let refs = ref_seqs();
+        let cfg = make_sample_config_with_platform("SAMPLE", "illumina");
+
+        let writer = BamWriter::new(tmp.path(), &refs, &cfg, 60).unwrap();
+        let header = writer.header().clone();
+        writer.finish().unwrap();
+
+        let rg = header
+            .read_groups()
+            .get(&b"SAMPLE"[..])
+            .expect("RG not found");
+
+        let pl_tag =
+            noodles_sam::header::record::value::map::tag::Other::try_from([b'P', b'L']).unwrap();
+        let pl_value = rg
+            .other_fields()
+            .get(&pl_tag)
+            .expect("PL field missing from @RG");
+        let pl_bytes: &[u8] = pl_value.as_ref();
+        assert_eq!(pl_bytes, b"ILLUMINA", "PL tag must be uppercase");
     }
 
     #[test]
@@ -756,6 +888,121 @@ mod tests {
         assert_eq!(build_md_string(read, ref_seq), "1T1A0");
     }
 
+    // --- NM tag unit tests ---
+
+    #[test]
+    fn test_nm_all_match() {
+        // 10 bp, all bases identical: NM = 0.
+        let read = vec![b'A'; 10];
+        let ref_seq = vec![b'A'; 10];
+        assert_eq!(compute_nm(&read, &ref_seq, "10M"), 0);
+    }
+
+    #[test]
+    fn test_nm_single_snv() {
+        // One mismatch at position 5: NM = 1.
+        let mut read = vec![b'A'; 10];
+        read[5] = b'C';
+        let ref_seq = vec![b'A'; 10];
+        assert_eq!(compute_nm(&read, &ref_seq, "10M"), 1);
+    }
+
+    #[test]
+    fn test_nm_insertion() {
+        // 2 bp insertion in the read: NM = 2.
+        // read: 5 matches + 2 inserted + 3 matches = 10 bp read, 8 bp ref.
+        let read = vec![b'A'; 10];
+        let ref_seq = vec![b'A'; 8];
+        assert_eq!(compute_nm(&read, &ref_seq, "5M2I3M"), 2);
+    }
+
+    #[test]
+    fn test_nm_deletion() {
+        // 2 bp deletion from reference: NM = 2.
+        // read: 5 matches + 3 matches = 8 bp read, 10 bp ref.
+        let read = vec![b'A'; 8];
+        let ref_seq = vec![b'A'; 10];
+        assert_eq!(compute_nm(&read, &ref_seq, "5M2D3M"), 2);
+    }
+
+    #[test]
+    fn test_nm_snv_and_indel() {
+        // 1 mismatch + 2 bp deletion: NM = 3.
+        // read:  ACCCAAA  (7 bp: pos 0 is mismatch, then 6 match)
+        // ref:   AACCAAAAA (9 bp: pos 0 matches A, pos 1 matches A, 2-bp del, then 5 match)
+        // CIGAR: 2M2D5M
+        let mut read = vec![b'A'; 7];
+        read[1] = b'C'; // mismatch at read pos 1 vs ref pos 1 (ref=A)
+        let ref_seq = vec![b'A'; 9];
+        assert_eq!(compute_nm(&read, &ref_seq, "2M2D5M"), 3);
+    }
+
+    #[test]
+    fn test_nm_empty_ref() {
+        // No reference available: NM = 0.
+        let read = vec![b'A'; 10];
+        assert_eq!(compute_nm(&read, &[], "10M"), 0);
+    }
+
+    #[test]
+    fn test_nm_soft_clip_ignored() {
+        // Soft clip does not contribute to NM.
+        // CIGAR: 2S8M — only the 8M region is compared.
+        let read = vec![b'A'; 10];
+        let ref_seq = vec![b'A'; 8];
+        assert_eq!(compute_nm(&read, &ref_seq, "2S8M"), 0);
+    }
+
+    #[test]
+    fn test_nm_written_to_bam() {
+        // End-to-end: write a pair with one SNV, read back NM tag.
+        let tmp = NamedTempFile::new().unwrap();
+        let refs = ref_seqs();
+        let cfg = make_sample_config("SAMPLE");
+
+        // Build a read pair where read1 has one mismatch vs the reference.
+        let mut seq1 = vec![b'A'; 100];
+        seq1[10] = b'C'; // mismatch at position 10
+        let ref1 = vec![b'A'; 100]; // reference is all A's
+
+        let seq2 = vec![b'A'; 100];
+        let ref2 = vec![b'A'; 100];
+
+        let pair = ReadPair {
+            name: "nmtest".to_string(),
+            read1: Read::new(seq1, vec![30u8; 100]),
+            read2: Read::new(seq2, vec![30u8; 100]),
+            fragment_start: 0,
+            fragment_length: 250,
+            chrom: "chr1".to_string(),
+            variant_tags: Vec::new(),
+            ref_seq_r1: ref1,
+            ref_seq_r2: ref2,
+        };
+
+        let mut writer = BamWriter::new(tmp.path(), &refs, &cfg, 60).unwrap();
+        writer.write_pair(&pair, 0, 0, "100M", "100M").unwrap();
+        let header = writer.header().clone();
+        writer.finish().unwrap();
+
+        let records = read_back_records(tmp.path(), &header);
+        assert_eq!(records.len(), 2);
+
+        // R1 has one mismatch: NM should be 1.
+        let nm_r1 = records[0]
+            .data()
+            .get(&Tag::EDIT_DISTANCE)
+            .expect("NM tag missing on R1");
+        assert_eq!(nm_r1.as_int(), Some(1), "R1 NM should be 1");
+
+        // R2 has no mismatches: NM should be 0.
+        let nm_r2 = records[1]
+            .data()
+            .get(&Tag::EDIT_DISTANCE)
+            .expect("NM tag missing on R2");
+        assert_eq!(nm_r2.as_int(), Some(0), "R2 NM should be 0");
+    }
+
     #[test]
     fn test_read_group() {
         let tmp = NamedTempFile::new().unwrap();
@@ -785,5 +1032,38 @@ mod tests {
 
         // Also verify RG is in the header
         assert!(header.read_groups().contains_key(&b"MY_SAMPLE"[..]));
+    }
+
+    #[test]
+    fn test_pg_record_in_header() {
+        let tmp = NamedTempFile::new().unwrap();
+        let refs = ref_seqs();
+        let cfg = make_sample_config("SAMPLE");
+
+        let writer = BamWriter::new(tmp.path(), &refs, &cfg, 60).unwrap();
+        let header = writer.header().clone();
+        writer.finish().unwrap();
+
+        // @PG line with ID:varforge must be present.
+        assert!(
+            header.programs().as_ref().contains_key(&b"varforge"[..]),
+            "@PG ID:varforge not found in header"
+        );
+
+        let pg = &header.programs().as_ref()[&b"varforge"[..]];
+
+        // PN field
+        let pn = pg
+            .other_fields()
+            .get(&pg_tag::NAME)
+            .expect("PN field missing from @PG");
+        assert_eq!(pn, "varforge");
+
+        // VN field must be a non-empty string.
+        let vn = pg
+            .other_fields()
+            .get(&pg_tag::VERSION)
+            .expect("VN field missing from @PG");
+        assert!(!vn.is_empty(), "VN field should not be empty");
     }
 }

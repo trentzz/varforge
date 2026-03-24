@@ -66,9 +66,6 @@ pub struct Config {
     /// sub-directories under `output.directory`.
     #[serde(default)]
     pub paired: Option<PairedConfig>,
-    /// Optional cross-sample contamination configuration.
-    #[serde(default)]
-    pub contamination: Option<ContaminationConfig>,
 }
 
 /// Performance tuning parameters for the streaming output pipeline.
@@ -228,7 +225,6 @@ fn default_lr_max() -> usize {
 pub enum FragmentModel {
     Normal,
     Cfda,
-    Custom,
 }
 
 fn default_fragment_model() -> FragmentModel {
@@ -562,30 +558,6 @@ impl Default for PairedConfig {
 
 fn default_normal_sample_name() -> String {
     "NORMAL".to_string()
-}
-
-/// Configuration for cross-sample contamination simulation.
-///
-/// Enables synthetic contamination from a donor SNP profile. Reads carrying
-/// donor SNPs are drawn at the specified fraction.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContaminationConfig {
-    /// Contamination fraction (0.0–1.0). This fraction of read pairs will
-    /// carry donor alleles instead of the primary sample sequence.
-    pub fraction: f64,
-    /// Path to a VCF of donor SNPs. Used as the contamination source.
-    /// When absent, random donor-like SNVs are generated instead.
-    #[serde(default)]
-    pub vcf: Option<std::path::PathBuf>,
-}
-
-impl Default for ContaminationConfig {
-    fn default() -> Self {
-        Self {
-            fraction: 0.0,
-            vcf: None,
-        }
-    }
 }
 
 // Default value functions
@@ -985,10 +957,34 @@ pub fn validate(config: &Config) -> Result<()> {
         config.fragment.mean
     );
     anyhow::ensure!(
-        config.fragment.sd >= 0.0,
-        "fragment sd must be non-negative, got {}",
+        config.fragment.sd > 0.0,
+        "fragment.sd must be greater than zero, got {}",
         config.fragment.sd
     );
+
+    // T115: mono_sd, di_sd, and long_read.sd must be positive so that
+    // Normal::new() and LogNormal::new() succeed.
+    if let Some(mono_sd) = config.fragment.mono_sd {
+        anyhow::ensure!(
+            mono_sd > 0.0,
+            "fragment.mono_sd must be greater than zero, got {}",
+            mono_sd
+        );
+    }
+    if let Some(di_sd) = config.fragment.di_sd {
+        anyhow::ensure!(
+            di_sd > 0.0,
+            "fragment.di_sd must be greater than zero, got {}",
+            di_sd
+        );
+    }
+    if let Some(ref lr) = config.fragment.long_read {
+        anyhow::ensure!(
+            lr.sd > 0,
+            "fragment.long_read.sd must be greater than zero, got {}",
+            lr.sd
+        );
+    }
 
     if let Some(ctdna_frac) = config.fragment.ctdna_fraction {
         anyhow::ensure!(
@@ -1095,14 +1091,6 @@ pub fn validate(config: &Config) -> Result<()> {
                 vaf
             );
         }
-    }
-
-    if let Some(ref cont) = config.contamination {
-        anyhow::ensure!(
-            (0.0..=1.0).contains(&cont.fraction),
-            "contamination fraction must be in [0.0, 1.0], got {}",
-            cont.fraction
-        );
     }
 
     Ok(())
@@ -1416,5 +1404,62 @@ fragment:
         let vars = std::collections::HashMap::new();
         let result = substitute_vars("plain string", &vars).unwrap();
         assert_eq!(result, "plain string");
+    }
+
+    // T115: zero standard deviation must fail validation.
+
+    /// `fragment.sd: 0.0` fails validation with a clear message.
+    #[test]
+    fn test_fragment_sd_zero_fails_validation() {
+        let yaml = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+fragment:
+  sd: 0.0
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        let err = validate(&cfg).unwrap_err();
+        assert!(
+            err.to_string().contains("greater than zero"),
+            "error should mention 'greater than zero', got: {}",
+            err
+        );
+    }
+
+    /// `fragment.mono_sd: 0.0` fails validation.
+    #[test]
+    fn test_fragment_mono_sd_zero_fails_validation() {
+        let yaml = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+fragment:
+  sd: 20.0
+  mono_sd: 0.0
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        assert!(
+            validate(&cfg).is_err(),
+            "mono_sd: 0.0 should fail validation"
+        );
+    }
+
+    /// `fragment.di_sd: 0.0` fails validation.
+    #[test]
+    fn test_fragment_di_sd_zero_fails_validation() {
+        let yaml = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+fragment:
+  sd: 20.0
+  di_sd: 0.0
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        assert!(validate(&cfg).is_err(), "di_sd: 0.0 should fail validation");
     }
 }
