@@ -166,7 +166,6 @@ pub struct Variant {
     /// Populated when a `ClonalTree` is constructed from config.  `None`
     /// indicates no clonal-tree model was used; callers fall back to
     /// `expected_vaf` as a proxy.
-    #[allow(dead_code)]
     pub ccf: Option<f64>,
 }
 

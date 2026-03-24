@@ -21,6 +21,7 @@ use crate::io::manifest::{Manifest, ReferenceInfo, SimulationStatistics};
 use crate::io::reference::ReferenceGenome;
 use crate::io::truth_vcf::TruthVcfWriter;
 use crate::io::vcf_input;
+use crate::tumour::clonal_tree::{ClonalTree, Clone as TumourClone};
 use crate::variants::germline::generate_germline_variants;
 use crate::variants::random_gen::{
     generate_msi_indels, generate_random_mutations, resolve_signature,
@@ -158,6 +159,7 @@ pub fn apply_overrides(
             random: None,
             sv_count: 0,
             sv_signature: None,
+            include_driver_mutations: false,
         });
         let rand = existing.random.get_or_insert(config::RandomMutationConfig {
             count: 0,
@@ -2136,7 +2138,185 @@ fn build_somatic_variant_list(
         variants.extend(msi_variants);
     }
 
+    // Driver mutation injection: add canonical hotspot mutations from the
+    // active cancer preset. Only mutations with fully specified genomic
+    // coordinates (chrom, pos, ref_allele, alt_allele all Some) are injected.
+    // Structural/fusion events without allele fields are silently skipped.
+    if mutations_cfg.include_driver_mutations {
+        if let Some(ref preset_name) = cfg.preset {
+            if let Some(cancer_name) = preset_name.strip_prefix("cancer:") {
+                let purity = cfg.tumour.as_ref().map(|t| t.purity).unwrap_or(1.0);
+                // Clonal heterozygous driver: VAF = purity / 2.
+                let driver_vaf = purity / 2.0;
+
+                let drivers = crate::cli::cancer_presets::drivers_for(cancer_name);
+                let mut injected = 0usize;
+                for driver in drivers {
+                    // Skip mutations without fully resolved genomic coordinates.
+                    let (Some(chrom), Some(pos), Some(ref_allele), Some(alt_allele)) = (
+                        driver.chrom,
+                        driver.pos,
+                        driver.ref_allele,
+                        driver.alt_allele,
+                    ) else {
+                        continue;
+                    };
+
+                    // Only inject mutations with prevalence above 10 % to keep
+                    // the variant list realistic without overwhelming it.
+                    if driver.prevalence <= 0.1 {
+                        continue;
+                    }
+
+                    let mutation = if ref_allele.len() == 1 && alt_allele.len() == 1 {
+                        MutationType::Snv {
+                            pos,
+                            ref_base: ref_allele[0],
+                            alt_base: alt_allele[0],
+                        }
+                    } else {
+                        MutationType::Indel {
+                            pos,
+                            ref_seq: ref_allele.to_vec(),
+                            alt_seq: alt_allele.to_vec(),
+                        }
+                    };
+
+                    variants.push(Variant {
+                        chrom: chrom.to_string(),
+                        mutation,
+                        expected_vaf: driver_vaf,
+                        clone_id: None,
+                        haplotype: None,
+                        ccf: None,
+                    });
+                    injected += 1;
+                }
+
+                if injected > 0 {
+                    tracing::info!(
+                        "injected {} driver mutation(s) from cancer preset '{}'",
+                        injected,
+                        cancer_name
+                    );
+                }
+            }
+        }
+    }
+
+    // Clonal tree integration (T067, T080).
+    //
+    // When `tumour.clones` is non-empty, build a ClonalTree and use it to:
+    //   1. Set the true CCF on each variant from its assigned clone.
+    //   2. Compute effective VAF: vaf = ccf * purity / ploidy.
+    //   3. Propagate mutations from parent clones to all descendant clones by
+    //      duplicating the variant with the subclone's CCF and effective VAF.
+    if let Some(tumour_cfg) = &cfg.tumour {
+        if !tumour_cfg.clones.is_empty() {
+            variants = apply_clonal_tree(variants, tumour_cfg, &tumour_cfg.clones)?;
+        }
+    }
+
     Ok(variants)
+}
+
+/// Apply the clonal tree model to a variant list.
+///
+/// For each variant with a `clone_id` that matches a clone in the tree:
+///   - Sets `variant.ccf` to the clone's CCF.
+///   - Sets `variant.expected_vaf` to `ccf * purity / ploidy` (if not already
+///     user-specified via a VCF `AF` field or random generation outside clonal context).
+///
+/// Mutations are inherited by descendant clones. If a variant is assigned to
+/// clone A and clone B is a child of A, the variant also appears in B's cells.
+/// This is modelled by adding a copy of the variant for each descendant, with
+/// that descendant's CCF and effective VAF.
+///
+/// When `clone_id` is `None` or does not match any tree node, the variant is
+/// left unchanged.
+fn apply_clonal_tree(
+    variants: Vec<Variant>,
+    tumour_cfg: &crate::io::config::TumourConfig,
+    clone_cfgs: &[crate::io::config::CloneConfig],
+) -> Result<Vec<Variant>> {
+    // Build the ClonalTree.
+    let clones: Vec<TumourClone> = clone_cfgs
+        .iter()
+        .map(|c| TumourClone {
+            id: c.id.clone(),
+            ccf: c.ccf,
+            parent: c.parent.clone(),
+        })
+        .collect();
+    let tree = ClonalTree::new(clones).context("invalid clonal tree in config")?;
+
+    let purity = tumour_cfg.purity;
+    let ploidy = tumour_cfg.ploidy as f64;
+
+    // Helper: collect all descendant clone IDs for a given clone (excluding itself).
+    let descendants_of = |clone_id: &str| -> Vec<String> {
+        // BFS over children.
+        let mut result = Vec::new();
+        let mut queue = std::collections::VecDeque::new();
+        for child_id in tree.children_of(clone_id) {
+            queue.push_back(child_id.clone());
+        }
+        while let Some(id) = queue.pop_front() {
+            result.push(id.clone());
+            for child_id in tree.children_of(&id) {
+                queue.push_back(child_id.clone());
+            }
+        }
+        result
+    };
+
+    let n_input = variants.len();
+    let mut output: Vec<Variant> = Vec::with_capacity(n_input);
+
+    for mut v in variants {
+        let Some(ref clone_id) = v.clone_id.clone() else {
+            // No clone assignment: leave untouched.
+            output.push(v);
+            continue;
+        };
+
+        let Some(clone) = tree.get(clone_id) else {
+            // Clone ID not found in tree: leave untouched.
+            output.push(v);
+            continue;
+        };
+
+        let ccf = clone.ccf;
+        let effective_vaf = ccf * purity / ploidy;
+
+        // Update the originating variant.
+        v.ccf = Some(ccf);
+        v.expected_vaf = effective_vaf;
+        output.push(v.clone());
+
+        // Propagate to descendant clones.
+        for desc_id in descendants_of(clone_id) {
+            let Some(desc_clone) = tree.get(&desc_id) else {
+                continue;
+            };
+            let desc_ccf = desc_clone.ccf;
+            let desc_vaf = desc_ccf * purity / ploidy;
+            let mut desc_v = v.clone();
+            desc_v.clone_id = Some(desc_id.clone());
+            desc_v.ccf = Some(desc_ccf);
+            desc_v.expected_vaf = desc_vaf;
+            output.push(desc_v);
+        }
+    }
+
+    tracing::info!(
+        "clonal tree applied ({} clones): {} input variants -> {} output variants (including propagated)",
+        tree.clones().len(),
+        n_input,
+        output.len()
+    );
+
+    Ok(output)
 }
 
 /// Generate germline variants from config and merge them with somatic variants.

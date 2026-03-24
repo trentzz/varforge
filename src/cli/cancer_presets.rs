@@ -59,7 +59,6 @@ pub fn get(name: &str) -> anyhow::Result<PresetOverlay> {
 
 /// Return the names of all built-in cancer-type presets (without the
 /// `cancer:` namespace prefix).
-#[allow(dead_code)] // TODO(T068): remove once driver mutations are wired into presets
 pub fn all_names() -> &'static [&'static str] {
     &[
         "lung_adeno",
@@ -120,6 +119,7 @@ fn preset_lung_adeno() -> PresetOverlay {
             }),
             sv_signature: None,
             sv_count: 0,
+            include_driver_mutations: false,
         }),
         ..Default::default()
     }
@@ -149,6 +149,7 @@ fn preset_colorectal() -> PresetOverlay {
             }),
             sv_signature: None,
             sv_count: 0,
+            include_driver_mutations: false,
         }),
         ..Default::default()
     }
@@ -178,6 +179,7 @@ fn preset_breast_tnbc() -> PresetOverlay {
             }),
             sv_signature: None,
             sv_count: 0,
+            include_driver_mutations: false,
         }),
         artifacts: Some(ArtifactConfig {
             ffpe_damage_rate: None,
@@ -213,6 +215,7 @@ fn preset_melanoma() -> PresetOverlay {
             }),
             sv_signature: None,
             sv_count: 0,
+            include_driver_mutations: false,
         }),
         ..Default::default()
     }
@@ -242,6 +245,7 @@ fn preset_aml() -> PresetOverlay {
             }),
             sv_signature: None,
             sv_count: 0,
+            include_driver_mutations: false,
         }),
         ..Default::default()
     }
@@ -270,6 +274,7 @@ fn preset_prostate() -> PresetOverlay {
             }),
             sv_signature: None,
             sv_count: 0,
+            include_driver_mutations: false,
         }),
         ..Default::default()
     }
@@ -298,6 +303,7 @@ fn preset_pancreatic() -> PresetOverlay {
             }),
             sv_signature: None,
             sv_count: 0,
+            include_driver_mutations: false,
         }),
         ..Default::default()
     }
@@ -326,6 +332,7 @@ fn preset_glioblastoma() -> PresetOverlay {
             }),
             sv_signature: None,
             sv_count: 0,
+            include_driver_mutations: false,
         }),
         ..Default::default()
     }
@@ -364,7 +371,6 @@ pub struct DriverMutation {
 
 /// Return the list of canonical driver mutations for a given cancer preset
 /// name.  The name must **not** include the `cancer:` prefix.
-#[allow(dead_code)] // TODO(T068): remove once driver mutations are wired into presets
 pub fn drivers_for(preset_name: &str) -> &'static [DriverMutation] {
     match preset_name {
         "lung_adeno" => LUNG_ADENO_DRIVERS,
@@ -379,7 +385,6 @@ pub fn drivers_for(preset_name: &str) -> &'static [DriverMutation] {
     }
 }
 
-#[allow(dead_code)] // TODO(T068): remove once driver mutations are wired into presets
 static LUNG_ADENO_DRIVERS: &[DriverMutation] = &[
     DriverMutation {
         gene: "KRAS",
@@ -442,7 +447,6 @@ static LUNG_ADENO_DRIVERS: &[DriverMutation] = &[
     },
 ];
 
-#[allow(dead_code)] // TODO(T068): remove once driver mutations are wired into presets
 static COLORECTAL_DRIVERS: &[DriverMutation] = &[
     DriverMutation {
         gene: "KRAS",
@@ -492,7 +496,6 @@ static COLORECTAL_DRIVERS: &[DriverMutation] = &[
     },
 ];
 
-#[allow(dead_code)] // TODO(T068): remove once driver mutations are wired into presets
 static BREAST_TNBC_DRIVERS: &[DriverMutation] = &[
     DriverMutation {
         gene: "TP53",
@@ -533,7 +536,6 @@ static BREAST_TNBC_DRIVERS: &[DriverMutation] = &[
     },
 ];
 
-#[allow(dead_code)] // TODO(T068): remove once driver mutations are wired into presets
 static MELANOMA_DRIVERS: &[DriverMutation] = &[
     DriverMutation {
         gene: "BRAF",
@@ -585,7 +587,6 @@ static MELANOMA_DRIVERS: &[DriverMutation] = &[
     },
 ];
 
-#[allow(dead_code)] // TODO(T068): remove once driver mutations are wired into presets
 static AML_DRIVERS: &[DriverMutation] = &[
     DriverMutation {
         gene: "FLT3",
@@ -643,7 +644,6 @@ static AML_DRIVERS: &[DriverMutation] = &[
     },
 ];
 
-#[allow(dead_code)] // TODO(T068): remove once driver mutations are wired into presets
 static PROSTATE_DRIVERS: &[DriverMutation] = &[
     DriverMutation {
         gene: "TMPRSS2-ERG",
@@ -692,7 +692,6 @@ static PROSTATE_DRIVERS: &[DriverMutation] = &[
     },
 ];
 
-#[allow(dead_code)] // TODO(T068): remove once driver mutations are wired into presets
 static PANCREATIC_DRIVERS: &[DriverMutation] = &[
     DriverMutation {
         gene: "KRAS",
@@ -732,7 +731,6 @@ static PANCREATIC_DRIVERS: &[DriverMutation] = &[
     },
 ];
 
-#[allow(dead_code)] // TODO(T068): remove once driver mutations are wired into presets
 static GLIOBLASTOMA_DRIVERS: &[DriverMutation] = &[
     DriverMutation {
         gene: "EGFR",

@@ -51,7 +51,6 @@ pub struct AppliedVariant {
     #[allow(dead_code)]
     pub actual_total_count: u32,
     /// Number of duplex (AB+BA) family pairs carrying the alt allele.
-    // TODO(T004): wire duplex family count here
     pub duplex_alt_count: u32,
 }
 

@@ -39,7 +39,12 @@ pub struct PresetOverlay {
 /// routed to [`crate::cli::cancer_presets::get`].
 pub fn get(name: &str) -> anyhow::Result<PresetOverlay> {
     if let Some(cancer_name) = name.strip_prefix("cancer:") {
-        return crate::cli::cancer_presets::get(cancer_name);
+        let mut overlay = crate::cli::cancer_presets::get(cancer_name)?;
+        // Enable driver mutation injection for all cancer presets by default.
+        if let Some(ref mut muts) = overlay.mutations {
+            muts.include_driver_mutations = true;
+        }
+        return Ok(overlay);
     }
     match name {
         "small" => Ok(preset_small()),
@@ -90,6 +95,7 @@ fn preset_small() -> PresetOverlay {
             }),
             sv_count: 0,
             sv_signature: None,
+            include_driver_mutations: false,
         }),
         ..Default::default()
     }
@@ -114,6 +120,7 @@ fn preset_panel() -> PresetOverlay {
             }),
             sv_count: 0,
             sv_signature: None,
+            include_driver_mutations: false,
         }),
         umi: Some(UmiConfig {
             length: 8,
@@ -146,6 +153,7 @@ fn preset_wgs() -> PresetOverlay {
             }),
             sv_count: 0,
             sv_signature: None,
+            include_driver_mutations: false,
         }),
         ..Default::default()
     }
@@ -181,6 +189,7 @@ fn preset_cfdna() -> PresetOverlay {
             }),
             sv_count: 0,
             sv_signature: None,
+            include_driver_mutations: false,
         }),
         umi: Some(UmiConfig {
             length: 8,
@@ -219,6 +228,7 @@ fn preset_ffpe() -> PresetOverlay {
             }),
             sv_count: 0,
             sv_signature: None,
+            include_driver_mutations: false,
         }),
         ..Default::default()
     }
@@ -243,6 +253,7 @@ fn preset_umi() -> PresetOverlay {
             }),
             sv_count: 0,
             sv_signature: None,
+            include_driver_mutations: false,
         }),
         umi: Some(UmiConfig {
             length: 9,
@@ -295,6 +306,7 @@ fn preset_twist() -> PresetOverlay {
             }),
             sv_count: 0,
             sv_signature: None,
+            include_driver_mutations: false,
         }),
         capture: Some(CaptureConfig {
             enabled: true,
