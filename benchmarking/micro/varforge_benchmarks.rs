@@ -29,14 +29,14 @@ fn bench_fragment_sampling(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     // Normal (WGS) sampler
-    let normal_sampler = NormalFragmentSampler::new(300.0, 50.0);
+    let normal_sampler = NormalFragmentSampler::new(300.0, 50.0).unwrap();
     group.bench_function("normal_wgs", |b| {
         let mut rng = StdRng::seed_from_u64(42);
         b.iter(|| black_box(normal_sampler.sample(&mut rng)));
     });
 
     // cfDNA sampler (more expensive: has ctDNA branch + periodicity)
-    let cfdna_sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.05);
+    let cfdna_sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.05, 20.0, 30.0).unwrap();
     group.bench_function("cfdna", |b| {
         let mut rng = StdRng::seed_from_u64(42);
         b.iter(|| black_box(cfdna_sampler.sample(&mut rng)));
@@ -187,6 +187,9 @@ fn make_read_pair(read_len: usize) -> ReadPair {
         fragment_start: 1000,
         fragment_length: read_len * 2,
         chrom: "chr1".to_string(),
+        variant_tags: Vec::new(),
+        ref_seq_r1: Vec::new(),
+        ref_seq_r2: Vec::new(),
     }
 }
 
@@ -317,7 +320,7 @@ fn bench_umi_generation(c: &mut Criterion) {
 fn bench_pipeline_mini(c: &mut Criterion) {
     let mut group = c.benchmark_group("pipeline_mini");
 
-    let frag_sampler = NormalFragmentSampler::new(300.0, 50.0);
+    let frag_sampler = NormalFragmentSampler::new(300.0, 50.0).unwrap();
     let qual_model = ParametricQualityModel::new(36, 0.003);
     let snv = MutationType::Snv {
         pos: 1050,
@@ -355,6 +358,9 @@ fn bench_pipeline_mini(c: &mut Criterion) {
                             fragment_start: read_start,
                             fragment_length: frag_len,
                             chrom: "chr1".to_string(),
+                            variant_tags: Vec::new(),
+                            ref_seq_r1: Vec::new(),
+                            ref_seq_r2: Vec::new(),
                         });
                     }
                     black_box(results)

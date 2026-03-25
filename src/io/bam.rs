@@ -285,7 +285,12 @@ impl BamWriter {
         let pos2 = Position::new(pos2_zero + 1)
             .ok_or_else(|| anyhow::anyhow!("invalid mate alignment position"))?;
 
-        let mapq = MappingQuality::new(self.mapq).expect("mapq is a valid mapping quality");
+        let mapq = MappingQuality::new(self.mapq).ok_or_else(|| {
+            anyhow::anyhow!(
+                "invalid mapping quality {}: value 255 is reserved for unavailable",
+                self.mapq
+            )
+        })?;
         // Use a saturating cast; fragment_length > i32::MAX is possible for long reads.
         let template_len = i32::try_from(pair.fragment_length).unwrap_or(i32::MAX);
 

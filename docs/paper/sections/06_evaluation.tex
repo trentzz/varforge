@@ -5,13 +5,13 @@ The introduction claimed five contributions.
 This section evaluates each against the benchmark evidence.
 
 \textbf{(i) Unified pipeline.}
-All seven benchmark scenarios (Table~\ref{tab:scenarios}) ran from a single YAML configuration through one binary.
+All six benchmark scenarios (Table~\ref{tab:scenarios}) ran from a single YAML configuration through one binary.
 No external tool or intermediate file format was required.
 The claim holds.
 
 \textbf{(ii) First genome-wide UMI/duplex simulator.}
 The panel UMI scenario (1\,MB, 200x, simplex) completed successfully (Table~\ref{tab:scenarios}).
-hg38 chr22 configs for UMI simplex and Twist-style duplex (both at 30x) are included in the hg38 benchmark suite and complete without error.
+hg38 chr22 configs for UMI simplex and Twist-style duplex (both at 5x) are included in the hg38 benchmark suite and complete without error.
 No other published tool generates genome-wide UMI-tagged reads with configurable family sizes and duplex strand pairing.
 The claim holds.
 
@@ -26,15 +26,15 @@ Quantitative validation (chi-squared test against Binomial) is needed but not ye
 The claim is supported by design but not yet independently validated.
 
 \textbf{(v) Streaming Rust with bounded memory.}
-Per-pair memory is constant at ${\sim}0.45$\,KB across coverage depths on the 1\,MB reference (Figure~\ref{fig:mem}).
+Per-pair memory converges to ${\sim}0.86$\,KB at high coverage on the 1\,MB reference (Figure~\ref{fig:mem}).
 The streaming architecture bounds memory by concurrent batch state rather than total dataset size.
-On chr22 at 30x (Table~\ref{tab:hg38}), per-pair memory rises to ${\sim}0.85$\,KB because the larger chromosome produces more pairs per chunk.
+On chr22 at 30x (Table~\ref{tab:hg38}), per-pair memory is similar at ${\sim}0.85$\,KB.
 The claim holds in the sense that memory is bounded by channel depth, not dataset size.
 The bound itself grows with chromosome length and coverage; the \texttt{output\_buffer\_regions} setting provides a lever to reduce it on memory-constrained systems.
 
 \textbf{Memory limitations.}
-Peak RAM for the most demanding configuration tested (chr22, 30x WGS) is 4.21\,GB.
-A full human genome at 30x is projected at ${\sim}17$\,GB, which exceeds the 12\,GB benchmark machine and requires either a higher-memory workstation or reducing \texttt{output\_buffer\_regions}.
+Peak RAM for the most demanding configuration tested (chr22, 30x WGS) is 4.11\,GB.
+A full human genome at 30x is projected at ${\sim}16$\,GB, which exceeds the 12\,GB benchmark machine and requires either a higher-memory workstation or reducing \texttt{output\_buffer\_regions}.
 This is a real constraint for users on budget hardware.
 The \texttt{output\_buffer\_regions} knob provides control, but the tradeoff between memory and throughput is not yet characterised across its full range.
 
