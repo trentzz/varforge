@@ -1,3 +1,7 @@
+//! Clonal tree representation for tumour subclone architecture.
+//!
+//! Models a hierarchy of tumour clones where each clone has a cancer-cell
+//! fraction (CCF) and inherits mutations from all ancestor clones.
 use anyhow::{bail, Result};
 use std::collections::HashMap;
 
@@ -80,7 +84,8 @@ impl ClonalTree {
     }
 
     /// Get the root clone.
-    #[allow(dead_code)]
+    // Called only in tests.
+    #[cfg(test)]
     pub fn root(&self) -> &Clone {
         self.clones.iter().find(|c| c.parent.is_none()).unwrap()
     }
@@ -100,7 +105,8 @@ impl ClonalTree {
 
     /// Get all ancestor clone IDs for a given clone (including itself).
     /// Mutations are inherited from all ancestors.
-    #[allow(dead_code)]
+    // Called only in tests.
+    #[cfg(test)]
     pub fn ancestors(&self, clone_id: &str) -> Vec<String> {
         let mut result = Vec::new();
         let mut current = Some(clone_id.to_string());

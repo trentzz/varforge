@@ -31,7 +31,7 @@ pub fn generate_duplex_umi_pair<R: Rng>(length: usize, rng: &mut R) -> (Vec<u8>,
 
 /// Inject sequencing errors into a UMI sequence.
 // Called only in tests; not yet wired into the simulation write path.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn inject_umi_errors<R: Rng>(umi: &mut [u8], error_rate: f64, rng: &mut R) {
     for base in umi.iter_mut() {
         if rng.gen::<f64>() < error_rate {
@@ -50,7 +50,7 @@ pub fn inject_umi_errors<R: Rng>(umi: &mut [u8], error_rate: f64, rng: &mut R) {
 /// Format a UMI for the RX BAM tag (SAM spec).
 /// For duplex: "AAAA-BBBB" format.
 // Called only in tests; production UMI tagging uses the RX tag inline.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn format_rx_tag(umi: &[u8], umi_length: usize) -> String {
     if umi.len() == umi_length {
         String::from_utf8_lossy(umi).to_string()

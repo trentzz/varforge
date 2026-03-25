@@ -1,3 +1,7 @@
+//! VarForge: synthetic cancer sequencing data generator.
+//!
+//! Parses the command-line, initialises logging, and dispatches to the
+//! selected subcommand.
 mod artifacts;
 mod cli;
 mod core;

@@ -1,6 +1,7 @@
 //! Simulation manifest: records config, reference metadata, output file paths, and run statistics
 //! as a machine-readable JSON file for reproducibility and auditing.
 
+#[cfg(test)]
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -79,7 +80,7 @@ impl Manifest {
 
     /// Serialise the manifest to pretty-printed JSON and write it to `path`.
     // Called only in tests; production code serialises via serde_json directly.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn write(&self, path: &Path) -> Result<()> {
         let json =
             serde_json::to_string_pretty(self).context("failed to serialise manifest to JSON")?;

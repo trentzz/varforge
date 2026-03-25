@@ -1,3 +1,7 @@
+//! Implementation of the `validate` subcommand.
+//!
+//! Loads and structurally validates a YAML config, then performs pre-flight
+//! checks on the reference genome, BED targets, and mutations VCF.
 use super::ValidateOpts;
 use crate::io::config;
 use anyhow::Result;

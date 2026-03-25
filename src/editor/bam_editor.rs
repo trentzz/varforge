@@ -692,16 +692,6 @@ mod tests {
             .collect()
     }
 
-    #[allow(dead_code)]
-    fn write_and_reload(
-        records: Vec<RecordBuf>,
-        header: &sam::Header,
-    ) -> (sam::Header, Vec<RecordBuf>) {
-        let tmp = NamedTempFile::new().unwrap();
-        write_bam(tmp.path(), header, &records).unwrap();
-        load_bam(tmp.path()).unwrap()
-    }
-
     // ------------------------------------------------------------------
     // Test 1: SNV spike-in, base changed, quality preserved
     // ------------------------------------------------------------------

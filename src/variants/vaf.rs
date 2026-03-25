@@ -7,8 +7,8 @@ use rand_distr::{Binomial, Distribution};
 ///
 /// VAF = CCF * multiplicity * purity / (purity * CN_tumour + (1 - purity) * CN_normal)
 // Called from tests and from vaf_in_amplified_region in cnv.rs (also test-only).
+#[cfg(test)]
 #[must_use]
-#[allow(dead_code)]
 pub fn expected_vaf(
     ccf: f64,
     multiplicity: u32,

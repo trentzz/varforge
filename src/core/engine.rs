@@ -79,7 +79,7 @@ impl SimulationEngine {
     /// If `config.seed` is set that seed is used; otherwise entropy is drawn
     /// from the OS.
     // Called only in tests; production code uses new_with_shared_config.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn new(config: Config, reference: ReferenceGenome) -> Self {
         let config = Arc::new(config);
         let rng = match config.seed {
@@ -104,7 +104,7 @@ impl SimulationEngine {
     ///
     /// This is used for parallel region simulation where the same reference
     /// is shared across multiple engines running on different threads.
-    // Not called in production yet; retained as an alternative constructor for future callers.
+    // Not called yet; retained as an alternative constructor for parallel callers.
     #[allow(dead_code)]
     pub fn new_with_shared_reference(config: Config, reference: Arc<ReferenceGenome>) -> Self {
         let config = Arc::new(config);
@@ -163,8 +163,7 @@ impl SimulationEngine {
     /// - Thread scheduling does not affect determinism.
     ///
     /// If `master_seed` is `None`, per-region entropy is drawn from the OS.
-    // Not called in production yet; retained as a convenience constructor for parallel
-    // pipelines that operate per-region rather than per-config.
+    // Not called yet; retained as a convenience constructor for per-region parallel pipelines.
     #[allow(dead_code)]
     pub fn new_for_region(
         config: Config,

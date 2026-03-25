@@ -1,3 +1,8 @@
+//! BAM output writer for simulated reads.
+//!
+//! Converts internal [`Read`] and [`ReadPair`] records into noodles BAM
+//! records and writes them to a bgzip-compressed, coordinate-sorted BAM file
+//! with an accompanying BAI/CSI index.
 use std::fs::File;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -382,7 +387,8 @@ impl BamWriter {
     }
 
     /// Return a reference to the SAM header.
-    #[allow(dead_code)]
+    // Called only in tests; not yet needed by production callers.
+    #[cfg(test)]
     pub fn header(&self) -> &sam::Header {
         &self.header
     }
