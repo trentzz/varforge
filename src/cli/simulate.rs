@@ -821,8 +821,13 @@ pub(crate) fn run_single_sample(
         for (variant, n_alt_mol, n_duplex_alt) in &records {
             if let Some(sv) = sv_to_structural(variant) {
                 // SVs use symbolic ALT alleles and SV-specific INFO fields.
-                vcf.write_sv(&sv, variant.expected_vaf, variant.clone_id.as_deref())
-                    .context("failed to write SV truth VCF record")?;
+                vcf.write_sv(
+                    &sv,
+                    variant.expected_vaf,
+                    variant.ccf,
+                    variant.clone_id.as_deref(),
+                )
+                .context("failed to write SV truth VCF record")?;
             } else {
                 let (ref_allele, alt_allele) = variant_alleles(variant);
                 vcf.write_variant(variant, &ref_allele, &alt_allele, *n_alt_mol, *n_duplex_alt)
@@ -1879,8 +1884,13 @@ fn run_sample_simulation(
         });
         for (variant, n_alt_mol, n_duplex_alt) in &records {
             if let Some(sv) = sv_to_structural(variant) {
-                vcf.write_sv(&sv, variant.expected_vaf, variant.clone_id.as_deref())
-                    .context("failed to write SV truth VCF record")?;
+                vcf.write_sv(
+                    &sv,
+                    variant.expected_vaf,
+                    variant.ccf,
+                    variant.clone_id.as_deref(),
+                )
+                .context("failed to write SV truth VCF record")?;
             } else {
                 let (ref_allele, alt_allele) = variant_alleles(variant);
                 vcf.write_variant(variant, &ref_allele, &alt_allele, *n_alt_mol, *n_duplex_alt)
@@ -2200,7 +2210,14 @@ fn build_somatic_variant_list(
                         cancer_name
                     );
                 }
+            } else {
+                tracing::warn!(
+                    "include_driver_mutations is set but preset '{}' is not a cancer preset",
+                    preset_name
+                );
             }
+        } else {
+            tracing::warn!("include_driver_mutations is set but no preset is configured");
         }
     }
 

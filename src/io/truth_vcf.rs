@@ -227,6 +227,7 @@ impl TruthVcfWriter {
     /// and SVLEN in standard VCF format.
     ///
     /// - `expected_vaf` is the target allele frequency.
+    /// - `ccf` is the cancer cell fraction. Falls back to `expected_vaf` when `None`.
     /// - `clone_id` is the clone assignment (used to select GT and annotate CLONE).
     ///
     /// Records are not written immediately.  Call `finish` to sort and flush.
@@ -234,6 +235,7 @@ impl TruthVcfWriter {
         &mut self,
         sv: &StructuralVariant,
         expected_vaf: f64,
+        ccf: Option<f64>,
         clone_id: Option<&str>,
     ) -> Result<()> {
         let chrom = sv.chrom();
@@ -248,9 +250,10 @@ impl TruthVcfWriter {
         let is_hom = expected_vaf >= 0.99 || clone_id.map(|id| id.contains("hom")).unwrap_or(false);
         let gt = if is_hom { "1/1" } else { "0/1" };
 
+        let ccf_value = ccf.unwrap_or(expected_vaf);
         let info = format!(
             "{sv_info};EXPECTED_VAF={expected_vaf:.6};CLONE={clone_str};\
-             VARTYPE=SV;CCF={expected_vaf:.6};N_ALT_MOL=0;N_DUPLEX_ALT=0"
+             VARTYPE=SV;CCF={ccf_value:.6};N_ALT_MOL=0;N_DUPLEX_ALT=0"
         );
 
         let line = format!("{chrom}\t{pos_1based}\t.\tN\t{alt}\t.\tPASS\t{info}\tGT\t{gt}",);
@@ -827,7 +830,9 @@ mod tests {
             start: 1000,
             end: 2000,
         };
-        writer.write_sv(&del_sv, 0.45, Some("clone_A")).unwrap();
+        writer
+            .write_sv(&del_sv, 0.45, None, Some("clone_A"))
+            .unwrap();
 
         writer.finish().unwrap();
 
