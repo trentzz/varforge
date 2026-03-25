@@ -453,7 +453,7 @@ fn reservoir_sample(items: &[usize], k: usize, rng: &mut StdRng) -> Vec<usize> {
     let k = k.min(items.len());
     let mut result: Vec<usize> = items[..k].to_vec();
     for (i, &item) in items[k..].iter().enumerate() {
-        let j = rng.gen_range(0..=(i + k));
+        let j = rng.random_range(0..=(i + k));
         if j < k {
             result[j] = item;
         }

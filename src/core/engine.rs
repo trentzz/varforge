@@ -84,7 +84,7 @@ impl SimulationEngine {
         let config = Arc::new(config);
         let rng = match config.seed {
             Some(seed) => StdRng::seed_from_u64(seed),
-            None => StdRng::from_entropy(),
+            None => StdRng::from_os_rng(),
         };
         let gc_bias_model = build_gc_bias_model(&config);
         let cnv_regions = build_cnv_regions(&config);
@@ -110,7 +110,7 @@ impl SimulationEngine {
         let config = Arc::new(config);
         let rng = match config.seed {
             Some(seed) => StdRng::seed_from_u64(seed),
-            None => StdRng::from_entropy(),
+            None => StdRng::from_os_rng(),
         };
         let gc_bias_model = build_gc_bias_model(&config);
         let cnv_regions = build_cnv_regions(&config);
@@ -138,7 +138,7 @@ impl SimulationEngine {
     ) -> Self {
         let rng = match seed {
             Some(s) => StdRng::seed_from_u64(s),
-            None => StdRng::from_entropy(),
+            None => StdRng::from_os_rng(),
         };
         let gc_bias_model = build_gc_bias_model(&config);
         let cnv_regions = build_cnv_regions(&config);
@@ -178,7 +178,7 @@ impl SimulationEngine {
                 let region_seed = derive_region_seed(seed, region_index as u64);
                 StdRng::seed_from_u64(region_seed)
             }
-            None => StdRng::from_entropy(),
+            None => StdRng::from_os_rng(),
         };
         let config = Arc::new(config);
         let gc_bias_model = build_gc_bias_model(&config);
@@ -409,7 +409,7 @@ impl SimulationEngine {
             let max_start_offset = region_len.saturating_sub(frag_len);
             let frag_start = region.start
                 + if max_start_offset > 0 {
-                    self.rng.gen_range(0..max_start_offset as u64)
+                    self.rng.random_range(0..max_start_offset as u64)
                 } else {
                     0
                 };
@@ -465,7 +465,7 @@ impl SimulationEngine {
                 let gc = GcBiasModel::gc_fraction(&frag_seq);
                 let multiplier = gc_model.coverage_multiplier(gc);
                 // Reject fragment with probability (1 - multiplier).
-                if self.rng.gen::<f64>() >= multiplier {
+                if self.rng.random::<f64>() >= multiplier {
                     continue;
                 }
             }
@@ -474,7 +474,7 @@ impl SimulationEngine {
             // Each fragment is assigned to haplotype 0 or 1 with equal probability.
             // Variants with a matching haplotype assignment are only applied to
             // fragments on that haplotype.
-            let fragment_haplotype: u8 = self.rng.gen_range(0u8..2);
+            let fragment_haplotype: u8 = self.rng.random_range(0u8..2);
 
             // Record the pre-variant fragment length for R2 offset calculation.
             // We avoid cloning frag_seq here; instead we derive ref sequences
@@ -512,7 +512,7 @@ impl SimulationEngine {
                 let remaining_pairs = n_pairs - pair_idx;
                 // Stochastically decide: spike this read given remaining budget and pairs.
                 let spike_prob = (*budget as f64) / (remaining_pairs as f64).max(1.0);
-                if self.rng.gen::<f64>() < spike_prob {
+                if self.rng.random::<f64>() < spike_prob {
                     apply_variant_to_seq(&mut frag_seq, frag_start, variant);
                     *budget = budget.saturating_sub(1);
                     alt_counts[vi] += 1;
@@ -670,7 +670,7 @@ impl SimulationEngine {
                             if *budget > 0 {
                                 let remaining = (n_pairs - pair_idx.min(n_pairs)) as f64;
                                 let prob = (*budget as f64) / remaining.max(1.0);
-                                if self.rng.gen::<f64>() < prob {
+                                if self.rng.random::<f64>() < prob {
                                     *budget = budget.saturating_sub(1);
                                     alt_counts[*vi] += 1;
                                     true

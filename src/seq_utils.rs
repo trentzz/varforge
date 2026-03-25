@@ -3,6 +3,18 @@
 /// Return the DNA complement of a single base.
 ///
 /// Handles both uppercase and lowercase IUPAC bases. Unknown bases map to `N`.
+///
+/// # Examples
+///
+/// ```
+/// use varforge::seq_utils::complement;
+///
+/// assert_eq!(complement(b'A'), b'T');
+/// assert_eq!(complement(b'C'), b'G');
+/// assert_eq!(complement(b'a'), b't');
+/// // Unknown bases map to N.
+/// assert_eq!(complement(b'X'), b'N');
+/// ```
 pub fn complement(base: u8) -> u8 {
     match base {
         b'A' => b'T',
@@ -20,6 +32,21 @@ pub fn complement(base: u8) -> u8 {
 /// Return the reverse complement of a DNA sequence.
 ///
 /// Unknown bases map to `N`. The input is not modified.
+///
+/// # Examples
+///
+/// ```
+/// use varforge::seq_utils::reverse_complement;
+///
+/// // ACGT is a palindrome under reverse complement.
+/// assert_eq!(reverse_complement(b"ACGT"), b"ACGT");
+///
+/// // ATCG → complement is TAGC → reverse is CGAT.
+/// assert_eq!(reverse_complement(b"ATCG"), b"CGAT");
+///
+/// // Empty input returns an empty vector.
+/// assert_eq!(reverse_complement(b""), b"");
+/// ```
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
     seq.iter().rev().map(|&b| complement(b)).collect()
 }

@@ -18,6 +18,27 @@ pub struct NormalFragmentSampler {
 }
 
 impl NormalFragmentSampler {
+    /// Create a Gaussian fragment size sampler.
+    ///
+    /// Returns an error if `sd` is NaN or infinite. The minimum sampled fragment
+    /// size is clamped to 50 bp.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use varforge::core::fragment::{NormalFragmentSampler, FragmentSampler};
+    /// use rand::SeedableRng;
+    /// use rand::rngs::StdRng;
+    ///
+    /// let sampler = NormalFragmentSampler::new(300.0, 50.0).unwrap();
+    /// let mut rng = StdRng::seed_from_u64(0);
+    /// let size = sampler.sample(&mut rng);
+    /// // Fragment size is always at least the minimum (50 bp).
+    /// assert!(size >= 50);
+    ///
+    /// // A non-finite sd produces an error.
+    /// assert!(NormalFragmentSampler::new(300.0, f64::INFINITY).is_err());
+    /// ```
     pub fn new(mean: f64, sd: f64) -> Result<Self> {
         Ok(Self {
             dist: Normal::new(mean, sd)
@@ -83,18 +104,18 @@ impl CfdnaFragmentSampler {
         // Add a small sinusoidal modulation
         let period_phase = (size / 10.0).fract();
         let adjustment = (period_phase * 2.0 * std::f64::consts::PI).sin() * 2.0;
-        let noise: f64 = rng.gen_range(-1.0..1.0);
+        let noise: f64 = rng.random_range(-1.0..1.0);
         size + adjustment + noise
     }
 }
 
 impl FragmentSampler for CfdnaFragmentSampler {
     fn sample<R: Rng>(&self, rng: &mut R) -> usize {
-        let is_ctdna = rng.gen::<f64>() < self.ctdna_fraction;
+        let is_ctdna = rng.random::<f64>() < self.ctdna_fraction;
 
         let raw_size = if is_ctdna {
             self.ctdna_dist.sample(rng)
-        } else if rng.gen::<f64>() < self.mono_weight {
+        } else if rng.random::<f64>() < self.mono_weight {
             self.mono_dist.sample(rng)
         } else {
             self.di_dist.sample(rng)

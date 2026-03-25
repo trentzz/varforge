@@ -34,11 +34,11 @@ pub fn generate_random_mutations<R: Rng>(
 
     for _ in 0..count {
         // Pick a random position within the regions.
-        let rand_offset: u64 = rng.gen_range(0..total_length);
+        let rand_offset: u64 = rng.random_range(0..total_length);
         let (chrom, pos) = offset_to_position(regions, rand_offset);
 
         // Pick mutation type.
-        let type_roll: f64 = rng.gen();
+        let type_roll: f64 = rng.random();
         let mutation = if type_roll < snv_fraction {
             generate_random_snv(&chrom, pos, reference_lookup, signature, rng)
         } else if type_roll < snv_fraction + indel_fraction {
@@ -48,7 +48,7 @@ pub fn generate_random_mutations<R: Rng>(
         };
 
         if let Some(mutation) = mutation {
-            let vaf = rng.gen_range(vaf_min..vaf_max);
+            let vaf = rng.random_range(vaf_min..vaf_max);
             variants.push(Variant {
                 chrom,
                 mutation,
@@ -102,10 +102,10 @@ pub fn signature_weighted_alt_base<R: Rng>(
     let total: f64 = weights.iter().sum();
     if total <= 0.0 {
         // All weights zero: fall back to uniform.
-        return alts[rng.gen_range(0..alts.len())];
+        return alts[rng.random_range(0..alts.len())];
     }
 
-    let r: f64 = rng.gen_range(0.0..total);
+    let r: f64 = rng.random_range(0.0..total);
     let mut cumulative = 0.0;
     for (i, &w) in weights.iter().enumerate() {
         cumulative += w;
@@ -151,7 +151,7 @@ fn generate_random_snv<R: Rng>(
         } else {
             // Context unavailable: fall back to uniform.
             loop {
-                let b = BASES[rng.gen_range(0..4)];
+                let b = BASES[rng.random_range(0..4)];
                 if b != ref_base {
                     break b;
                 }
@@ -159,7 +159,7 @@ fn generate_random_snv<R: Rng>(
         }
     } else {
         loop {
-            let b = BASES[rng.gen_range(0..4)];
+            let b = BASES[rng.random_range(0..4)];
             if b != ref_base {
                 break b;
             }
@@ -184,13 +184,13 @@ fn generate_random_indel<R: Rng>(
         return None;
     }
 
-    let is_insertion = rng.gen_bool(0.5);
-    let indel_len: usize = rng.gen_range(1..=10);
+    let is_insertion = rng.random_bool(0.5);
+    let indel_len: usize = rng.random_range(1..=10);
 
     if is_insertion {
         let mut alt_seq = vec![ref_base];
         for _ in 0..indel_len {
-            alt_seq.push(BASES[rng.gen_range(0..4)]);
+            alt_seq.push(BASES[rng.random_range(0..4)]);
         }
         Some(MutationType::Indel {
             pos,
@@ -221,7 +221,7 @@ fn generate_random_mnv<R: Rng>(
     reference_lookup: &dyn Fn(&str, u64) -> Option<u8>,
     rng: &mut R,
 ) -> Option<MutationType> {
-    let mnv_len: usize = rng.gen_range(2..=3);
+    let mnv_len: usize = rng.random_range(2..=3);
     let mut ref_seq = Vec::with_capacity(mnv_len);
     let mut alt_seq = Vec::with_capacity(mnv_len);
 
@@ -232,7 +232,7 @@ fn generate_random_mnv<R: Rng>(
         }
         ref_seq.push(ref_base);
         let alt_base = loop {
-            let b = BASES[rng.gen_range(0..4)];
+            let b = BASES[rng.random_range(0..4)];
             if b != ref_base {
                 break b;
             }
@@ -314,7 +314,7 @@ pub fn generate_msi_indels<R: Rng>(
     while variants.len() < target_count && attempts < max_attempts {
         attempts += 1;
 
-        let rand_offset: u64 = rng.gen_range(0..total_length);
+        let rand_offset: u64 = rng.random_range(0..total_length);
         let (chrom, pos) = offset_to_position(regions, rand_offset);
 
         // Fetch a small window around the position for repeat context detection.

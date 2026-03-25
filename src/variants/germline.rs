@@ -30,13 +30,13 @@ pub fn generate_germline_variants<R: Rng>(
         // Heterozygous SNPs.
         let het_count = (region_kbp * cfg.het_snp_density).round() as usize;
         for _ in 0..het_count {
-            let pos = region.start + rng.gen_range(0..region.len());
+            let pos = region.start + rng.random_range(0..region.len());
             if let Some(ref_base) = reference_lookup(&region.chrom, pos) {
                 if ref_base == b'N' {
                     continue;
                 }
                 let alts: Vec<u8> = BASES.iter().copied().filter(|&b| b != ref_base).collect();
-                let alt = alts[rng.gen_range(0..alts.len())];
+                let alt = alts[rng.random_range(0..alts.len())];
                 variants.push(Variant {
                     chrom: region.chrom.clone(),
                     mutation: MutationType::Snv {
@@ -55,13 +55,13 @@ pub fn generate_germline_variants<R: Rng>(
         // Homozygous SNPs.
         let hom_count = (region_kbp * cfg.hom_snp_density).round() as usize;
         for _ in 0..hom_count {
-            let pos = region.start + rng.gen_range(0..region.len());
+            let pos = region.start + rng.random_range(0..region.len());
             if let Some(ref_base) = reference_lookup(&region.chrom, pos) {
                 if ref_base == b'N' {
                     continue;
                 }
                 let alts: Vec<u8> = BASES.iter().copied().filter(|&b| b != ref_base).collect();
-                let alt = alts[rng.gen_range(0..alts.len())];
+                let alt = alts[rng.random_range(0..alts.len())];
                 variants.push(Variant {
                     chrom: region.chrom.clone(),
                     mutation: MutationType::Snv {
@@ -80,11 +80,13 @@ pub fn generate_germline_variants<R: Rng>(
         // Heterozygous indels.
         let indel_count = (region_kbp * cfg.het_indel_density).round() as usize;
         for _ in 0..indel_count {
-            let pos = region.start + rng.gen_range(0..region.len().saturating_sub(5));
-            if rng.gen_bool(0.5) {
+            let pos = region.start + rng.random_range(0..region.len().saturating_sub(5));
+            if rng.random_bool(0.5) {
                 // Insertion: anchor base + 1–3 random bases.
-                let ins_len = rng.gen_range(1usize..=3);
-                let inserted: Vec<u8> = (0..ins_len).map(|_| BASES[rng.gen_range(0..4)]).collect();
+                let ins_len = rng.random_range(1usize..=3);
+                let inserted: Vec<u8> = (0..ins_len)
+                    .map(|_| BASES[rng.random_range(0..4)])
+                    .collect();
                 if let Some(ref_base) = reference_lookup(&region.chrom, pos) {
                     let mut alt = vec![ref_base];
                     alt.extend_from_slice(&inserted);
@@ -103,7 +105,7 @@ pub fn generate_germline_variants<R: Rng>(
                 }
             } else {
                 // Deletion: 1–3 bp.
-                let del_len = rng.gen_range(1usize..=3);
+                let del_len = rng.random_range(1usize..=3);
                 let mut ref_seq = Vec::new();
                 for i in 0..=del_len {
                     if let Some(b) = reference_lookup(&region.chrom, pos + i as u64) {

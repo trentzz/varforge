@@ -45,10 +45,10 @@ pub fn generate_pcr_copies(
 fn inject_pcr_errors(seq: &mut [u8], rate: f64, rng: &mut impl Rng) {
     const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
     for base in seq.iter_mut() {
-        if rng.gen::<f64>() < rate {
+        if rng.random::<f64>() < rate {
             let original = *base;
             loop {
-                let new_base = BASES[rng.gen_range(0..4)];
+                let new_base = BASES[rng.random_range(0..4)];
                 if new_base != original {
                     *base = new_base;
                     break;

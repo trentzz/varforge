@@ -6,9 +6,10 @@
 //! Or for a specific benchmark group:
 //!   cargo bench -- fragment_sampling
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use std::hint::black_box;
 use std::io::Write;
 use tempfile::TempDir;
 

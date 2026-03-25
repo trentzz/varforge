@@ -289,12 +289,12 @@ mod tests {
         for _ in 0..n {
             // AT-rich fragment (10% GC)
             let m = model.coverage_multiplier(0.1);
-            if rng.gen::<f64>() < m {
+            if rng.random::<f64>() < m {
                 kept_at_rich += 1;
             }
             // Neutral fragment (50% GC)
             let m = model.coverage_multiplier(0.5);
-            if rng.gen::<f64>() < m {
+            if rng.random::<f64>() < m {
                 kept_neutral += 1;
             }
         }

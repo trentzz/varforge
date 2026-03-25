@@ -6,7 +6,7 @@ const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
 
 /// Generate a random UMI barcode of the specified length.
 pub fn generate_umi<R: Rng>(length: usize, rng: &mut R) -> Vec<u8> {
-    (0..length).map(|_| BASES[rng.gen_range(0..4)]).collect()
+    (0..length).map(|_| BASES[rng.random_range(0..4)]).collect()
 }
 
 /// Generate a duplex UMI pair (AB, BA).
@@ -34,10 +34,10 @@ pub fn generate_duplex_umi_pair<R: Rng>(length: usize, rng: &mut R) -> (Vec<u8>,
 #[cfg(test)]
 pub fn inject_umi_errors<R: Rng>(umi: &mut [u8], error_rate: f64, rng: &mut R) {
     for base in umi.iter_mut() {
-        if rng.gen::<f64>() < error_rate {
+        if rng.random::<f64>() < error_rate {
             let original = *base;
             loop {
-                let new_base = BASES[rng.gen_range(0..4)];
+                let new_base = BASES[rng.random_range(0..4)];
                 if new_base != original {
                     *base = new_base;
                     break;
