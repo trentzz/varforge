@@ -155,7 +155,7 @@ mod tests {
             .sum();
         let mean = total as f64 / n as f64;
         assert!(
-            mean >= 0.15 && mean <= 0.25,
+            (0.15..=0.25).contains(&mean),
             "mean {} should be 0.2 ± 0.05 for ultra-low VAF at 2000x",
             mean
         );
@@ -172,7 +172,7 @@ mod tests {
             .sum();
         let mean = total as f64 / n as f64;
         assert!(
-            mean >= 0.03 && mean <= 0.07,
+            (0.03..=0.07).contains(&mean),
             "mean {} should be 0.05 ± 0.02 for ultra-low VAF at 5000x",
             mean
         );
