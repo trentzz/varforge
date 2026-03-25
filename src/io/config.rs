@@ -1038,6 +1038,11 @@ pub fn validate(config: &Config) -> Result<()> {
         }
     }
 
+    anyhow::ensure!(
+        config.output.mapq <= 254,
+        "mapq must be 0-254 (255 is reserved in SAM spec)"
+    );
+
     // T083: warn when reads are longer than fragments (produces artifactual overlapping pairs).
     if config.sample.read_length > config.fragment.mean as usize {
         tracing::warn!(

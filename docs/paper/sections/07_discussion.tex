@@ -15,7 +15,7 @@ By replacing deterministic spike-in with Bernoulli sampling, \varforge{} elimina
 
 \textbf{Performance for CI/CD.}
 The streaming Rust architecture enables integration into automated testing pipelines.
-A 1\,MB, 30x simulation completes in ${\sim}15$\,s.
+A 1\,MB, 30x simulation completes in ${\sim}15$\,s (baseline, no features).
 Panel simulations (1\,MB, 200x, UMI) complete in ${\sim}3$\,min.
 Full WGS requires extrapolation, but the linear scaling and bounded memory make it feasible on a standard workstation.
 
@@ -24,13 +24,13 @@ The current benchmark workload (10\,MB, 30x, simple reads) is I/O-bound.
 FASTQ compression saturates the single writer thread; adding workers increases coordination overhead without accelerating the bottleneck.
 Threading provides a real benefit when the compute cost per read pair rises above the I/O cost.
 UMI simulation (PCR family tracking across cycles) and high-mutation-density runs are the primary candidates.
-The Panel+UMI scenario (1\,MB, 200x) runs at ${{\sim}}6{,}800$ pairs/s versus ${{\sim}}13{,}000$ for the I/O-bound baseline, confirming that more CPU work per pair shifts the balance.
+The Panel+UMI scenario (1\,MB, 200x) has higher wall time per base pair than the I/O-bound baseline, confirming that more CPU work per pair shifts the balance.
 A parallel BGZF writer or per-worker output files with later merging would make the I/O itself parallelisable, but this is not implemented.
 For workloads where thread count does not help, the correct setting is a low thread count to reduce coordination overhead.
 The default of all available threads is conservative; users on memory-constrained machines should reduce threads to limit channel buffer size.
 
 Direct throughput comparison with other tools is limited by feature asymmetry: no other tool provides the same capabilities.
 BAMSurgeon injects variants at ${\sim}1$ variant per 4--5\,s (${\sim}40$\,min for 500 variants).
-\varforge{} applies 500 variants in $<1$\,s within a 75\,s total run.
+\varforge{} applies 500 variants in $<1$\,s within a 140\,s total run (10\,MB, 30x).
 ART is single-threaded and lacks variant support.
 NEAT is Python-based with limited WGS-scale throughput.

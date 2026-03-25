@@ -14,11 +14,9 @@ if command -v /usr/bin/time &>/dev/null; then
     TIME_BIN="/usr/bin/time"
 elif [ -x "/tmp/time" ]; then
     TIME_BIN="/tmp/time"
-elif [ -x "/mnt/tzeng-local/tzeng-thesis/fastp_0.23.4_dir/usr/bin/time" ]; then
-    # Copy to /tmp and make symlink named "time" (busybox needs applet name)
-    cp /mnt/tzeng-local/tzeng-thesis/fastp_0.23.4_dir/usr/bin/time /tmp/busybox_time_bin
-    ln -sf /tmp/busybox_time_bin /tmp/time
-    TIME_BIN="/tmp/time"
+elif command -v gtime &>/dev/null; then
+    # macOS with GNU time installed via Homebrew
+    TIME_BIN="$(command -v gtime)"
 else
     echo "ERROR: no suitable 'time' binary found" >&2
     exit 1

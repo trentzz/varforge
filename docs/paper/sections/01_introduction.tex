@@ -14,7 +14,8 @@ Cell-free DNA from liquid biopsy has a distinct fragment length distribution tha
 
 No single existing tool covers this space.
 BAMSurgeon\autocite{ewing2015bamsurgeon} spikes variants into existing BAMs but uses deterministic VAF assignment.
-ART\autocite{huang2012art} and NEAT\autocite{stephens2016neat} generate reads de novo but lack tumour models and variant injection.
+ART\autocite{huang2012art} generates reads de novo but lacks variant injection.
+NEAT\autocite{stephens2016neat} supports basic SNV and indel injection but lacks tumour models, UMI simulation, and cfDNA fragmentation.
 ReSeq\autocite{schmeing2021reseq} achieves high read-level realism but supports no variant or cancer features.
 No genome-wide UMI or duplex simulator exists.
 No tool combines cfDNA fragmentation with somatic variant spike-in.

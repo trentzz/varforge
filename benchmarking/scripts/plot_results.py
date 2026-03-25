@@ -312,7 +312,7 @@ def fig_throughput_scenarios(data):
     names, throughputs = [], []
     for name, key, ref_size, cov in scenarios:
         d = data['main_benchmarks'][key]
-        pairs = cov * ref_size / 150
+        pairs = cov * ref_size / (2 * 150)
         names.append(name)
         throughputs.append(pairs / d['avg_wall_secs'] / 1000)  # K pairs/s
 

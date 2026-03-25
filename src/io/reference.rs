@@ -150,7 +150,7 @@ impl ReferenceGenome {
         let record = self
             .reader
             .lock()
-            .unwrap()
+            .map_err(|e| anyhow!("reference reader lock poisoned: {}", e))?
             .query(&noodles_region)
             .with_context(|| {
                 format!(
@@ -199,6 +199,13 @@ impl ReferenceGenome {
 /// This is used by the parallel simulation pipeline so that each rayon worker
 /// thread can own an independent file handle rather than contending on a
 /// shared [`Mutex`].
+///
+/// # Panics
+///
+/// Panics if the FASTA file (or its `.fai` index) at the original path can no
+/// longer be opened. The file must remain accessible for the lifetime of any
+/// clone operation. In practice this is safe because the reference genome is
+/// an immutable input that exists before the pipeline starts.
 impl Clone for ReferenceGenome {
     fn clone(&self) -> Self {
         Self::open(&self.path).expect("failed to reopen reference genome for parallel worker")

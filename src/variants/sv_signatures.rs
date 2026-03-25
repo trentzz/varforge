@@ -30,7 +30,10 @@ pub fn generate_hrd_deletions<R: Rng>(
 
     for _ in 0..count {
         // Pick a random chromosome weighted by length.
-        let (chrom, chrom_len) = pick_chrom(chrom_lengths, rng);
+        let (chrom, chrom_len) = match pick_chrom(chrom_lengths, rng) {
+            Some(v) => v,
+            None => continue,
+        };
 
         // Sample size clamped to [100_000, 10_000_000].
         let size = (size_dist.sample(rng) as u64).clamp(100_000, 10_000_000);
@@ -43,10 +46,10 @@ pub fn generate_hrd_deletions<R: Rng>(
         let end = start + size;
 
         variants.push(Variant {
-            chrom,
+            chrom: chrom.clone(),
             mutation: MutationType::Sv {
                 sv_type: SvType::Deletion,
-                chrom: String::new(), // unused for intrachromosomal events
+                chrom,
                 start,
                 end,
             },
@@ -79,7 +82,10 @@ pub fn generate_tdp_duplications<R: Rng>(
     let size_dist = LogNormal::new(8.0, 0.8).expect("valid log-normal params");
 
     for _ in 0..count {
-        let (chrom, chrom_len) = pick_chrom(chrom_lengths, rng);
+        let (chrom, chrom_len) = match pick_chrom(chrom_lengths, rng) {
+            Some(v) => v,
+            None => continue,
+        };
 
         let size = (size_dist.sample(rng) as u64).clamp(1_000, 10_000);
 
@@ -91,10 +97,10 @@ pub fn generate_tdp_duplications<R: Rng>(
         let end = start + size;
 
         variants.push(Variant {
-            chrom,
+            chrom: chrom.clone(),
             mutation: MutationType::Sv {
                 sv_type: SvType::Duplication,
-                chrom: String::new(),
+                chrom,
                 start,
                 end,
             },
@@ -125,7 +131,10 @@ pub fn generate_chromothripsis<R: Rng>(
     }
 
     // Pick one chromosome to shatter.
-    let (shattered_chrom, chrom_len) = pick_chrom(chrom_lengths, rng);
+    let (shattered_chrom, chrom_len) = match pick_chrom(chrom_lengths, rng) {
+        Some(v) => v,
+        None => return variants,
+    };
 
     // The shattering window is a 10–50 Mbp region.
     let window_size = rng.gen_range(10_000_000u64..=50_000_000).min(chrom_len);
@@ -135,6 +144,12 @@ pub fn generate_chromothripsis<R: Rng>(
         0
     };
     let window_end = window_start + window_size;
+
+    // The window must be large enough to place at least one rearrangement.
+    // We need window_start < window_end - 1000 for the range to be non-empty.
+    if window_size < 2_000 {
+        return variants;
+    }
 
     // Generate `count` rearrangements within the shattering window.
     for _ in 0..count {
@@ -170,19 +185,23 @@ pub fn generate_chromothripsis<R: Rng>(
 }
 
 /// Pick a chromosome weighted by length.
-fn pick_chrom<R: Rng>(chrom_lengths: &[(String, u64)], rng: &mut R) -> (String, u64) {
+///
+/// Returns `None` if `chrom_lengths` is empty or all lengths are zero.
+fn pick_chrom<R: Rng>(chrom_lengths: &[(String, u64)], rng: &mut R) -> Option<(String, u64)> {
     let total_len: u64 = chrom_lengths.iter().map(|(_, l)| l).sum();
+    if total_len == 0 {
+        return None;
+    }
     let pick = rng.gen_range(0..total_len);
     let mut cumulative = 0u64;
     for (chrom, len) in chrom_lengths {
         cumulative += len;
         if pick < cumulative {
-            return (chrom.clone(), *len);
+            return Some((chrom.clone(), *len));
         }
     }
     // Fallback: last chromosome.
-    let (c, l) = chrom_lengths.last().unwrap();
-    (c.clone(), *l)
+    chrom_lengths.last().map(|(c, l)| (c.clone(), *l))
 }
 
 #[cfg(test)]

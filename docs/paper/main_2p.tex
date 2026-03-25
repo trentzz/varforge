@@ -40,7 +40,7 @@
 \begin{abstract}
 \noindent
 No single tool integrates de-novo read generation, somatic variant spike-in, UMI/duplex simulation, cfDNA fragmentation, and library artefact injection.
-\varforge{} fills this gap in a single Rust binary driven by YAML configuration, achieving ${\sim}14{,}000$ read pairs/s at 30x on a 12-thread workstation.
+\varforge{} fills this gap in a single Rust binary driven by YAML configuration, achieving ${\sim}7{,}000$ read pairs/s at 30x on a 12-thread workstation.
 No other published tool provides genome-wide UMI simulation or combines cfDNA fragmentation with variant spike-in.
 Variants are assigned by per-read Bernoulli sampling, not deterministic spike-in.
 BED region filtering enables clinical-depth panel simulation (200x, 1\,Mbp target, 86\,s).
@@ -78,7 +78,7 @@ For each read at a variant site: $X_i \sim \text{Bernoulli}(\text{VAF}_\text{eff
 Alt-read count follows $\text{Binomial}(D, \text{VAF}_\text{eff})$, matching real sequencing variance.
 
 \textbf{cfDNA.}
-Fragment lengths follow a four-component Gaussian mixture with sub-nucleosomal (${\sim}143$\,bp), mono-nucleosomal (${\sim}167$\,bp), di-nucleosomal (${\sim}334$\,bp), and tri-nucleosomal (${\sim}500$\,bp) components.
+Fragment lengths follow a three-component Gaussian mixture with ctDNA (${\sim}143$\,bp), mono-nucleosomal (${\sim}167$\,bp), and di-nucleosomal (${\sim}334$\,bp) components.
 
 %%─────────────────────────────────────────────────────────────────────────
 \section{Results}
@@ -92,10 +92,10 @@ Fragment lengths follow a four-component Gaussian mixture with sub-nucleosomal (
 \toprule
 Scenario & Wall (s) & RAM (GB) & Pairs/s \\
 \midrule
-WGS 10\,MB, 30x  & 139.6 & 0.87 & 14,300 \\
-Panel+UMI 1\,MB  & 195.1 & 1.80 &  6,800 \\
-chr22, 30x WGS   & 595.3 & 4.21 &  8,537 \\
-Panel BED 200x   &  85.5 & 0.56 &  7,796 \\
+WGS 10\,MB, 30x  & 139.6 & 0.83 &  7,200 \\
+Panel+UMI 1\,MB  & 195.1 & 1.72 &  6,800 \\
+chr22, 30x WGS   & 595.3 & 4.11 &  8,537 \\
+Panel BED 200x   &  85.5 & 0.55 &  7,794 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -112,7 +112,8 @@ All six hg38 chr22 feature configurations (UMI, duplex, cfDNA, FFPE) completed w
 The main limitation is that output correctness is not yet independently validated: VAF accuracy, cfDNA fragment distributions, and UMI family structure require quantitative comparison against their respective models.
 Thread scaling only helps for compute-heavy workloads (UMI simulation); the I/O-bound WGS workload runs fastest at one thread.
 
-Priority next steps: (1) chi-squared VAF accuracy test; (2) cfDNA fragment distribution validation; (3) downstream variant caller benchmarking (Mutect2 or VarDict against the truth VCF).
+A four-scenario downstream benchmark (bwa-mem2, Mutect2, rtg-tools vcfeval) confirms that VarForge data exposes real caller behaviour: the SNV baseline achieves F1\,=\,0.857, while FFPE artefacts overwhelm stock Mutect2 with 113K false positives.
+Priority next steps: (1) chi-squared VAF accuracy test; (2) cfDNA fragment distribution validation; (3) extending the variant caller benchmark to additional tools (VarDict, Strelka2, fgbio).
 
 %%─────────────────────────────────────────────────────────────────────────
 \printbibliography[heading=bibintoc, title={References}]

@@ -12,14 +12,26 @@ readme = "README.md"
 keywords = ["bioinformatics", "sequencing", "cancer", "simulation", "genomics"]
 categories = ["science", "command-line-utilities", "simulation"]
 exclude = [
+    # Documentation not needed in the published crate
     "docs/paper/**",
-    "docs/benchmarking/**",
-    "docs/reviewcycle/**",
     "docs/research/**",
-    "docs/plan/**",
-    "benchmark_output/**",
-    "scripts/**",
+    "docs/planning/**",
+    "docs/reviewcycle/**",
+    "docs/claudetracking/**",
+    "docs/claudeguide/**",
+    "docs/features/**",
+    "docs/vision/**",
+    "docs/dev/**",
+    "docs/archive/**",
+    # Benchmarking assets (keep benchmarking/micro/ for cargo bench)
+    "benchmarking/design/**",
+    "benchmarking/results/**",
+    "benchmarking/scripts/**",
+    "benchmarking/downstreamvc/**",
+    # CI, scripts, editor config
     ".github/**",
+    "scripts/**",
+    "CLAUDE.md",
 ]
 
 [dependencies]

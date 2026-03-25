@@ -1,5 +1,6 @@
 //! Fragment size sampling: Gaussian WGS, cfDNA nucleosomal, log-normal long-read, and PCR family size models.
 
+use anyhow::{Context, Result};
 use rand::Rng;
 use rand_distr::{Distribution, LogNormal, Normal};
 
@@ -17,11 +18,12 @@ pub struct NormalFragmentSampler {
 }
 
 impl NormalFragmentSampler {
-    pub fn new(mean: f64, sd: f64) -> Self {
-        Self {
-            dist: Normal::new(mean, sd).expect("invalid normal parameters"),
+    pub fn new(mean: f64, sd: f64) -> Result<Self> {
+        Ok(Self {
+            dist: Normal::new(mean, sd)
+                .context("invalid normal distribution parameters (mean or sd is NaN/Inf)")?,
             min_size: 50,
-        }
+        })
     }
 }
 
@@ -61,15 +63,18 @@ impl CfdnaFragmentSampler {
         ctdna_fraction: f64,
         mono_sd: f64,
         di_sd: f64,
-    ) -> Self {
-        Self {
-            mono_dist: Normal::new(mono_peak, mono_sd).unwrap(),
-            di_dist: Normal::new(di_peak, di_sd).unwrap(),
+    ) -> Result<Self> {
+        Ok(Self {
+            mono_dist: Normal::new(mono_peak, mono_sd)
+                .context("invalid mononucleosomal distribution parameters")?,
+            di_dist: Normal::new(di_peak, di_sd)
+                .context("invalid dinucleosomal distribution parameters")?,
             mono_weight,
-            ctdna_dist: Normal::new(143.0, 15.0).unwrap(),
+            ctdna_dist: Normal::new(143.0, 15.0)
+                .context("invalid ctDNA distribution parameters")?,
             ctdna_fraction,
             min_size: 50,
-        }
+        })
     }
 
     /// Add 10bp periodicity sub-peaks to a sampled size.
@@ -105,16 +110,17 @@ impl FragmentSampler for CfdnaFragmentSampler {
 /// The distribution is parameterised by the linear-space mean and standard
 /// deviation. These are converted to the underlying normal parameters (mu, sigma)
 /// before sampling. The result is clamped to [min_len, max_len].
-pub fn sample_long_read_length<R: Rng>(cfg: &LongReadFragmentConfig, rng: &mut R) -> usize {
+pub fn sample_long_read_length<R: Rng>(cfg: &LongReadFragmentConfig, rng: &mut R) -> Result<usize> {
     let mean = cfg.mean as f64;
     let sd = cfg.sd as f64;
     let variance = sd * sd;
     // Convert linear-space mean/sd to log-normal mu/sigma.
     let mu = (mean * mean / (mean * mean + variance).sqrt()).ln();
     let sigma = (1.0_f64 + variance / (mean * mean)).ln().sqrt();
-    let dist = LogNormal::new(mu, sigma).expect("invalid log-normal parameters");
+    let dist = LogNormal::new(mu, sigma)
+        .context("invalid log-normal parameters for long-read fragment size")?;
     let sample = dist.sample(rng) as usize;
-    sample.clamp(cfg.min_len, cfg.max_len)
+    Ok(sample.clamp(cfg.min_len, cfg.max_len))
 }
 
 /// PCR family size sampler using a log-normal distribution.
@@ -123,14 +129,15 @@ pub struct PcrFamilySizeSampler {
 }
 
 impl PcrFamilySizeSampler {
-    pub fn new(mean: f64, sd: f64) -> Self {
+    pub fn new(mean: f64, sd: f64) -> Result<Self> {
         // Convert mean/sd of the actual family size to log-space parameters
         let variance = sd * sd;
         let mu = (mean * mean / (mean * mean + variance).sqrt()).ln();
         let sigma = (1.0 + variance / (mean * mean)).ln().sqrt();
-        Self {
-            dist: LogNormal::new(mu, sigma).expect("invalid lognormal parameters"),
-        }
+        Ok(Self {
+            dist: LogNormal::new(mu, sigma)
+                .context("invalid log-normal parameters for PCR family size")?,
+        })
     }
 
     pub fn sample<R: Rng>(&self, rng: &mut R) -> usize {
@@ -147,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_normal_fragment_sampler() {
-        let sampler = NormalFragmentSampler::new(300.0, 50.0);
+        let sampler = NormalFragmentSampler::new(300.0, 50.0).unwrap();
         let mut rng = StdRng::seed_from_u64(42);
         let sizes: Vec<usize> = (0..1000).map(|_| sampler.sample(&mut rng)).collect();
 
@@ -162,7 +169,7 @@ mod tests {
 
     #[test]
     fn test_cfdna_fragment_sampler() {
-        let sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.0, 20.0, 30.0);
+        let sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.0, 20.0, 30.0).unwrap();
         let mut rng = StdRng::seed_from_u64(42);
         let sizes: Vec<usize> = (0..10000).map(|_| sampler.sample(&mut rng)).collect();
 
@@ -177,8 +184,9 @@ mod tests {
 
     #[test]
     fn test_cfdna_ctdna_shorter() {
-        let sampler_normal = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.0, 20.0, 30.0);
-        let sampler_ctdna = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 1.0, 20.0, 30.0);
+        let sampler_normal =
+            CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.0, 20.0, 30.0).unwrap();
+        let sampler_ctdna = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 1.0, 20.0, 30.0).unwrap();
         let mut rng = StdRng::seed_from_u64(42);
 
         let normal_mean: f64 = (0..5000)
@@ -200,7 +208,7 @@ mod tests {
 
     #[test]
     fn test_pcr_family_size_sampler() {
-        let sampler = PcrFamilySizeSampler::new(3.0, 1.5);
+        let sampler = PcrFamilySizeSampler::new(3.0, 1.5).unwrap();
         let mut rng = StdRng::seed_from_u64(42);
         let sizes: Vec<usize> = (0..10000).map(|_| sampler.sample(&mut rng)).collect();
 
@@ -220,7 +228,7 @@ mod tests {
         };
         let mut rng = StdRng::seed_from_u64(42);
         let sizes: Vec<usize> = (0..1000)
-            .map(|_| sample_long_read_length(&cfg, &mut rng))
+            .map(|_| sample_long_read_length(&cfg, &mut rng).unwrap())
             .collect();
         assert!(
             sizes.iter().all(|&s| s >= 1000 && s <= 100000),
@@ -241,7 +249,7 @@ mod tests {
     #[test]
     fn test_cfdna_low_ctdna_fraction_mostly_normal_lengths() {
         // 1% ctDNA: almost all fragments should be at nucleosomal peaks (>150 bp)
-        let sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.01, 20.0, 30.0);
+        let sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 0.01, 20.0, 30.0).unwrap();
         let mut rng = StdRng::seed_from_u64(99);
         let n = 10_000usize;
         // Count fragments that are clearly in the short ctDNA range (<150 bp, well below
@@ -262,7 +270,7 @@ mod tests {
     /// Explicit ctdna_fraction=1.0 should yield entirely short fragments.
     #[test]
     fn test_cfdna_full_ctdna_fraction_all_short() {
-        let sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 1.0, 20.0, 30.0);
+        let sampler = CfdnaFragmentSampler::new(167.0, 334.0, 0.85, 1.0, 20.0, 30.0).unwrap();
         let mut rng = StdRng::seed_from_u64(77);
         let mean: f64 = (0..5_000)
             .map(|_| sampler.sample(&mut rng) as f64)
@@ -278,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_deterministic_with_seed() {
-        let sampler = NormalFragmentSampler::new(300.0, 50.0);
+        let sampler = NormalFragmentSampler::new(300.0, 50.0).unwrap();
         let mut rng1 = StdRng::seed_from_u64(123);
         let mut rng2 = StdRng::seed_from_u64(123);
 

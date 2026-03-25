@@ -275,8 +275,8 @@ impl SimulationEngine {
             LongRead(&'a crate::io::config::LongReadFragmentConfig),
         }
         impl Sampler<'_> {
-            fn sample(&self, rng: &mut StdRng) -> usize {
-                match self {
+            fn sample(&self, rng: &mut StdRng) -> Result<usize> {
+                Ok(match self {
                     Sampler::Normal(s) => {
                         use crate::core::fragment::FragmentSampler as _;
                         s.sample(rng)
@@ -285,8 +285,8 @@ impl SimulationEngine {
                         use crate::core::fragment::FragmentSampler as _;
                         s.sample(rng)
                     }
-                    Sampler::LongRead(cfg) => sample_long_read_length(cfg, rng),
-                }
+                    Sampler::LongRead(cfg) => sample_long_read_length(cfg, rng)?,
+                })
             }
         }
         let fragment_sampler = if let Some(ref lr_cfg) = self.config.fragment.long_read {
@@ -317,12 +317,12 @@ impl SimulationEngine {
                         ctdna_fraction,
                         mono_sd,
                         di_sd,
-                    ))
+                    )?)
                 }
                 _ => Sampler::Normal(NormalFragmentSampler::new(
                     self.config.fragment.mean,
                     self.config.fragment.sd,
-                )),
+                )?),
             }
         };
 
@@ -402,7 +402,7 @@ impl SimulationEngine {
         while pair_idx < n_pairs && attempts < max_attempts {
             attempts += 1;
 
-            let frag_len = fragment_sampler.sample(&mut self.rng);
+            let frag_len = fragment_sampler.sample(&mut self.rng)?;
 
             // Sample fragment start within the region, clamped so the
             // fragment doesn't exceed the region boundary.
@@ -737,7 +737,7 @@ impl SimulationEngine {
             // Construct sampler once; log-space conversion is non-trivial so
             // avoid repeating it for every read pair.
             let family_sampler =
-                crate::core::fragment::PcrFamilySizeSampler::new(family_mean, family_sd);
+                crate::core::fragment::PcrFamilySizeSampler::new(family_mean, family_sd)?;
 
             let mut families: Vec<ReadPair> = Vec::new();
             for mut pair in read_pairs {

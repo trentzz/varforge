@@ -7,7 +7,7 @@ Figure~\ref{fig:pipeline} shows the pipeline.
 A YAML configuration drives all parameters.
 The reference genome is loaded and shared via \texttt{Arc}.
 Variants come from VCF or stochastic generation.
-The genome is partitioned into fixed-size chunks (default 10\,Mbp), each processed by a Rayon\autocite{rayon} worker thread.
+The genome is partitioned into fixed-size chunks (default 1\,Mbp), each processed by a Rayon\autocite{rayon} worker thread.
 If a BED file of target intervals is provided, chunks are clipped to the target boundaries, restricting simulation to the specified regions.
 Workers send completed batches through a bounded \texttt{crossbeam-channel} (default depth 64) to a dedicated writer thread that produces FASTQ, BAM, and truth VCF output.
 
@@ -83,14 +83,14 @@ SNVs replace reference bases.
 Indels modify sequence and CIGAR with local re-alignment.
 MNVs are applied atomically to preserve cis-phasing.
 Structural variants (deletions, insertions, inversions, tandem duplications, translocations) produce split reads and discordant pairs with correct CIGAR strings, SA tags, and mate coordinates.
-Copy number variants scale read depth by $(p \cdot \text{CN}_\text{tumor} + (1-p) \cdot 2) / 2$ and adjust effective VAF accordingly.
+Copy number variants scale read depth by $(p \cdot \text{CN}_\text{tumour} + (1-p) \cdot 2) / 2$ and adjust effective VAF accordingly.
 
 \subsection{Tumour modelling}
 
 Heterogeneity is a directed tree of clones, each with a cancer cell fraction (CCF).
 The effective VAF integrates purity, ploidy, CCF, and copy number:
 \begin{equation}
-  \text{VAF}_\text{eff} = \frac{\text{CCF} \times m \times p}{p \cdot \text{CN}_\text{tumor} + (1-p) \cdot \text{CN}_\text{normal}}
+  \text{VAF}_\text{eff} = \frac{\text{CCF} \times m \times p}{p \cdot \text{CN}_\text{tumour} + (1-p) \cdot \text{CN}_\text{normal}}
   \label{eq:vaf}
 \end{equation}
 
@@ -105,21 +105,38 @@ Artefacts are strand-specific, reproducing the error suppression that makes dupl
 \subsection{Cell-free DNA fragmentation}
 \label{sec:cfdna}
 
-Fragment lengths follow a four-component Gaussian mixture:
+Fragment lengths follow a three-component Gaussian mixture:
 \begin{equation}
-  P(L) = \sum_{k=1}^{4} w_k \cdot \mathcal{N}(L;\, \mu_k,\, \sigma_k^2)
+  P(L) = f_\text{ct} \cdot \mathcal{N}(L;\, 143,\, 15^2) + (1 - f_\text{ct})\left[w_1 \cdot \mathcal{N}(L;\, \mu_\text{mono},\, \sigma_\text{mono}^2) + (1 - w_1) \cdot \mathcal{N}(L;\, \mu_\text{di},\, \sigma_\text{di}^2)\right]
   \label{eq:cfdna}
 \end{equation}
-Components represent sub-nucleosomal (${\sim}143$\,bp), mono-nucleosomal (${\sim}167$\,bp), di-nucleosomal (${\sim}334$\,bp), and tri-nucleosomal (${\sim}500$\,bp) populations.
-Below 167\,bp, a 10\,bp sinusoidal periodicity matching the DNA helical repeat is applied\autocite{snyder2016cfdna_nucleosome}.
-Tumour-derived fragments are shifted shorter (${\sim}143$--147\,bp peak)\autocite{lo2010cfdna}, enabling fragment-based tumour fraction estimation by tools such as DELFI.
+where $f_\text{ct}$ is the ctDNA fraction and $w_1$ is the mono-nucleosomal weight.
+The three components represent ctDNA (${\sim}143$\,bp), mono-nucleosomal (${\sim}167$\,bp), and di-nucleosomal (${\sim}334$\,bp) populations.
+A 10\,bp sinusoidal periodicity matching the DNA helical repeat is applied to all sampled sizes\autocite{snyder2016cfdna_nucleosome}.
+Tumour-derived fragments are shorter (${\sim}143$\,bp peak)\autocite{lo2010cfdna}, enabling fragment-based tumour fraction estimation by tools such as DELFI.
 
 \subsection{Library artefacts}
 
 FFPE deamination: C$>$T transitions at a configurable rate, preferentially at fragment ends.
 Oxidative damage: G$>$T transversions with strand-specific bias.
 PCR errors: per-cycle substitution errors propagated through family genealogies.
-GC bias: fragment-level coverage modulation with an empirical U-shaped weighting.
+GC bias: fragment-level coverage modulation via a Gaussian curve centred at 50\% GC content, with a configurable severity parameter.
+
+\subsection{Germline variants and paired tumour-normal mode}
+
+Germline SNPs and indels can be added at population-frequency densities alongside somatic variants.
+A paired mode runs two simulations from the same configuration: a tumour sample carrying both somatic and germline variants, and a matched normal sample carrying germline variants only.
+This enables benchmarking of somatic callers that require a paired normal.
+
+\subsection{Mutational signatures}
+
+Somatic mutations can be weighted by COSMIC SBS96 trinucleotide signatures, biasing the substitution spectrum toward a chosen signature profile.
+SV signature generators produce structural variants with size and type distributions characteristic of specific genomic instability phenotypes (e.g.\ HRD-typical large deletions).
+
+\subsection{Chemistry presets}
+
+Built-in presets (\texttt{twist-umi-duplex}, \texttt{illumina-wgs}, \texttt{illumina-wes}, \texttt{illumina-ctdna}, \texttt{pacbio-hifi}, \texttt{nanopore-r10}) set UMI, fragment, and quality parameters appropriate for each platform.
+Explicit YAML values always take precedence over preset defaults.
 
 \subsection{Implementation}
 

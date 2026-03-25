@@ -8,7 +8,7 @@ A chi-squared or Kolmogorov-Smirnov test comparing observed alt-read counts agai
 This is straightforward to automate: generate reads at a known VAF, align with BWA, count alt reads in pileup, and test the resulting distribution.
 
 \textbf{cfDNA fragment distribution validation.}
-The cfDNA mode uses a four-component Gaussian mixture.
+The cfDNA mode uses a three-component Gaussian mixture.
 Extracting insert sizes from the BAM output and comparing to the configured parameters would confirm that the fragment model is applied correctly.
 
 \textbf{Downstream variant caller benchmarking.}
@@ -20,9 +20,9 @@ Current thread scaling data covers only the I/O-bound 10\,MB, 30x workload where
 Testing thread scaling for UMI simulation (where per-pair compute cost is higher) would characterise when Rayon parallelism provides real benefit.
 
 \textbf{Long-read sequencing.}
-Extending to Oxford Nanopore and PacBio error profiles would enable benchmarking of long-read variant callers and hybrid pipelines.
-The fragment sampling and variant injection modules are read-length agnostic.
-The main work is in quality score modelling.
+Basic PacBio HiFi and Nanopore R10 quality models are implemented via chemistry presets, and the fragment sampling and variant injection modules are read-length agnostic.
+However, these profiles are parametric approximations, not learned from real data.
+Extending \texttt{learn-profile} to capture long-read error patterns would improve realism for long-read variant caller benchmarking.
 
 \textbf{Enhanced error profiles.}
 The current \texttt{learn-profile} subcommand captures per-cycle quality distributions but does not reproduce the full correlation structure modelled by ReSeq\autocite{schmeing2021reseq}.

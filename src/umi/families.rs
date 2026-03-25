@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn test_pcr_family_size_sampler() {
         use crate::core::fragment::PcrFamilySizeSampler;
-        let sampler = PcrFamilySizeSampler::new(3.0, 1.5);
+        let sampler = PcrFamilySizeSampler::new(3.0, 1.5).unwrap();
         let mut rng = StdRng::seed_from_u64(42);
         let sizes: Vec<usize> = (0..10000).map(|_| sampler.sample(&mut rng)).collect();
 
