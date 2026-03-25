@@ -58,7 +58,7 @@ clap = { version = "4", features = ["derive"] }
 
 # Config / serialization
 serde = { version = "1", features = ["derive"] }
-serde_yml = "0.0"
+serde_yaml = "0.9"
 serde_json = "1"
 
 # Logging

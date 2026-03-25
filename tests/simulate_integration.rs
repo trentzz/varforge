@@ -1036,7 +1036,7 @@ seed: 33
     for sample in &resolved {
         let sample_cfg_path = dir.path().join(format!("{}_config.yaml", sample.name));
         let sample_cfg_str =
-            serde_yml::to_string(&sample.config).expect("failed to serialize sample config");
+            serde_yaml::to_string(&sample.config).expect("failed to serialize sample config");
         std::fs::write(&sample_cfg_path, sample_cfg_str.as_bytes()).unwrap();
 
         let sample_opts = default_opts(sample_cfg_path);
