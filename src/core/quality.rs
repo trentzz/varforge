@@ -126,9 +126,10 @@ pub fn sample_nanopore_r10_qualities<R: Rng>(length: usize, seq: &[u8], rng: &mu
     (0..length)
         .map(|pos| {
             // Q15–Q25 range; mode around Q20.
-            let q: f64 = rng.gen_range(15.0..=25.0_f64);
+            let q: f64 = rng.random_range(15.0..=25.0_f64);
             let q = if pos < seq.len() && is_homopolymer_run(seq, pos, MIN_HOMOPOLYMER_LEN) {
-                let penalty: f64 = rng.gen_range(HOMOPOLYMER_PENALTY_MIN..=HOMOPOLYMER_PENALTY_MAX);
+                let penalty: f64 =
+                    rng.random_range(HOMOPOLYMER_PENALTY_MIN..=HOMOPOLYMER_PENALTY_MAX);
                 (q - penalty).max(HOMOPOLYMER_FLOOR)
             } else {
                 q
@@ -147,10 +148,10 @@ pub fn inject_errors<R: Rng>(seq: &mut [u8], qual: &[u8], rng: &mut R) {
 
     for i in 0..seq.len() {
         let error_prob = ParametricQualityModel::error_probability(qual[i]);
-        if rng.gen::<f64>() < error_prob {
+        if rng.random::<f64>() < error_prob {
             let original = seq[i];
             loop {
-                let new_base = BASES[rng.gen_range(0..4)];
+                let new_base = BASES[rng.random_range(0..4)];
                 if new_base != original {
                     seq[i] = new_base;
                     break;

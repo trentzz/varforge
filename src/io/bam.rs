@@ -36,7 +36,7 @@ use crate::io::config::SampleConfig;
 
 /// BAM writer that outputs aligned paired-end reads with proper SAM headers.
 pub struct BamWriter {
-    writer: bam::io::Writer<bgzf::Writer<File>>,
+    writer: bam::io::Writer<bgzf::io::Writer<File>>,
     header: sam::Header,
     sample_name: String,
     /// Mapping quality written to every record.
@@ -464,7 +464,7 @@ fn build_bai_index(bam_path: &Path, header: &sam::Header) -> Result<()> {
 
     let index = builder.build(header.reference_sequences().len());
 
-    bam::bai::write(&bai_path, &index)
+    bam::bai::fs::write(&bai_path, &index)
         .with_context(|| format!("failed to write BAI index: {}", bai_path.display()))?;
 
     Ok(())

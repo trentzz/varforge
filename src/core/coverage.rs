@@ -7,7 +7,20 @@ use super::types::Region;
 /// n_pairs = (coverage * region_length) / (2 * read_length)
 ///
 /// The factor of 2 accounts for paired-end reads (each pair covers ~2*read_length bases,
-/// minus overlap for short fragments, but we use the simple model).
+/// minus overlap for short fragments, but we use the simple model). The result is
+/// rounded up so coverage targets are never undershot.
+///
+/// # Examples
+///
+/// ```
+/// use varforge::core::coverage::read_pairs_for_coverage;
+///
+/// // 1 kbp region at 30x with 150 bp reads → 100 pairs.
+/// assert_eq!(read_pairs_for_coverage(1_000, 30.0, 150), 100);
+///
+/// // Fractional result is rounded up.
+/// assert_eq!(read_pairs_for_coverage(1_001, 30.0, 150), 101);
+/// ```
 #[must_use]
 pub fn read_pairs_for_coverage(region_length: u64, coverage: f64, read_length: usize) -> u64 {
     let n = (coverage * region_length as f64) / (2.0 * read_length as f64);

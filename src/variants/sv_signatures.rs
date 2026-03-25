@@ -42,7 +42,7 @@ pub fn generate_hrd_deletions<R: Rng>(
             continue; // Chromosome too small for this deletion.
         }
 
-        let start = rng.gen_range(0..chrom_len - size);
+        let start = rng.random_range(0..chrom_len - size);
         let end = start + size;
 
         variants.push(Variant {
@@ -93,7 +93,7 @@ pub fn generate_tdp_duplications<R: Rng>(
             continue;
         }
 
-        let start = rng.gen_range(0..chrom_len - size);
+        let start = rng.random_range(0..chrom_len - size);
         let end = start + size;
 
         variants.push(Variant {
@@ -137,9 +137,9 @@ pub fn generate_chromothripsis<R: Rng>(
     };
 
     // The shattering window is a 10–50 Mbp region.
-    let window_size = rng.gen_range(10_000_000u64..=50_000_000).min(chrom_len);
+    let window_size = rng.random_range(10_000_000u64..=50_000_000).min(chrom_len);
     let window_start = if chrom_len > window_size {
-        rng.gen_range(0..chrom_len - window_size)
+        rng.random_range(0..chrom_len - window_size)
     } else {
         0
     };
@@ -153,14 +153,14 @@ pub fn generate_chromothripsis<R: Rng>(
 
     // Generate `count` rearrangements within the shattering window.
     for _ in 0..count {
-        let start = rng.gen_range(window_start..window_end.saturating_sub(1_000));
+        let start = rng.random_range(window_start..window_end.saturating_sub(1_000));
         let size = rng
-            .gen_range(100_000u64..=5_000_000)
+            .random_range(100_000u64..=5_000_000)
             .min(window_end - start);
         let end = start + size;
 
         // Randomly pick an SV type.
-        let sv_type = match rng.gen_range(0..3u8) {
+        let sv_type = match rng.random_range(0..3u8) {
             0 => SvType::Deletion,
             1 => SvType::Inversion,
             _ => SvType::Duplication,
@@ -192,7 +192,7 @@ fn pick_chrom<R: Rng>(chrom_lengths: &[(String, u64)], rng: &mut R) -> Option<(S
     if total_len == 0 {
         return None;
     }
-    let pick = rng.gen_range(0..total_len);
+    let pick = rng.random_range(0..total_len);
     let mut cumulative = 0u64;
     for (chrom, len) in chrom_lengths {
         cumulative += len;

@@ -686,6 +686,16 @@ pub enum ChemistryPreset {
 
 impl ChemistryPreset {
     /// Parse a preset name from a string, returning `None` for unknown names.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use varforge::io::config::ChemistryPreset;
+    ///
+    /// assert!(ChemistryPreset::from_name("illumina-wgs").is_some());
+    /// assert!(ChemistryPreset::from_name("twist-umi-duplex").is_some());
+    /// assert!(ChemistryPreset::from_name("unknown-preset").is_none());
+    /// ```
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "twist-umi-duplex" => Some(Self::TwistUmiDuplex),
@@ -907,6 +917,23 @@ fn substitute_vars(text: &str, vars: &std::collections::HashMap<String, String>)
 /// Returns `(chrom, start, end)` on success. Returns an error if the string
 /// is missing a colon, missing a dash, or if the coordinates are not valid
 /// integers.
+///
+/// # Examples
+///
+/// ```
+/// use varforge::io::config::parse_region;
+///
+/// let (chrom, start, end) = parse_region("chr7:55000000-55200000").unwrap();
+/// assert_eq!(chrom, "chr7");
+/// assert_eq!(start, 55_000_000);
+/// assert_eq!(end, 55_200_000);
+///
+/// // Missing colon is an error.
+/// assert!(parse_region("chr1_1000_2000").is_err());
+///
+/// // Non-integer coordinates are an error.
+/// assert!(parse_region("chr1:abc-2000").is_err());
+/// ```
 pub fn parse_region(s: &str) -> Result<(String, u64, u64)> {
     let colon = s
         .find(':')
