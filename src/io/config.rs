@@ -837,7 +837,7 @@ fn fill_umi(config: &mut Config, length: usize, duplex: bool, inline: bool) {
 pub fn load(path: &Path) -> Result<Config> {
     let contents = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config file: {}", path.display()))?;
-    let mut config: Config = serde_yml::from_str(&contents)
+    let mut config: Config = serde_yaml::from_str(&contents)
         .with_context(|| format!("failed to parse config file: {}", path.display()))?;
     if let Some(preset_name) = config.preset.clone() {
         if let Some(preset) = ChemistryPreset::from_name(&preset_name) {
@@ -860,7 +860,7 @@ pub fn load_with_vars(
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config file: {}", path.display()))?;
     let substituted = substitute_vars(&raw, vars)?;
-    let mut config: Config = serde_yml::from_str(&substituted)
+    let mut config: Config = serde_yaml::from_str(&substituted)
         .with_context(|| format!("failed to parse config file: {}", path.display()))?;
     if let Some(preset_name) = config.preset.clone() {
         if let Some(preset) = ChemistryPreset::from_name(&preset_name) {
@@ -1072,6 +1072,13 @@ pub fn validate(config: &Config) -> Result<()> {
             "UMI length ({}) must be less than read_length ({})",
             umi.length,
             config.sample.read_length
+        );
+
+        // T134: inline UMI trimming is not implemented in v1. Reject early
+        // so users get a clear message rather than silently incorrect output.
+        anyhow::ensure!(
+            !umi.inline,
+            "inline UMI mode is not supported in v1; set umi.inline to false or omit it"
         );
     }
 
@@ -1320,6 +1327,26 @@ umi:
         let umi = cfg.umi.expect("umi should be set");
         // Explicit length 12 overrides the preset default of 8.
         assert_eq!(umi.length, 12);
+    }
+
+    /// `umi.inline: true` is rejected by validation with a clear error.
+    #[test]
+    fn test_inline_umi_rejected() {
+        let yaml = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+umi:
+  length: 8
+  inline: true
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        let err = validate(&cfg).unwrap_err();
+        assert!(
+            err.to_string().contains("inline UMI mode is not supported"),
+            "unexpected error message: {err}"
+        );
     }
 
     /// Explicit `fragment.ctdna_fraction` is parsed and validated correctly.
