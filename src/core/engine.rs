@@ -476,10 +476,10 @@ impl SimulationEngine {
             // fragments on that haplotype.
             let fragment_haplotype: u8 = self.rng.gen_range(0u8..2);
 
-            // ---- Save pre-variant reference for MD tag construction ----
-            // Clone the unmodified fragment sequence before any variant is applied.
-            // The BAM writer uses this to build the MD tag.
-            let pre_variant_frag_seq = frag_seq.clone();
+            // Record the pre-variant fragment length for R2 offset calculation.
+            // We avoid cloning frag_seq here; instead we derive ref sequences
+            // from region_seq after the variant loop (see below).
+            let pre_frag_len = frag_seq.len();
 
             // ---- Variant spike-in ----
             // Collect tags for any variant actually applied to this fragment.
@@ -539,17 +539,22 @@ impl SimulationEngine {
             let r2_len = read_length.min(actual_frag_len);
 
             // Extract pre-variant reference slices for MD tag.
-            // Use the unmodified fragment length (from pre_variant_frag_seq) to
-            // determine the R2 reference offset, then pad to read_length.
-            let pre_len = pre_variant_frag_seq.len();
-            let pre_r1_len = read_length.min(pre_len);
-            let pre_r2_len = read_length.min(pre_len);
-            let mut ref_r1: Vec<u8> = pre_variant_frag_seq[..pre_r1_len].to_vec();
-            let mut ref_r2: Vec<u8> = if pre_len >= read_length {
-                pre_variant_frag_seq[pre_len - pre_r2_len..].to_vec()
+            // Read directly from region_seq (avoiding a per-fragment clone).
+            // region_seq[offset_start..] is the same data that frag_seq held
+            // before any variant was applied, so MD tags are identical.
+            let pre_r1_len = read_length.min(pre_frag_len);
+            let pre_r2_len = read_length.min(pre_frag_len);
+            // R1: first pre_r1_len bases from region_seq at the fragment offset.
+            let ref_r1_end = (offset_start + pre_r1_len).min(region_seq.len());
+            let mut ref_r1: Vec<u8> = region_seq[offset_start..ref_r1_end].to_vec();
+            // R2: last pre_r2_len bases of the fragment reference span.
+            let ref_r2_start = if pre_frag_len >= read_length {
+                offset_start + pre_frag_len - pre_r2_len
             } else {
-                pre_variant_frag_seq[pre_len - pre_r2_len.min(pre_len)..].to_vec()
+                offset_start + pre_frag_len - pre_r2_len.min(pre_frag_len)
             };
+            let ref_r2_end = (ref_r2_start + pre_r2_len).min(region_seq.len());
+            let mut ref_r2: Vec<u8> = region_seq[ref_r2_start..ref_r2_end].to_vec();
             while ref_r1.len() < read_length {
                 ref_r1.push(b'N');
             }
