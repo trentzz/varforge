@@ -30,8 +30,8 @@ pub fn spike_snv(read: &mut Read, read_start: u64, mutation: &MutationType) -> b
 
 /// Apply an MNV (multi-nucleotide variant) to a read.
 /// All bases must be on the same read — never partially spike.
-// Called from tests and benchmarks; not used in the production simulation path.
-#[allow(dead_code)]
+// Called from tests; not used in the production simulation path.
+#[cfg(test)]
 pub fn spike_mnv(read: &mut Read, read_start: u64, mutation: &MutationType) -> bool {
     match mutation {
         MutationType::Mnv {

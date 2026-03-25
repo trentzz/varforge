@@ -110,7 +110,6 @@ pub enum MutationType {
     },
     /// Structural variant (>50 bp) with breakend notation for truth VCF.
     // Variant is constructed by the SV pipeline; retain to avoid breaking match arms.
-    #[allow(dead_code)]
     Sv {
         sv_type: SvType,
         chrom: String,

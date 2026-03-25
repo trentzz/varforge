@@ -1,3 +1,8 @@
+//! Implementation of the `simulate` subcommand.
+//!
+//! Loads a YAML config, builds the simulation plan, drives parallel read
+//! generation across genomic regions, and writes the output BAM/FASTQ and
+//! truth VCF files.
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;

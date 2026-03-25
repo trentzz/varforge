@@ -1,3 +1,9 @@
+//! GC-content-based coverage bias model.
+//!
+//! Provides a configurable bell-shaped bias curve that reproduces the
+//! systematic under-coverage of AT-rich and GC-rich regions seen in Illumina
+//! sequencing.
+
 /// GC-content-based coverage bias model.
 ///
 /// Real Illumina sequencing shows systematic GC bias: AT-rich and GC-rich

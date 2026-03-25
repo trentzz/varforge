@@ -239,7 +239,7 @@ fn run_from_config(
 /// This is a simple line-by-line parser that handles SNVs and indels.
 /// VCF records with symbolic ALT alleles (e.g. `<DEL>`) are skipped.
 // Called only in tests; not yet wired into the production edit command.
-#[allow(dead_code)]
+#[cfg(test)]
 fn load_variants_from_vcf(vcf_path: &PathBuf) -> Result<Vec<Variant>> {
     use std::io::{BufRead, BufReader};
 
@@ -321,7 +321,7 @@ fn load_variants_from_vcf(vcf_path: &PathBuf) -> Result<Vec<Variant>> {
 
 /// Extract AF or EXPECTED_VAF from a VCF INFO field string.
 // Called only from load_variants_from_vcf which is test-only.
-#[allow(dead_code)]
+#[cfg(test)]
 fn parse_vaf_from_info(info: &str) -> Option<f64> {
     for field in info.split(';') {
         if let Some(val) = field

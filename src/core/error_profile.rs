@@ -294,7 +294,7 @@ impl QualityModel for EmpiricalQualityModel {
 ///
 /// `None` signals the caller to fall back to `ParametricQualityModel`.
 // Called only in tests; production code uses `build_empirical_quality` in engine.rs.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn load_from_config(profile_path: Option<&Path>) -> Result<Option<EmpiricalQualityModel>> {
     match profile_path {
         Some(path) => Ok(Some(EmpiricalQualityModel::from_file(path)?)),

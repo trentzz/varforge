@@ -311,29 +311,9 @@ pub fn cigar_ref_to_read_offset(cigar: &[Op], align_start: u64, ref_pos: u64) ->
     None
 }
 
-/// Compute the reference span consumed by a list of CIGAR ops.
-// Companion to cigar_read_span and cigar_to_string; not yet called from production code.
-#[allow(dead_code)]
-pub fn cigar_ref_span(cigar: &[Op]) -> u64 {
-    cigar
-        .iter()
-        .filter_map(|op| op.kind().consumes_reference().then_some(op.len() as u64))
-        .sum()
-}
-
-/// Compute the read (query) span consumed by a list of CIGAR ops.
-// Companion to cigar_ref_span and cigar_to_string; not yet called from production code.
-#[allow(dead_code)]
-pub fn cigar_read_span(cigar: &[Op]) -> usize {
-    cigar
-        .iter()
-        .filter_map(|op| op.kind().consumes_read().then_some(op.len()))
-        .sum()
-}
-
 /// Format CIGAR ops into a string like "5M2I143M".
 // Called from test helpers; not yet used in production code.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn cigar_to_string(ops: &[Op]) -> String {
     ops.iter()
         .map(|op| {

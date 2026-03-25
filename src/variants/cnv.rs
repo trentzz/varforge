@@ -102,7 +102,7 @@ pub fn adjusted_coverage(
 ///
 /// Returns `None` if the region has no allele-specific CN information.
 // Called only in tests.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn loh_vaf(purity: f64, major_cn: u32, minor_cn: u32, normal_cn: u32) -> f64 {
     let total_tumor_cn = major_cn + minor_cn;
     let denominator = purity * (total_tumor_cn as f64) + (1.0 - purity) * (normal_cn as f64);
@@ -123,7 +123,7 @@ pub fn loh_vaf(purity: f64, major_cn: u32, minor_cn: u32, normal_cn: u32) -> f64
 ///
 /// With CCF=1.0 (clonal) and provided multiplicity.
 // Called only in tests.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn vaf_in_amplified_region(
     purity: f64,
     multiplicity: u32,

@@ -1,3 +1,8 @@
+//! Truth VCF writer for variants spiked into the simulation.
+//!
+//! Writes a bgzip-compressed, coordinate-sorted VCF 4.3 file containing every
+//! variant applied to the simulated reads, annotated with expected VAF, clone
+//! assignment, variant type, and cancer-cell fraction.
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;

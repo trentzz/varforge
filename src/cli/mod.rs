@@ -1,3 +1,7 @@
+//! Command-line interface definitions for VarForge.
+//!
+//! Defines the top-level [`Args`] parser, the [`Command`] enum, and per-subcommand
+//! option structs used by each subcommand module.
 pub mod benchmark_suite;
 pub mod cancer_presets;
 pub mod edit;
