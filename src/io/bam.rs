@@ -557,8 +557,12 @@ pub fn compute_nm(read_seq: &[u8], ref_seq: &[u8], cigar_str: &str) -> usize {
                 nm += len;
                 read_pos += len;
             }
-            Kind::Deletion | Kind::Skip => {
+            Kind::Deletion => {
                 nm += len;
+                ref_pos += len;
+            }
+            // N (Skip) advances reference position but does not count as an edit.
+            Kind::Skip => {
                 ref_pos += len;
             }
             Kind::SoftClip => {
