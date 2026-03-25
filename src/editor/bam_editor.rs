@@ -692,6 +692,7 @@ mod tests {
             .collect()
     }
 
+    #[allow(dead_code)]
     fn write_and_reload(
         records: Vec<RecordBuf>,
         header: &sam::Header,
