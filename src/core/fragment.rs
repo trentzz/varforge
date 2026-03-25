@@ -231,7 +231,7 @@ mod tests {
             .map(|_| sample_long_read_length(&cfg, &mut rng).unwrap())
             .collect();
         assert!(
-            sizes.iter().all(|&s| s >= 1000 && s <= 100000),
+            sizes.iter().all(|&s| (1000..=100000).contains(&s)),
             "all samples must be within [min_len, max_len]"
         );
         let mean = sizes.iter().sum::<usize>() as f64 / sizes.len() as f64;

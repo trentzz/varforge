@@ -465,9 +465,9 @@ mod tests {
         // `purity_override` reflects a CLI-supplied value.
         let effective = {
             let content = std::fs::read_to_string(tmp.path()).unwrap();
-            let cfg: EditYamlConfig = serde_yml::from_str(&content).unwrap();
-            let purity_override: Option<f64> = Some(0.8);
-            purity_override.unwrap_or(cfg.purity)
+            let _cfg: EditYamlConfig = serde_yml::from_str(&content).unwrap();
+            let _purity_override: Option<f64> = Some(0.8);
+            0.8_f64
         };
 
         assert!(
@@ -493,8 +493,8 @@ mod tests {
         let effective = {
             let content = std::fs::read_to_string(tmp.path()).unwrap();
             let cfg: EditYamlConfig = serde_yml::from_str(&content).unwrap();
-            let purity_override: Option<f64> = None;
-            purity_override.unwrap_or(cfg.purity)
+            let _purity_override: Option<f64> = None;
+            cfg.purity
         };
 
         assert!(
