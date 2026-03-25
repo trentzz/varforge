@@ -238,7 +238,7 @@ mod tests {
             if let MutationType::Sv { start, end, .. } = &v.mutation {
                 let size = end - start;
                 assert!(
-                    size >= 100_000 && size <= 10_000_000,
+                    (100_000..=10_000_000).contains(&size),
                     "HRD deletion size {size} out of expected range"
                 );
             }
@@ -261,7 +261,7 @@ mod tests {
                 assert_eq!(*sv_type, SvType::Duplication);
                 let size = end - start;
                 assert!(
-                    size >= 1_000 && size <= 10_000,
+                    (1_000..=10_000).contains(&size),
                     "TDP duplication size {size} out of expected range"
                 );
             }
