@@ -290,6 +290,7 @@ mod tests {
                 germline_vcf: false,
                 single_read_bam: false,
                 mapq: 60,
+                annotate_reads: false,
             },
             sample: SampleConfig {
                 name: "BASE".to_string(),

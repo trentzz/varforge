@@ -459,6 +459,7 @@ mod tests {
                 germline_vcf: false,
                 single_read_bam: false,
                 mapq: 60,
+                annotate_reads: false,
             },
             sample: SampleConfig::default(),
             fragment: FragmentConfig::default(),
@@ -518,6 +519,7 @@ mod tests {
                 germline_vcf: false,
                 single_read_bam: false,
                 mapq: 60,
+                annotate_reads: false,
             },
             // User set coverage to 60x in YAML.
             sample: SampleConfig {
