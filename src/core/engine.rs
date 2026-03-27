@@ -34,6 +34,47 @@ use crate::variants::structural::{
 };
 use crate::variants::vaf::sample_alt_count;
 
+// ---------------------------------------------------------------------------
+// Module-level enums used by generate_region and its helpers
+// ---------------------------------------------------------------------------
+
+/// Fragment length sampler variants.
+///
+/// `FragmentSampler` is a trait with a generic `Rng` parameter, so we cannot
+/// use `Box<dyn FragmentSampler>`. This enum serves as the concrete dispatch
+/// type used within `generate_region`.
+enum Sampler {
+    Normal(NormalFragmentSampler),
+    Cfdna(CfdnaFragmentSampler),
+    LongRead(crate::io::config::LongReadFragmentConfig),
+}
+
+impl Sampler {
+    fn sample(&self, rng: &mut StdRng) -> Result<usize> {
+        Ok(match self {
+            Sampler::Normal(s) => {
+                use crate::core::fragment::FragmentSampler as _;
+                s.sample(rng)
+            }
+            Sampler::Cfdna(s) => {
+                use crate::core::fragment::FragmentSampler as _;
+                s.sample(rng)
+            }
+            Sampler::LongRead(cfg) => sample_long_read_length(cfg, rng)?,
+        })
+    }
+}
+
+/// Quality model variants used for read quality and error injection.
+///
+/// Built once outside the fragment loop and passed into `build_read_pair`.
+enum QualModel<'a> {
+    Empirical(&'a EmpiricalQualityModel),
+    Parametric(ParametricQualityModel),
+    PacbioHifi,
+    NanoporeR10,
+}
+
 /// The output produced for a single genomic region.
 pub struct RegionOutput {
     pub read_pairs: Vec<ReadPair>,
@@ -227,103 +268,9 @@ impl SimulationEngine {
         let read_length = self.config.sample.read_length;
         let coverage = self.config.sample.coverage;
 
-        // ---- CNV coverage adjustment ----
-        // Compute effective coverage for the region centre.
-        let region_centre = (region.start + region.end) / 2;
-        let effective_coverage = if !self.cnv_regions.is_empty() {
-            let purity = self.config.tumour.as_ref().map(|t| t.purity).unwrap_or(1.0);
-            let ploidy = self.config.tumour.as_ref().map(|t| t.ploidy).unwrap_or(2);
-            if let Some(cn_region) = find_cn_region(&self.cnv_regions, &region.chrom, region_centre)
-            {
-                adjusted_coverage(
-                    coverage,
-                    purity,
-                    cn_region.tumor_cn,
-                    cn_region.normal_cn,
-                    ploidy,
-                )
-            } else {
-                coverage
-            }
-        } else {
-            coverage
-        };
+        let n_pairs = self.compute_n_pairs(region, read_length, coverage);
 
-        // ---- Capture coverage adjustment ----
-        // If a capture model is present, sample per-target multipliers and
-        // compute the effective coverage multiplier for the region centre.
-        let capture_multiplier = if let Some(ref capture_model) = self.capture_model {
-            let target_multipliers = capture_model.sample_all_target_multipliers(&mut self.rng);
-            capture_model.coverage_multiplier_at(&region.chrom, region_centre, &target_multipliers)
-        } else {
-            1.0
-        };
-
-        let final_coverage = effective_coverage * capture_multiplier;
-        let n_pairs = read_pairs_for_coverage(region.len(), final_coverage, read_length);
-
-        // Build fragment sampler from config.
-        // FragmentSampler uses a generic Rng parameter so we can't use
-        // Box<dyn FragmentSampler>. Use an enum instead.
-        //
-        // When `fragment.long_read` is set, use the log-normal long-read sampler
-        // regardless of the `model` field.
-        enum Sampler<'a> {
-            Normal(NormalFragmentSampler),
-            Cfdna(CfdnaFragmentSampler),
-            LongRead(&'a crate::io::config::LongReadFragmentConfig),
-        }
-        impl Sampler<'_> {
-            fn sample(&self, rng: &mut StdRng) -> Result<usize> {
-                Ok(match self {
-                    Sampler::Normal(s) => {
-                        use crate::core::fragment::FragmentSampler as _;
-                        s.sample(rng)
-                    }
-                    Sampler::Cfdna(s) => {
-                        use crate::core::fragment::FragmentSampler as _;
-                        s.sample(rng)
-                    }
-                    Sampler::LongRead(cfg) => sample_long_read_length(cfg, rng)?,
-                })
-            }
-        }
-        let fragment_sampler = if let Some(ref lr_cfg) = self.config.fragment.long_read {
-            Sampler::LongRead(lr_cfg)
-        } else {
-            match self.config.fragment.model {
-                FragmentModel::Cfda => {
-                    let mono_peak = self.config.fragment.mean;
-                    let di_peak = mono_peak * 2.0;
-                    // Resolve ctDNA fraction: explicit config field takes priority
-                    // over purity. Higher purity means more tumour-derived ctDNA,
-                    // so we use purity directly (not 1.0 - purity).
-                    let ctdna_fraction = self.config.fragment.ctdna_fraction.unwrap_or_else(|| {
-                        self.config.tumour.as_ref().map(|t| t.purity).unwrap_or(0.0)
-                    });
-                    if (ctdna_fraction - 1.0).abs() < f64::EPSILON {
-                        tracing::warn!(
-                            "purity=1.0 with cfDNA model: all fragments will be \
-                             tumour-derived. Did you mean to set a lower purity?"
-                        );
-                    }
-                    let mono_sd = self.config.fragment.mono_sd.unwrap_or(20.0);
-                    let di_sd = self.config.fragment.di_sd.unwrap_or(30.0);
-                    Sampler::Cfdna(CfdnaFragmentSampler::new(
-                        mono_peak,
-                        di_peak,
-                        0.85,
-                        ctdna_fraction,
-                        mono_sd,
-                        di_sd,
-                    )?)
-                }
-                _ => Sampler::Normal(NormalFragmentSampler::new(
-                    self.config.fragment.mean,
-                    self.config.fragment.sd,
-                )?),
-            }
-        };
+        let fragment_sampler = self.build_fragment_sampler()?;
 
         // Per-variant alt/total counters (indexed parallel to `variants`).
         let mut alt_counts = vec![0u32; variants.len()];
@@ -346,38 +293,16 @@ impl SimulationEngine {
         // Pre-fetch the full region sequence once (Fix C-3: avoid per-fragment reference lookup).
         let region_seq: Vec<u8> = self.reference.sequence(region)?;
 
-        // Hoist quality model construction outside the fragment loop (Fix C-2).
-        //
-        // For long-read platforms, use platform-specific flat quality profiles
-        // rather than the Illumina parametric model. Platform is detected from
-        // `sample.platform` only when `fragment.long_read` is set, ensuring
-        // that the long-read quality model is not applied to short-read runs.
-        let is_long_read = self.config.fragment.long_read.is_some();
-        let platform = self
-            .config
-            .sample
-            .platform
-            .as_deref()
-            .unwrap_or("")
-            .to_lowercase();
-        enum QualModel<'a> {
-            Empirical(&'a EmpiricalQualityModel),
-            Parametric(ParametricQualityModel),
-            PacbioHifi,
-            NanoporeR10,
-        }
-        let qual_model = if let Some(ref emp) = self.empirical_quality {
-            QualModel::Empirical(emp)
-        } else if is_long_read && platform.contains("pacbio") {
-            QualModel::PacbioHifi
-        } else if is_long_read && platform.contains("nanopore") {
-            QualModel::NanoporeR10
-        } else {
-            QualModel::Parametric(ParametricQualityModel::new(
-                self.config.quality.mean_quality,
-                self.config.quality.tail_decay,
-            ))
-        };
+        // Build quality model once; re-construction per fragment would be wasteful (Fix C-2).
+        // We access fields directly to avoid a whole-self borrow that would conflict
+        // with the later &mut self.rng uses inside the fragment loop.
+        let qual_model = build_qual_model_from_fields(
+            self.empirical_quality.as_ref(),
+            self.config.fragment.long_read.is_some(),
+            self.config.sample.platform.as_deref().unwrap_or(""),
+            self.config.quality.mean_quality,
+            self.config.quality.tail_decay,
+        );
 
         // Determine whether duplex UMI mode is active. In duplex mode, every alt
         // molecule produces both an AB and a BA strand family, so the duplex alt
@@ -392,9 +317,10 @@ impl SimulationEngine {
         let mut attempts: u64 = 0;
         // Safety cap: at most 10× target pairs to avoid infinite loop on
         // degenerate GC bias configs.
-        let max_attempts: u64 = (n_pairs as u64).saturating_mul(10).max(100);
+        let max_attempts: u64 = n_pairs.saturating_mul(10).max(100);
 
         // Pre-allocate read name buffer to avoid repeated allocation (Fix H-5).
+        use std::fmt::Write as FmtWrite;
         let chrom_prefix = &region.chrom;
         let mut name_buf = String::with_capacity(64);
 
@@ -403,72 +329,21 @@ impl SimulationEngine {
 
             let frag_len = fragment_sampler.sample(&mut self.rng)?;
 
-            // Sample fragment start within the region, clamped so the
-            // fragment doesn't exceed the region boundary.
-            let region_len = region.len() as usize;
-            let max_start_offset = region_len.saturating_sub(frag_len);
-            let frag_start = region.start
-                + if max_start_offset > 0 {
-                    self.rng.random_range(0..max_start_offset as u64)
-                } else {
-                    0
-                };
-
-            // Clamp fragment end to region end.
-            let frag_end = (frag_start + frag_len as u64).min(region.end);
-            let actual_frag_len = (frag_end - frag_start) as usize;
-
-            // Skip severely truncated fragments (e.g. post-deletion tail with fewer
-            // than half the requested read bases).  N-padding is fine for fragments
-            // that are only a few bases short; this guard prevents near-empty reads
-            // that would panic in downstream slice operations.
-            if actual_frag_len < read_length / 2 {
+            // Sample the fragment, applying truncation guards, end-motif filtering,
+            // and GC bias rejection. Returns None if this attempt should be skipped.
+            let Some((frag_start, frag_end, offset_start, frag_seq_init)) = try_sample_fragment_seq(
+                frag_len,
+                region,
+                &region_seq,
+                read_length,
+                self.config.fragment.end_motif_model.as_deref(),
+                self.gc_bias_model.as_ref(),
+                &mut self.rng,
+            ) else {
                 continue;
-            }
-
-            // ---- End motif rejection sampling ----
-            // When the plasma end motif model is enabled, extract the 4-mer at
-            // the fragment 5' end and use rejection sampling to bias fragment
-            // starts toward motifs that are enriched in plasma cfDNA.
-            if self.config.fragment.end_motif_model.as_deref() == Some("plasma") {
-                let motif_5p = {
-                    let pos = (frag_start - region.start) as usize;
-                    if pos + 4 <= region_seq.len() {
-                        Some([
-                            region_seq[pos],
-                            region_seq[pos + 1],
-                            region_seq[pos + 2],
-                            region_seq[pos + 3],
-                        ])
-                    } else {
-                        None
-                    }
-                };
-                if !accept_fragment_by_end_motif(motif_5p, &mut self.rng) {
-                    continue;
-                }
-            }
-
-            // Extract reference sequence for the fragment from the pre-fetched region sequence
-            // (Fix C-3: slice into cached region_seq instead of per-fragment reference call).
-            let offset_start = (frag_start - region.start) as usize;
-            let offset_end = (frag_end - region.start) as usize;
-            let mut frag_seq = region_seq[offset_start..offset_end.min(region_seq.len())].to_vec();
-
-            // Pad with 'N' if shorter than expected (shouldn't normally happen).
-            while frag_seq.len() < actual_frag_len {
-                frag_seq.push(b'N');
-            }
-
-            // ---- GC bias rejection sampling ----
-            if let Some(ref gc_model) = self.gc_bias_model {
-                let gc = GcBiasModel::gc_fraction(&frag_seq);
-                let multiplier = gc_model.coverage_multiplier(gc);
-                // Reject fragment with probability (1 - multiplier).
-                if self.rng.random::<f64>() >= multiplier {
-                    continue;
-                }
-            }
+            };
+            let pre_frag_len = frag_seq_init.len();
+            let mut frag_seq = frag_seq_init;
 
             // ---- Haplotype assignment ----
             // Each fragment is assigned to haplotype 0 or 1 with equal probability.
@@ -476,149 +351,25 @@ impl SimulationEngine {
             // fragments on that haplotype.
             let fragment_haplotype: u8 = self.rng.random_range(0u8..2);
 
-            // Record the pre-variant fragment length for R2 offset calculation.
-            // We avoid cloning frag_seq here; instead we derive ref sequences
-            // from region_seq after the variant loop (see below).
-            let pre_frag_len = frag_seq.len();
-
             // ---- Variant spike-in ----
-            // Collect tags for any variant actually applied to this fragment.
-            let mut fragment_variant_tags: Vec<VariantTag> = Vec::new();
-            for (vi, variant) in variants.iter().enumerate() {
-                if variant_alt_budget[vi] == 0 {
-                    continue;
-                }
-                if !variant_overlaps_region(variant, region) {
-                    continue;
-                }
-                // Haplotype filter: skip this variant if it is assigned to a
-                // haplotype that does not match this fragment.
-                if let Some(h) = variant.haplotype {
-                    if h != fragment_haplotype {
-                        continue;
-                    }
-                }
-                // Check if this fragment overlaps the variant position.
-                let var_pos = variant.pos();
-                if var_pos < frag_start || var_pos >= frag_end {
-                    continue;
-                }
+            let fragment_variant_tags = apply_small_variants(
+                &mut frag_seq,
+                frag_start,
+                frag_end,
+                fragment_haplotype,
+                variants,
+                region,
+                &mut variant_alt_budget,
+                &mut alt_counts,
+                &mut total_counts,
+                n_pairs,
+                pair_idx,
+                &mut self.rng,
+            );
 
-                // Increment total count for this variant.
-                total_counts[vi] += 1;
-
-                // Consume one alt from the budget and spike.
-                let budget = &mut variant_alt_budget[vi];
-                let remaining_pairs = n_pairs - pair_idx;
-                // Stochastically decide: spike this read given remaining budget and pairs.
-                let spike_prob = (*budget as f64) / (remaining_pairs as f64).max(1.0);
-                if self.rng.random::<f64>() < spike_prob {
-                    apply_variant_to_seq(&mut frag_seq, frag_start, variant);
-                    *budget = budget.saturating_sub(1);
-                    alt_counts[vi] += 1;
-                    // Record which variant was spiked into this fragment.
-                    fragment_variant_tags.push(VariantTag {
-                        chrom: variant.chrom.clone(),
-                        pos: mutation_pos(&variant.mutation),
-                        vartype: mutation_vartype(&variant.mutation).to_string(),
-                        vaf: variant.expected_vaf,
-                        clone_id: variant.clone_id.clone(),
-                    });
-                }
-            }
-
-            // ---- Build read1 and read2 ----
-            // read1: first read_length bases of fragment.
-            // read2: last read_length bases of fragment (reverse complement semantics
-            //        are handled by downstream tools; we store the actual sequence here).
-            //
+            // ---- Build read pair (sequences, quality, error injection) ----
             // Re-derive the fragment length from frag_seq: large indels (SV spike-ins)
             // change the sequence length after actual_frag_len was computed above.
-            let actual_frag_len = frag_seq.len();
-            let r1_len = read_length.min(actual_frag_len);
-            let r2_len = read_length.min(actual_frag_len);
-
-            // Extract pre-variant reference slices for MD tag.
-            // Read directly from region_seq (avoiding a per-fragment clone).
-            // region_seq[offset_start..] is the same data that frag_seq held
-            // before any variant was applied, so MD tags are identical.
-            let pre_r1_len = read_length.min(pre_frag_len);
-            let pre_r2_len = read_length.min(pre_frag_len);
-            // R1: first pre_r1_len bases from region_seq at the fragment offset.
-            let ref_r1_end = (offset_start + pre_r1_len).min(region_seq.len());
-            let mut ref_r1: Vec<u8> = region_seq[offset_start..ref_r1_end].to_vec();
-            // R2: last pre_r2_len bases of the fragment reference span.
-            let ref_r2_start = if pre_frag_len >= read_length {
-                offset_start + pre_frag_len - pre_r2_len
-            } else {
-                offset_start + pre_frag_len - pre_r2_len.min(pre_frag_len)
-            };
-            let ref_r2_end = (ref_r2_start + pre_r2_len).min(region_seq.len());
-            let mut ref_r2: Vec<u8> = region_seq[ref_r2_start..ref_r2_end].to_vec();
-            while ref_r1.len() < read_length {
-                ref_r1.push(b'N');
-            }
-            while ref_r2.len() < read_length {
-                ref_r2.push(b'N');
-            }
-
-            let mut r1_seq: Vec<u8> = frag_seq[..r1_len].to_vec();
-            let mut r2_seq: Vec<u8> = if actual_frag_len >= read_length {
-                frag_seq[actual_frag_len - r2_len..].to_vec()
-            } else {
-                frag_seq[actual_frag_len - r2_len.min(actual_frag_len)..].to_vec()
-            };
-
-            // Pad reads to requested read_length if fragment was shorter.
-            while r1_seq.len() < read_length {
-                r1_seq.push(b'N');
-            }
-            while r2_seq.len() < read_length {
-                r2_seq.push(b'N');
-            }
-
-            // ---- Quality and error injection ----
-            // Use empirical model when loaded, else platform-specific model for
-            // long reads, else fall back to the Illumina parametric model
-            // (Fix C-2: model was built once before the loop, not re-constructed
-            // each iteration).
-            let (r1_qual, r2_qual) = match &qual_model {
-                QualModel::Empirical(emp) => {
-                    let q1 = emp.generate_qualities(read_length, &mut self.rng);
-                    let q2 = emp.generate_qualities(read_length, &mut self.rng);
-                    emp.inject_errors(&mut r1_seq, &q1, &mut self.rng);
-                    emp.inject_errors(&mut r2_seq, &q2, &mut self.rng);
-                    (q1, q2)
-                }
-                QualModel::Parametric(parametric) => {
-                    let q1 = parametric.generate_qualities(read_length, &mut self.rng);
-                    let q2 = parametric.generate_qualities(read_length, &mut self.rng);
-                    inject_errors(&mut r1_seq, &q1, &mut self.rng);
-                    inject_errors(&mut r2_seq, &q2, &mut self.rng);
-                    (q1, q2)
-                }
-                QualModel::PacbioHifi => {
-                    // For long reads, r1 spans the full fragment; r2 is unused
-                    // but generated to keep the ReadPair structure intact.
-                    let q1 = sample_pacbio_hifi_qualities(read_length, &mut self.rng);
-                    let q2 = sample_pacbio_hifi_qualities(read_length, &mut self.rng);
-                    inject_errors(&mut r1_seq, &q1, &mut self.rng);
-                    inject_errors(&mut r2_seq, &q2, &mut self.rng);
-                    (q1, q2)
-                }
-                QualModel::NanoporeR10 => {
-                    // Pass the read sequence so homopolymer-aware quality degradation
-                    // can be applied at the correct positions.
-                    let q1 = sample_nanopore_r10_qualities(read_length, &r1_seq, &mut self.rng);
-                    let q2 = sample_nanopore_r10_qualities(read_length, &r2_seq, &mut self.rng);
-                    inject_errors(&mut r1_seq, &q1, &mut self.rng);
-                    inject_errors(&mut r2_seq, &q2, &mut self.rng);
-                    (q1, q2)
-                }
-            };
-
-            // Build read name by reusing the pre-allocated buffer (Fix H-5).
-            use std::fmt::Write as FmtWrite;
             name_buf.clear();
             write!(
                 &mut name_buf,
@@ -627,231 +378,64 @@ impl SimulationEngine {
             )
             .unwrap();
 
-            let pair = ReadPair {
-                name: name_buf.clone(),
-                read1: Read::new(r1_seq, r1_qual),
-                read2: Read::new(r2_seq, r2_qual),
-                fragment_start: frag_start,
-                fragment_length: actual_frag_len,
-                chrom: region.chrom.clone(),
-                variant_tags: fragment_variant_tags,
-                ref_seq_r1: ref_r1,
-                ref_seq_r2: ref_r2,
-            };
+            let pair = build_read_pair(
+                name_buf.as_str(),
+                frag_seq,
+                pre_frag_len,
+                frag_start,
+                &region_seq,
+                offset_start,
+                read_length,
+                &region.chrom,
+                fragment_variant_tags,
+                &qual_model,
+                &mut self.rng,
+            );
 
             read_pairs.push(pair);
             pair_idx += 1;
         }
 
         // ---- SV spike-in: apply structural effects to reads ----
-        // For each SV variant that overlaps the region, apply its effect to
-        // reads that span the breakpoint.  Reads marked Deleted are removed.
-        let sv_variants: Vec<(usize, &Variant)> = variants
-            .iter()
-            .enumerate()
-            .filter(|(_, v)| {
-                matches!(v.mutation, MutationType::Sv { .. }) && variant_overlaps_region(v, region)
-            })
-            .collect();
-
-        if !sv_variants.is_empty() {
-            // Build StructuralVariant objects from SV-type Variant entries.
-            let mut surviving_pairs: Vec<ReadPair> = Vec::with_capacity(read_pairs.len());
-            for mut pair in read_pairs {
-                let mut deleted = false;
-                for (vi, variant) in &sv_variants {
-                    if variant_alt_budget[*vi] == 0 && total_counts[*vi] == 0 {
-                        continue;
-                    }
-                    if let Some(sv) = variant_to_structural(variant) {
-                        // Decide stochastically whether this read should carry the SV allele.
-                        let should_spike = {
-                            let budget = &mut variant_alt_budget[*vi];
-                            if *budget > 0 {
-                                let remaining = (n_pairs - pair_idx.min(n_pairs)) as f64;
-                                let prob = (*budget as f64) / remaining.max(1.0);
-                                if self.rng.random::<f64>() < prob {
-                                    *budget = budget.saturating_sub(1);
-                                    alt_counts[*vi] += 1;
-                                    true
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
-                        };
-                        total_counts[*vi] += 1;
-
-                        if should_spike {
-                            let read_start = pair.fragment_start;
-                            let effect1 = apply_sv_to_read(
-                                &mut pair.read1,
-                                read_start,
-                                &pair.chrom,
-                                &sv,
-                                &self.reference,
-                            );
-                            let _effect2 = apply_sv_to_read(
-                                &mut pair.read2,
-                                read_start,
-                                &pair.chrom,
-                                &sv,
-                                &self.reference,
-                            );
-                            if effect1 == SvReadEffect::Deleted {
-                                deleted = true;
-                                break;
-                            }
-                            // Record the SV spike-in in the read pair's variant tags.
-                            pair.variant_tags.push(VariantTag {
-                                chrom: variant.chrom.clone(),
-                                pos: mutation_pos(&variant.mutation),
-                                vartype: mutation_vartype(&variant.mutation).to_string(),
-                                vaf: variant.expected_vaf,
-                                clone_id: variant.clone_id.clone(),
-                            });
-                        }
-                    }
-                }
-                if !deleted {
-                    surviving_pairs.push(pair);
-                }
-            }
-            read_pairs = surviving_pairs;
-        }
+        read_pairs = apply_sv_variants(
+            read_pairs,
+            variants,
+            region,
+            &mut variant_alt_budget,
+            &mut alt_counts,
+            &mut total_counts,
+            n_pairs,
+            pair_idx,
+            &self.reference,
+            &mut self.rng,
+        );
 
         // ---- UMI / PCR families ----
-        let mut duplex_total_molecules: u64 = 0;
-        let mut duplex_molecules_with_both_strands: u64 = 0;
-
-        if let Some(ref umi_cfg) = self.config.umi {
-            let umi_len = umi_cfg.length;
-            let family_mean = umi_cfg.family_size_mean;
-            let family_sd = umi_cfg.family_size_sd;
-            let pcr_cycles = umi_cfg.pcr_cycles;
-            let is_duplex = umi_cfg.duplex;
-            let pcr_error_rate = self
-                .config
-                .artifacts
-                .as_ref()
-                .and_then(|a| a.pcr_error_rate)
-                .unwrap_or(0.0);
-
-            // Construct sampler once; log-space conversion is non-trivial so
-            // avoid repeating it for every read pair.
-            let family_sampler =
-                crate::core::fragment::PcrFamilySizeSampler::new(family_mean, family_sd)?;
-
-            let mut families: Vec<ReadPair> = Vec::new();
-            for mut pair in read_pairs {
-                if is_duplex {
-                    // Track molecule counts for duplex conversion rate (T108).
-                    duplex_total_molecules += 1;
-                    duplex_molecules_with_both_strands += 1; // always both strands in simulation
-
-                    // Generate an AB/BA duplex pair.
-                    // AB UMI is "AAAA-BBBB"; BA UMI is the halves swapped.
-                    let (umi_a, umi_b) = generate_duplex_umi_pair(umi_len, &mut self.rng);
-                    let a_str = String::from_utf8_lossy(&umi_a[..umi_len]);
-                    let b_str = String::from_utf8_lossy(&umi_b[..umi_len]);
-                    let ab_str = format!("{}-{}", a_str, b_str);
-                    let ba_str = format!("{}-{}", b_str, a_str);
-
-                    // AB strand: original orientation.
-                    pair.name = format!("{}:UMI:{}", pair.name, ab_str);
-                    let family_size = family_sampler.sample(&mut self.rng);
-                    let ab_family = UmiFamily {
-                        umi: umi_a,
-                        original: pair.clone(),
-                        family_size,
-                    };
-                    let mut ab_copies =
-                        generate_pcr_copies(&ab_family, pcr_error_rate, pcr_cycles, &mut self.rng);
-                    families.append(&mut ab_copies);
-
-                    // BA strand: swap R1/R2 and reverse-complement both.
-                    // R1_BA = revcomp(R2_AB), R2_BA = revcomp(R1_AB).
-                    // This models sequencing from the opposite end of the molecule.
-                    let ba_read1 = Read::new(
-                        reverse_complement(&pair.read2.seq),
-                        pair.read2.qual.iter().copied().rev().collect(),
-                    );
-                    let ba_read2 = Read::new(
-                        reverse_complement(&pair.read1.seq),
-                        pair.read1.qual.iter().copied().rev().collect(),
-                    );
-                    // Strip the ":UMI:..." suffix we already appended, then add BA tag.
-                    let base_name = pair
-                        .name
-                        .rfind(":UMI:")
-                        .map(|i| &pair.name[..i])
-                        .unwrap_or(&pair.name);
-                    let ba_pair = ReadPair {
-                        name: format!("{}:UMI:{}", base_name, ba_str),
-                        read1: ba_read1,
-                        read2: ba_read2,
-                        fragment_start: pair.fragment_start,
-                        fragment_length: pair.fragment_length,
-                        chrom: pair.chrom.clone(),
-                        variant_tags: pair.variant_tags.clone(),
-                        ref_seq_r1: pair.ref_seq_r2.iter().copied().rev().collect(),
-                        ref_seq_r2: pair.ref_seq_r1.iter().copied().rev().collect(),
-                    };
-                    let ba_family_size = family_sampler.sample(&mut self.rng);
-                    let ba_family = UmiFamily {
-                        umi: umi_b,
-                        original: ba_pair,
-                        family_size: ba_family_size,
-                    };
-                    let mut ba_copies =
-                        generate_pcr_copies(&ba_family, pcr_error_rate, pcr_cycles, &mut self.rng);
-                    families.append(&mut ba_copies);
-                } else {
-                    let umi = generate_umi(umi_len, &mut self.rng);
-                    let umi_str = String::from_utf8_lossy(&umi).into_owned();
-                    pair.name = format!("{}:UMI:{}", pair.name, umi_str);
-
-                    let family_size = family_sampler.sample(&mut self.rng);
-                    let family = UmiFamily {
-                        umi,
-                        original: pair,
-                        family_size,
-                    };
-                    let mut copies =
-                        generate_pcr_copies(&family, pcr_error_rate, pcr_cycles, &mut self.rng);
-                    families.append(&mut copies);
-                }
-            }
-            read_pairs = families;
-        }
+        let pcr_error_rate = self
+            .config
+            .artifacts
+            .as_ref()
+            .and_then(|a| a.pcr_error_rate)
+            .unwrap_or(0.0);
+        let (read_pairs, duplex_total_molecules, duplex_molecules_with_both_strands) =
+            if let Some(ref umi_cfg) = self.config.umi {
+                expand_umi_families(
+                    read_pairs,
+                    umi_cfg.length,
+                    umi_cfg.family_size_mean,
+                    umi_cfg.family_size_sd,
+                    umi_cfg.pcr_cycles,
+                    umi_cfg.duplex,
+                    pcr_error_rate,
+                    &mut self.rng,
+                )?
+            } else {
+                (read_pairs, 0u64, 0u64)
+            };
 
         // ---- Artifact injection ----
-        if let Some(ref artifact_cfg) = self.config.artifacts {
-            if let Some(ffpe_rate) = artifact_cfg.ffpe_damage_rate {
-                for pair in &mut read_pairs {
-                    inject_ffpe_damage(&mut pair.read1.seq, ffpe_rate, false, &mut self.rng);
-                    inject_ffpe_damage(&mut pair.read2.seq, ffpe_rate, true, &mut self.rng);
-                }
-            }
-
-            if let Some(oxog_rate) = artifact_cfg.oxog_rate {
-                for pair in &mut read_pairs {
-                    inject_oxog_damage(&mut pair.read1.seq, oxog_rate, true, &mut self.rng);
-                    inject_oxog_damage(&mut pair.read2.seq, oxog_rate, false, &mut self.rng);
-                }
-            }
-
-            if let Some(dup_rate) = artifact_cfg.duplicate_rate {
-                let dup_indices = select_duplicates(read_pairs.len(), dup_rate, &mut self.rng);
-                let mut duplicates: Vec<ReadPair> = dup_indices
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &idx)| duplicate_read_pair(&read_pairs[idx], i))
-                    .collect();
-                read_pairs.append(&mut duplicates);
-            }
-        }
+        let read_pairs =
+            inject_artifacts(read_pairs, self.config.artifacts.as_ref(), &mut self.rng);
 
         // ---- Collect applied variants ----
         let applied_variants: Vec<AppliedVariant> = variants
@@ -874,6 +458,86 @@ impl SimulationEngine {
             duplex_total_molecules,
             duplex_molecules_with_both_strands,
         })
+    }
+
+    /// Compute the number of read pairs to generate for a region.
+    ///
+    /// Applies CNV copy-number adjustment and capture-model efficiency multipliers
+    /// to derive the final effective coverage, then converts to a pair count.
+    fn compute_n_pairs(&mut self, region: &Region, read_length: usize, coverage: f64) -> u64 {
+        let region_centre = (region.start + region.end) / 2;
+        let effective_coverage = if !self.cnv_regions.is_empty() {
+            let purity = self.config.tumour.as_ref().map(|t| t.purity).unwrap_or(1.0);
+            let ploidy = self.config.tumour.as_ref().map(|t| t.ploidy).unwrap_or(2);
+            if let Some(cn_region) = find_cn_region(&self.cnv_regions, &region.chrom, region_centre)
+            {
+                adjusted_coverage(
+                    coverage,
+                    purity,
+                    cn_region.tumor_cn,
+                    cn_region.normal_cn,
+                    ploidy,
+                )
+            } else {
+                coverage
+            }
+        } else {
+            coverage
+        };
+
+        let capture_multiplier = if let Some(ref capture_model) = self.capture_model {
+            let target_multipliers = capture_model.sample_all_target_multipliers(&mut self.rng);
+            capture_model.coverage_multiplier_at(&region.chrom, region_centre, &target_multipliers)
+        } else {
+            1.0
+        };
+
+        read_pairs_for_coverage(
+            region.len(),
+            effective_coverage * capture_multiplier,
+            read_length,
+        )
+    }
+
+    /// Build the fragment length sampler from config.
+    ///
+    /// Returns a `Sampler` enum wrapping either the cfDNA bimodal sampler, the
+    /// normal Gaussian sampler, or the log-normal long-read sampler.
+    fn build_fragment_sampler(&self) -> Result<Sampler> {
+        if let Some(ref lr_cfg) = self.config.fragment.long_read {
+            return Ok(Sampler::LongRead(lr_cfg.clone()));
+        }
+        match self.config.fragment.model {
+            FragmentModel::Cfda => {
+                let mono_peak = self.config.fragment.mean;
+                let di_peak = mono_peak * 2.0;
+                // Resolve ctDNA fraction: explicit config field takes priority over purity.
+                // Higher purity means more tumour-derived ctDNA, so we use purity directly.
+                let ctdna_fraction = self.config.fragment.ctdna_fraction.unwrap_or_else(|| {
+                    self.config.tumour.as_ref().map(|t| t.purity).unwrap_or(0.0)
+                });
+                if (ctdna_fraction - 1.0).abs() < f64::EPSILON {
+                    tracing::warn!(
+                        "purity=1.0 with cfDNA model: all fragments will be \
+                         tumour-derived. Did you mean to set a lower purity?"
+                    );
+                }
+                let mono_sd = self.config.fragment.mono_sd.unwrap_or(20.0);
+                let di_sd = self.config.fragment.di_sd.unwrap_or(30.0);
+                Ok(Sampler::Cfdna(CfdnaFragmentSampler::new(
+                    mono_peak,
+                    di_peak,
+                    0.85,
+                    ctdna_fraction,
+                    mono_sd,
+                    di_sd,
+                )?))
+            }
+            _ => Ok(Sampler::Normal(NormalFragmentSampler::new(
+                self.config.fragment.mean,
+                self.config.fragment.sd,
+            )?)),
+        }
     }
 }
 
@@ -970,6 +634,500 @@ fn build_empirical_quality(config: &Config) -> Option<EmpiricalQualityModel> {
             None
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// generate_region helpers
+// ---------------------------------------------------------------------------
+
+/// Build the quality model from individual field values.
+///
+/// Accepting fields rather than `&self` avoids a whole-`self` borrow that would
+/// prevent simultaneous `&mut self.rng` borrows in the fragment loop.
+fn build_qual_model_from_fields<'a>(
+    empirical: Option<&'a EmpiricalQualityModel>,
+    is_long_read: bool,
+    platform: &str,
+    mean_quality: u8,
+    tail_decay: f64,
+) -> QualModel<'a> {
+    let platform = platform.to_lowercase();
+    if let Some(emp) = empirical {
+        QualModel::Empirical(emp)
+    } else if is_long_read && platform.contains("pacbio") {
+        QualModel::PacbioHifi
+    } else if is_long_read && platform.contains("nanopore") {
+        QualModel::NanoporeR10
+    } else {
+        QualModel::Parametric(ParametricQualityModel::new(mean_quality, tail_decay))
+    }
+}
+
+/// Sample a fragment position and extract its sequence, applying all rejection criteria.
+///
+/// Returns `Some((frag_start, frag_end, offset_start, frag_seq))` when the fragment passes
+/// all filters. Returns `None` when the fragment should be skipped (truncated, end-motif
+/// rejection, or GC bias rejection).
+#[allow(clippy::too_many_arguments)]
+fn try_sample_fragment_seq(
+    frag_len: usize,
+    region: &Region,
+    region_seq: &[u8],
+    read_length: usize,
+    end_motif_model: Option<&str>,
+    gc_bias_model: Option<&GcBiasModel>,
+    rng: &mut StdRng,
+) -> Option<(u64, u64, usize, Vec<u8>)> {
+    let region_len = region.len() as usize;
+    let max_start_offset = region_len.saturating_sub(frag_len);
+    let frag_start = region.start
+        + if max_start_offset > 0 {
+            rng.random_range(0..max_start_offset as u64)
+        } else {
+            0
+        };
+
+    let frag_end = (frag_start + frag_len as u64).min(region.end);
+    let actual_frag_len = (frag_end - frag_start) as usize;
+
+    // Skip severely truncated fragments. N-padding is fine for fragments that are
+    // only a few bases short; this guard prevents near-empty reads that would panic
+    // in downstream slice operations.
+    if actual_frag_len < read_length / 2 {
+        return None;
+    }
+
+    // End motif rejection sampling: bias fragment starts toward 5' motifs enriched
+    // in plasma cfDNA when the plasma model is enabled.
+    if end_motif_model == Some("plasma") {
+        let pos = (frag_start - region.start) as usize;
+        let motif_5p = if pos + 4 <= region_seq.len() {
+            Some([
+                region_seq[pos],
+                region_seq[pos + 1],
+                region_seq[pos + 2],
+                region_seq[pos + 3],
+            ])
+        } else {
+            None
+        };
+        if !accept_fragment_by_end_motif(motif_5p, rng) {
+            return None;
+        }
+    }
+
+    // Slice fragment sequence from the pre-fetched region sequence.
+    let offset_start = (frag_start - region.start) as usize;
+    let offset_end = (frag_end - region.start) as usize;
+    let mut frag_seq = region_seq[offset_start..offset_end.min(region_seq.len())].to_vec();
+    while frag_seq.len() < actual_frag_len {
+        frag_seq.push(b'N');
+    }
+
+    // GC bias rejection: reject the fragment with probability (1 - multiplier).
+    if let Some(gc_model) = gc_bias_model {
+        let gc = GcBiasModel::gc_fraction(&frag_seq);
+        let multiplier = gc_model.coverage_multiplier(gc);
+        if rng.random::<f64>() >= multiplier {
+            return None;
+        }
+    }
+
+    Some((frag_start, frag_end, offset_start, frag_seq))
+}
+
+/// Apply small variants (SNV, MNV, indel) to a fragment sequence.
+///
+/// Iterates over all variants, filters to those that overlap the fragment and
+/// pass the haplotype check, then stochastically decides whether to spike each
+/// one based on the remaining alt budget. Updates `alt_counts`, `total_counts`,
+/// and `variant_alt_budget` in place.
+///
+/// Returns a `Vec<VariantTag>` listing every variant that was actually spiked.
+#[allow(clippy::too_many_arguments)]
+fn apply_small_variants(
+    frag_seq: &mut Vec<u8>,
+    frag_start: u64,
+    frag_end: u64,
+    fragment_haplotype: u8,
+    variants: &[Variant],
+    region: &Region,
+    variant_alt_budget: &mut [u32],
+    alt_counts: &mut [u32],
+    total_counts: &mut [u32],
+    n_pairs: u64,
+    pair_idx: u64,
+    rng: &mut StdRng,
+) -> Vec<VariantTag> {
+    let mut tags: Vec<VariantTag> = Vec::new();
+    for (vi, variant) in variants.iter().enumerate() {
+        if variant_alt_budget[vi] == 0 {
+            continue;
+        }
+        if !variant_overlaps_region(variant, region) {
+            continue;
+        }
+        // Haplotype filter: skip if the variant's haplotype does not match this fragment.
+        if let Some(h) = variant.haplotype {
+            if h != fragment_haplotype {
+                continue;
+            }
+        }
+        // Check if this fragment overlaps the variant position.
+        let var_pos = variant.pos();
+        if var_pos < frag_start || var_pos >= frag_end {
+            continue;
+        }
+
+        total_counts[vi] += 1;
+
+        let budget = &mut variant_alt_budget[vi];
+        let remaining_pairs = n_pairs - pair_idx;
+        let spike_prob = (*budget as f64) / (remaining_pairs as f64).max(1.0);
+        if rng.random::<f64>() < spike_prob {
+            apply_variant_to_seq(frag_seq, frag_start, variant);
+            *budget = budget.saturating_sub(1);
+            alt_counts[vi] += 1;
+            tags.push(VariantTag {
+                chrom: variant.chrom.clone(),
+                pos: mutation_pos(&variant.mutation),
+                vartype: mutation_vartype(&variant.mutation).to_string(),
+                vaf: variant.expected_vaf,
+                clone_id: variant.clone_id.clone(),
+            });
+        }
+    }
+    tags
+}
+
+/// Construct a `ReadPair` from a mutated fragment sequence.
+///
+/// Extracts R1 and R2 subsequences, builds reference sequences for MD tags,
+/// pads with `N` to `read_length`, applies quality scoring, and injects
+/// sequencing errors.
+#[allow(clippy::too_many_arguments)]
+fn build_read_pair(
+    name: &str,
+    frag_seq: Vec<u8>,
+    pre_frag_len: usize,
+    frag_start: u64,
+    region_seq: &[u8],
+    offset_start: usize,
+    read_length: usize,
+    chrom: &str,
+    variant_tags: Vec<VariantTag>,
+    qual_model: &QualModel<'_>,
+    rng: &mut StdRng,
+) -> ReadPair {
+    let actual_frag_len = frag_seq.len();
+    let r1_len = read_length.min(actual_frag_len);
+    let r2_len = read_length.min(actual_frag_len);
+
+    // Extract pre-variant reference slices for MD tag.
+    // region_seq[offset_start..] mirrors the unmodified fragment, so MD tags
+    // reflect the reference rather than the spiked sequence.
+    let pre_r1_len = read_length.min(pre_frag_len);
+    let pre_r2_len = read_length.min(pre_frag_len);
+    let ref_r1_end = (offset_start + pre_r1_len).min(region_seq.len());
+    let mut ref_r1: Vec<u8> = region_seq[offset_start..ref_r1_end].to_vec();
+    let ref_r2_start = if pre_frag_len >= read_length {
+        offset_start + pre_frag_len - pre_r2_len
+    } else {
+        offset_start + pre_frag_len - pre_r2_len.min(pre_frag_len)
+    };
+    let ref_r2_end = (ref_r2_start + pre_r2_len).min(region_seq.len());
+    let mut ref_r2: Vec<u8> = region_seq[ref_r2_start..ref_r2_end].to_vec();
+    while ref_r1.len() < read_length {
+        ref_r1.push(b'N');
+    }
+    while ref_r2.len() < read_length {
+        ref_r2.push(b'N');
+    }
+
+    let mut r1_seq: Vec<u8> = frag_seq[..r1_len].to_vec();
+    let mut r2_seq: Vec<u8> = if actual_frag_len >= read_length {
+        frag_seq[actual_frag_len - r2_len..].to_vec()
+    } else {
+        frag_seq[actual_frag_len - r2_len.min(actual_frag_len)..].to_vec()
+    };
+    while r1_seq.len() < read_length {
+        r1_seq.push(b'N');
+    }
+    while r2_seq.len() < read_length {
+        r2_seq.push(b'N');
+    }
+
+    // Quality scoring and error injection.
+    let (r1_qual, r2_qual) = match qual_model {
+        QualModel::Empirical(emp) => {
+            let q1 = emp.generate_qualities(read_length, rng);
+            let q2 = emp.generate_qualities(read_length, rng);
+            emp.inject_errors(&mut r1_seq, &q1, rng);
+            emp.inject_errors(&mut r2_seq, &q2, rng);
+            (q1, q2)
+        }
+        QualModel::Parametric(parametric) => {
+            let q1 = parametric.generate_qualities(read_length, rng);
+            let q2 = parametric.generate_qualities(read_length, rng);
+            inject_errors(&mut r1_seq, &q1, rng);
+            inject_errors(&mut r2_seq, &q2, rng);
+            (q1, q2)
+        }
+        QualModel::PacbioHifi => {
+            // For long reads, r1 spans the full fragment; r2 is unused
+            // but generated to keep the ReadPair structure intact.
+            let q1 = sample_pacbio_hifi_qualities(read_length, rng);
+            let q2 = sample_pacbio_hifi_qualities(read_length, rng);
+            inject_errors(&mut r1_seq, &q1, rng);
+            inject_errors(&mut r2_seq, &q2, rng);
+            (q1, q2)
+        }
+        QualModel::NanoporeR10 => {
+            // Pass the read sequence so homopolymer-aware quality degradation
+            // can be applied at the correct positions.
+            let q1 = sample_nanopore_r10_qualities(read_length, &r1_seq, rng);
+            let q2 = sample_nanopore_r10_qualities(read_length, &r2_seq, rng);
+            inject_errors(&mut r1_seq, &q1, rng);
+            inject_errors(&mut r2_seq, &q2, rng);
+            (q1, q2)
+        }
+    };
+
+    ReadPair {
+        name: name.to_string(),
+        read1: Read::new(r1_seq, r1_qual),
+        read2: Read::new(r2_seq, r2_qual),
+        fragment_start: frag_start,
+        fragment_length: actual_frag_len,
+        chrom: chrom.to_string(),
+        variant_tags,
+        ref_seq_r1: ref_r1,
+        ref_seq_r2: ref_r2,
+    }
+}
+
+/// Apply SV variants to the read pair batch.
+///
+/// For each SV that overlaps the region, stochastically applies the structural
+/// effect to read pairs. Pairs marked `Deleted` by the SV effect are dropped.
+/// Updates `variant_alt_budget`, `alt_counts`, and `total_counts` in place.
+#[allow(clippy::too_many_arguments)]
+fn apply_sv_variants(
+    read_pairs: Vec<ReadPair>,
+    variants: &[Variant],
+    region: &Region,
+    variant_alt_budget: &mut [u32],
+    alt_counts: &mut [u32],
+    total_counts: &mut [u32],
+    n_pairs: u64,
+    pair_idx: u64,
+    reference: &ReferenceGenome,
+    rng: &mut StdRng,
+) -> Vec<ReadPair> {
+    let sv_variants: Vec<(usize, &Variant)> = variants
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| {
+            matches!(v.mutation, MutationType::Sv { .. }) && variant_overlaps_region(v, region)
+        })
+        .collect();
+
+    if sv_variants.is_empty() {
+        return read_pairs;
+    }
+
+    let mut surviving_pairs: Vec<ReadPair> = Vec::with_capacity(read_pairs.len());
+    for mut pair in read_pairs {
+        let mut deleted = false;
+        for (vi, variant) in &sv_variants {
+            if variant_alt_budget[*vi] == 0 && total_counts[*vi] == 0 {
+                continue;
+            }
+            if let Some(sv) = variant_to_structural(variant) {
+                let should_spike = {
+                    let budget = &mut variant_alt_budget[*vi];
+                    if *budget > 0 {
+                        let remaining = (n_pairs - pair_idx.min(n_pairs)) as f64;
+                        let prob = (*budget as f64) / remaining.max(1.0);
+                        if rng.random::<f64>() < prob {
+                            *budget = budget.saturating_sub(1);
+                            alt_counts[*vi] += 1;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                };
+                total_counts[*vi] += 1;
+
+                if should_spike {
+                    let read_start = pair.fragment_start;
+                    let effect1 =
+                        apply_sv_to_read(&mut pair.read1, read_start, &pair.chrom, &sv, reference);
+                    let _effect2 =
+                        apply_sv_to_read(&mut pair.read2, read_start, &pair.chrom, &sv, reference);
+                    if effect1 == SvReadEffect::Deleted {
+                        deleted = true;
+                        break;
+                    }
+                    pair.variant_tags.push(VariantTag {
+                        chrom: variant.chrom.clone(),
+                        pos: mutation_pos(&variant.mutation),
+                        vartype: mutation_vartype(&variant.mutation).to_string(),
+                        vaf: variant.expected_vaf,
+                        clone_id: variant.clone_id.clone(),
+                    });
+                }
+            }
+        }
+        if !deleted {
+            surviving_pairs.push(pair);
+        }
+    }
+    surviving_pairs
+}
+
+/// Expand read pairs into UMI-tagged PCR families.
+///
+/// For duplex mode, each molecule produces both an AB and a BA strand family.
+/// Returns the expanded read pair list and duplex molecule counts.
+#[allow(clippy::too_many_arguments)]
+fn expand_umi_families(
+    read_pairs: Vec<ReadPair>,
+    umi_len: usize,
+    family_mean: f64,
+    family_sd: f64,
+    pcr_cycles: u32,
+    is_duplex: bool,
+    pcr_error_rate: f64,
+    rng: &mut StdRng,
+) -> Result<(Vec<ReadPair>, u64, u64)> {
+    // Construct the family size sampler once; log-space conversion is non-trivial.
+    let family_sampler = crate::core::fragment::PcrFamilySizeSampler::new(family_mean, family_sd)?;
+
+    let mut families: Vec<ReadPair> = Vec::new();
+    let mut duplex_total_molecules: u64 = 0;
+    let mut duplex_molecules_with_both_strands: u64 = 0;
+
+    for mut pair in read_pairs {
+        if is_duplex {
+            // Track molecule counts for duplex conversion rate (T108).
+            duplex_total_molecules += 1;
+            duplex_molecules_with_both_strands += 1; // always both strands in simulation
+
+            // Generate AB and BA UMI tags. AB is "AAAA-BBBB"; BA is the halves swapped.
+            let (umi_a, umi_b) = generate_duplex_umi_pair(umi_len, rng);
+            let a_str = String::from_utf8_lossy(&umi_a[..umi_len]);
+            let b_str = String::from_utf8_lossy(&umi_b[..umi_len]);
+            let ab_str = format!("{}-{}", a_str, b_str);
+            let ba_str = format!("{}-{}", b_str, a_str);
+
+            // AB strand: original orientation.
+            pair.name = format!("{}:UMI:{}", pair.name, ab_str);
+            let family_size = family_sampler.sample(rng);
+            let ab_family = UmiFamily {
+                umi: umi_a,
+                original: pair.clone(),
+                family_size,
+            };
+            let mut ab_copies = generate_pcr_copies(&ab_family, pcr_error_rate, pcr_cycles, rng);
+            families.append(&mut ab_copies);
+
+            // BA strand: R1_BA = revcomp(R2_AB), R2_BA = revcomp(R1_AB).
+            // This models sequencing from the opposite end of the molecule.
+            let ba_read1 = Read::new(
+                reverse_complement(&pair.read2.seq),
+                pair.read2.qual.iter().copied().rev().collect(),
+            );
+            let ba_read2 = Read::new(
+                reverse_complement(&pair.read1.seq),
+                pair.read1.qual.iter().copied().rev().collect(),
+            );
+            let base_name = pair
+                .name
+                .rfind(":UMI:")
+                .map(|i| &pair.name[..i])
+                .unwrap_or(&pair.name);
+            let ba_pair = ReadPair {
+                name: format!("{}:UMI:{}", base_name, ba_str),
+                read1: ba_read1,
+                read2: ba_read2,
+                fragment_start: pair.fragment_start,
+                fragment_length: pair.fragment_length,
+                chrom: pair.chrom.clone(),
+                variant_tags: pair.variant_tags.clone(),
+                ref_seq_r1: pair.ref_seq_r2.iter().copied().rev().collect(),
+                ref_seq_r2: pair.ref_seq_r1.iter().copied().rev().collect(),
+            };
+            let ba_family_size = family_sampler.sample(rng);
+            let ba_family = UmiFamily {
+                umi: umi_b,
+                original: ba_pair,
+                family_size: ba_family_size,
+            };
+            let mut ba_copies = generate_pcr_copies(&ba_family, pcr_error_rate, pcr_cycles, rng);
+            families.append(&mut ba_copies);
+        } else {
+            let umi = generate_umi(umi_len, rng);
+            let umi_str = String::from_utf8_lossy(&umi).into_owned();
+            pair.name = format!("{}:UMI:{}", pair.name, umi_str);
+
+            let family_size = family_sampler.sample(rng);
+            let family = UmiFamily {
+                umi,
+                original: pair,
+                family_size,
+            };
+            let mut copies = generate_pcr_copies(&family, pcr_error_rate, pcr_cycles, rng);
+            families.append(&mut copies);
+        }
+    }
+    Ok((
+        families,
+        duplex_total_molecules,
+        duplex_molecules_with_both_strands,
+    ))
+}
+
+/// Inject sequencing artifacts (FFPE damage, oxoG damage, PCR duplicates) into a read batch.
+///
+/// If no artifact config is set, returns the batch unchanged.
+fn inject_artifacts(
+    mut read_pairs: Vec<ReadPair>,
+    artifact_cfg: Option<&crate::io::config::ArtifactConfig>,
+    rng: &mut StdRng,
+) -> Vec<ReadPair> {
+    let Some(cfg) = artifact_cfg else {
+        return read_pairs;
+    };
+
+    if let Some(ffpe_rate) = cfg.ffpe_damage_rate {
+        for pair in &mut read_pairs {
+            inject_ffpe_damage(&mut pair.read1.seq, ffpe_rate, false, rng);
+            inject_ffpe_damage(&mut pair.read2.seq, ffpe_rate, true, rng);
+        }
+    }
+
+    if let Some(oxog_rate) = cfg.oxog_rate {
+        for pair in &mut read_pairs {
+            inject_oxog_damage(&mut pair.read1.seq, oxog_rate, true, rng);
+            inject_oxog_damage(&mut pair.read2.seq, oxog_rate, false, rng);
+        }
+    }
+
+    if let Some(dup_rate) = cfg.duplicate_rate {
+        let dup_indices = select_duplicates(read_pairs.len(), dup_rate, rng);
+        let mut duplicates: Vec<ReadPair> = dup_indices
+            .iter()
+            .enumerate()
+            .map(|(i, &idx)| duplicate_read_pair(&read_pairs[idx], i))
+            .collect();
+        read_pairs.append(&mut duplicates);
+    }
+
+    read_pairs
 }
 
 // ---------------------------------------------------------------------------
