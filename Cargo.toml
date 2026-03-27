@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.74"
 description = "Synthetic cancer sequencing test data generator"
-repository = "https://github.com/varforge/varforge"
-homepage = "https://github.com/varforge/varforge"
+repository = "https://github.com/trentzz/varforge"
+homepage = "https://github.com/trentzz/varforge"
 documentation = "https://docs.rs/varforge"
 license = "MIT"
 readme = "README.md"
@@ -32,6 +32,10 @@ exclude = [
     ".github/**",
     "scripts/**",
     "CLAUDE.md",
+    # Claude agent files
+    ".claude/**",
+    # Integration tests (not needed in published crate)
+    "tests/**",
 ]
 
 [dependencies]

@@ -1,4 +1,5 @@
 /target
+.claude/
 
 # Large genomic output files
 *.bam
