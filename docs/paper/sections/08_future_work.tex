@@ -1,11 +1,11 @@
 \section{Future Work}
 \label{sec:future}
 
-The most important next step is output correctness validation.
+The most important next steps are output correctness validation and extended benchmarking.
 
-\textbf{VAF accuracy validation.}
-A chi-squared or Kolmogorov-Smirnov test comparing observed alt-read counts against the expected Binomial$(D, \text{VAF})$ distribution would directly validate the Bernoulli sampling model.
-This is straightforward to automate: generate reads at a known VAF, align with BWA, count alt reads in pileup, and test the resulting distribution.
+\textbf{VAF accuracy validation (done).}
+A chi-squared goodness-of-fit test comparing observed alt-read counts against $\text{Binomial}(D, \text{VAF})$ now validates the Bernoulli sampling model at four VAF levels, with a companion power test confirming rejection of deterministic spike-in.
+The next step is end-to-end validation: generate reads at a known VAF, align with BWA, count alt reads in pileup, and compare the observed VAF distribution against the configured value.
 
 \textbf{cfDNA fragment distribution validation.}
 The cfDNA mode uses a three-component Gaussian mixture.
