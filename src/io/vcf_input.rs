@@ -52,7 +52,7 @@ pub fn parse_vcf(
     if is_bgzipped {
         let file = std::fs::File::open(path)
             .with_context(|| format!("failed to open VCF: {}", path.display()))?;
-        let bgzf_reader = bgzf::Reader::new(file);
+        let bgzf_reader = bgzf::io::Reader::new(file);
         let buf_reader = BufReader::new(bgzf_reader);
         parse_from_reader(buf_reader, known_chroms, ref_seqs)
     } else {
@@ -104,7 +104,7 @@ pub fn parse_from_reader<R: BufRead>(
 
 /// Parse variants from a string (convenience wrapper for tests).
 // Called only in tests.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn parse_vcf_str(
     input: &str,
     known_chroms: Option<&[String]>,
@@ -549,7 +549,7 @@ chr2\t200\t.\tA\tG\t.\tPASS\t.\n"
         // Write a proper BGZF file using noodles_bgzf::Writer.
         let mut tmp = NamedTempFile::with_suffix(".vcf.gz").unwrap();
         {
-            let mut writer = bgzf::Writer::new(&mut tmp);
+            let mut writer = bgzf::io::Writer::new(&mut tmp);
             writer.write_all(vcf_content.as_bytes()).unwrap();
             writer.try_finish().unwrap();
         }

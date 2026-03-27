@@ -9,6 +9,18 @@ pub struct Region {
 }
 
 impl Region {
+    /// Create a new genomic region.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use varforge::core::types::Region;
+    ///
+    /// let r = Region::new("chr1", 1_000, 2_000);
+    /// assert_eq!(r.chrom, "chr1");
+    /// assert_eq!(r.start, 1_000);
+    /// assert_eq!(r.end, 2_000);
+    /// ```
     pub fn new(chrom: impl Into<String>, start: u64, end: u64) -> Self {
         Self {
             chrom: chrom.into(),
@@ -17,6 +29,20 @@ impl Region {
         }
     }
 
+    /// Return the length of the region in base pairs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use varforge::core::types::Region;
+    ///
+    /// let r = Region::new("chr1", 1_000, 2_000);
+    /// assert_eq!(r.len(), 1_000);
+    ///
+    /// // An empty region has length 0.
+    /// let empty = Region::new("chr1", 500, 500);
+    /// assert_eq!(empty.len(), 0);
+    /// ```
     #[must_use]
     pub fn len(&self) -> u64 {
         self.end.saturating_sub(self.start)
@@ -29,8 +55,6 @@ impl Region {
 }
 
 /// Records which variant a read pair carries, for FASTQ name annotation and sidecar output.
-// Fields are populated for future use; not yet consumed by any output path.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct VariantTag {
     pub chrom: String,
@@ -110,7 +134,6 @@ pub enum MutationType {
     },
     /// Structural variant (>50 bp) with breakend notation for truth VCF.
     // Variant is constructed by the SV pipeline; retain to avoid breaking match arms.
-    #[allow(dead_code)]
     Sv {
         sv_type: SvType,
         chrom: String,

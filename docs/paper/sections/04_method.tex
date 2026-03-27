@@ -140,6 +140,6 @@ Explicit YAML values always take precedence over preset defaults.
 
 \subsection{Implementation}
 
-\varforge{} uses a pure-Rust dependency stack: noodles\autocite{noodles} for BAM/VCF/FASTA, \texttt{seq\_io} for FASTQ, \texttt{flate2} for compression.
+\varforge{} uses a pure-Rust dependency stack: noodles\autocite{noodles} for BAM, FASTA, and BGZF I/O, \texttt{flate2} for gzip compression, and direct FASTQ and VCF formatting via buffered writers.
 No C libraries are required, enabling single-binary distribution.
 Deterministic seeding uses $\text{seed}_r = H(\text{seed}_\text{global}, r)$ per region, ensuring reproducibility independent of thread scheduling.

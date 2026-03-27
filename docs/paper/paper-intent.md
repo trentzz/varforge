@@ -39,9 +39,10 @@ deduplication tools, and liquid biopsy algorithms.
 
 ## What this paper is NOT
 
-- A validation paper. Output correctness (VAF accuracy, cfDNA fragment
-  distributions, UMI family size distributions) is not yet independently
-  validated. This is stated openly as the main limitation and next step.
+- A validation paper. VAF accuracy is validated by a chi-squared
+  goodness-of-fit test, but cfDNA fragment distributions and UMI family
+  size distributions are not yet independently validated. This is stated
+  openly as the main limitation and next step.
 - A comparison paper. Direct throughput comparison with other tools is
   complicated by feature asymmetry. We note what comparable tools do, but
   do not claim "N times faster than X".
@@ -123,9 +124,9 @@ The pipeline TikZ diagram stays in Method as the main architecture figure.
 
 ## Outstanding work (update this list as items are completed)
 
-- [ ] VAF accuracy chi-squared test
+- [x] VAF accuracy chi-squared test (tests/vaf_chi_squared.rs)
+- [x] Downstream variant caller benchmarking (Mutect2, four scenarios)
 - [ ] cfDNA fragment distribution extraction from BAM output
-- [ ] Downstream variant caller benchmarking (Mutect2 or VarDict)
 - [ ] Compute-bound thread scaling benchmark (UMI simulation at 1/2/4/6/12 threads)
 - [ ] FragmentModel::Custom implementation (currently warns and falls back to Normal)
 - [ ] umi.spacer_length config field for exact Twist protocol simulation

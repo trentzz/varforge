@@ -17,7 +17,7 @@ pub fn select_duplicates<R: Rng>(
     let n_dups = (read_count as f64 * duplicate_rate).round() as usize;
     let mut indices = Vec::with_capacity(n_dups);
     for _ in 0..n_dups {
-        indices.push(rng.gen_range(0..read_count));
+        indices.push(rng.random_range(0..read_count));
     }
     indices
 }

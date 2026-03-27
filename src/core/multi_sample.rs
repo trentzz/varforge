@@ -149,14 +149,14 @@ impl MultiSamplePlan {
     }
 
     /// Return the number of samples in this plan.
-    // Not yet called from production code; retained as a standard collection API method.
+    // Called from integration tests; not yet used in the production binary.
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.samples.len()
     }
 
     /// Return `true` if the plan has no samples.
-    // Not yet called from production code; retained as a standard collection API method.
+    // Companion to len(); required by Clippy's len_without_is_empty lint convention.
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.samples.is_empty()
@@ -290,6 +290,7 @@ mod tests {
                 germline_vcf: false,
                 single_read_bam: false,
                 mapq: 60,
+                annotate_reads: false,
             },
             sample: SampleConfig {
                 name: "BASE".to_string(),

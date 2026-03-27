@@ -66,3 +66,18 @@ jobs:
 
       - name: cargo fmt --check
         run: cargo fmt -- --check
+
+  audit:
+    name: Audit
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure Rust toolchain
+        run: rustup default stable && rustup update stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: cargo audit
+        run: cargo audit
