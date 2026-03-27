@@ -566,12 +566,11 @@ pub(crate) fn run_single_sample(
             .unwrap_or(0);
 
         for batch in rx {
-            // Write FASTQ — annotate read names with variant tags when present.
+            // Write FASTQ — annotate read names with variant tags when enabled.
             if let Some(ref mut fq) = fastq_writer {
                 for pair in &batch.read_pairs {
-                    let name = if pair.variant_tags.is_empty() {
-                        pair.name.clone()
-                    } else {
+                    let name = if writer_cfg.output.annotate_reads && !pair.variant_tags.is_empty()
+                    {
                         let tags: String = pair
                             .variant_tags
                             .iter()
@@ -579,6 +578,8 @@ pub(crate) fn run_single_sample(
                             .collect::<Vec<_>>()
                             .join("");
                         format!("{}{}", pair.name, tags)
+                    } else {
+                        pair.name.clone()
                     };
                     // Apply primer trimming when configured: remove the first and
                     // last `primer_trim` bases to simulate primer removal.
@@ -1648,12 +1649,11 @@ fn run_sample_simulation(
             .unwrap_or(0);
 
         for batch in rx {
-            // Write FASTQ — annotate read names with variant tags when present.
+            // Write FASTQ — annotate read names with variant tags when enabled.
             if let Some(ref mut fq) = fastq_writer {
                 for pair in &batch.read_pairs {
-                    let name = if pair.variant_tags.is_empty() {
-                        pair.name.clone()
-                    } else {
+                    let name = if writer_cfg.output.annotate_reads && !pair.variant_tags.is_empty()
+                    {
                         let tags: String = pair
                             .variant_tags
                             .iter()
@@ -1661,6 +1661,8 @@ fn run_sample_simulation(
                             .collect::<Vec<_>>()
                             .join("");
                         format!("{}{}", pair.name, tags)
+                    } else {
+                        pair.name.clone()
                     };
                     // Apply primer trimming when configured: remove the first and
                     // last `primer_trim` bases to simulate primer removal.
@@ -2872,6 +2874,7 @@ mod tests {
                 germline_vcf: false,
                 single_read_bam: false,
                 mapq: 60,
+                annotate_reads: false,
             },
             sample: SampleConfig {
                 name: "TEST".to_string(),
@@ -3002,6 +3005,7 @@ mod tests {
                 germline_vcf: false,
                 single_read_bam: false,
                 mapq: 60,
+                annotate_reads: false,
             },
             sample: SampleConfig::default(),
             fragment: FragmentConfig::default(),

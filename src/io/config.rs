@@ -107,6 +107,15 @@ pub struct OutputConfig {
     /// alignment is perfect. Lower values suit error-prone platforms.
     #[serde(default = "default_mapq")]
     pub mapq: u8,
+    /// Annotate FASTQ read names with variant information for reads that carry
+    /// a spiked-in variant.
+    ///
+    /// When enabled, each read name gains one or more space-separated tags of
+    /// the form `VT:Z:<chrom>:<pos>:<type>` (e.g. `VT:Z:chr1:1000:SNV`).
+    /// Disabled by default to keep read names clean for production use.
+    /// Enable for debugging or truth-labelled benchmarking datasets.
+    #[serde(default)]
+    pub annotate_reads: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -55,8 +55,6 @@ impl Region {
 }
 
 /// Records which variant a read pair carries, for FASTQ name annotation and sidecar output.
-// Fields are populated for future use; not yet consumed by any output path.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct VariantTag {
     pub chrom: String,
