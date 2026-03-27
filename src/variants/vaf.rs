@@ -7,8 +7,8 @@ use rand_distr::{Binomial, Distribution};
 ///
 /// VAF = CCF * multiplicity * purity / (purity * CN_tumour + (1 - purity) * CN_normal)
 // Called from tests and from vaf_in_amplified_region in cnv.rs (also test-only).
+#[cfg(test)]
 #[must_use]
-#[allow(dead_code)]
 pub fn expected_vaf(
     ccf: f64,
     multiplicity: u32,
@@ -28,6 +28,26 @@ pub fn expected_vaf(
 ///
 /// This avoids the deterministic spike-in bias present in tools like BAMSurgeon,
 /// where a 10% VAF at 30x always gives exactly 3 alt reads.
+///
+/// # Examples
+///
+/// ```
+/// use rand::SeedableRng;
+/// use rand::rngs::StdRng;
+/// use varforge::variants::vaf::sample_alt_count;
+///
+/// let mut rng = StdRng::seed_from_u64(42);
+///
+/// // At VAF=0.0, no alt reads are produced.
+/// assert_eq!(sample_alt_count(100, 0.0, &mut rng), 0);
+///
+/// // At VAF=1.0, all reads are alt.
+/// assert_eq!(sample_alt_count(50, 1.0, &mut rng), 50);
+///
+/// // At an intermediate VAF, the result is stochastic but bounded.
+/// let count = sample_alt_count(100, 0.1, &mut rng);
+/// assert!(count <= 100);
+/// ```
 pub fn sample_alt_count<R: Rng>(total_depth: u32, expected_vaf: f64, rng: &mut R) -> u32 {
     if expected_vaf <= 0.0 {
         return 0;

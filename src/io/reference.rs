@@ -181,14 +181,14 @@ impl ReferenceGenome {
 
     /// Returns `true` if the reference contains a chromosome named `name`.
     // Called only in tests; production code iterates known_chromosomes directly.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn contains_chromosome(&self, name: &str) -> bool {
         self.chrom_lengths.contains_key(name)
     }
 
     /// Returns the total size of the genome (sum of all chromosome lengths).
     // Called only in tests; production code sums chrom_lengths inline.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn genome_size(&self) -> u64 {
         self.chrom_lengths.values().sum()
     }

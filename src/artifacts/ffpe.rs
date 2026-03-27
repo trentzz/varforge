@@ -22,12 +22,12 @@ pub fn inject_ffpe_damage<R: Rng>(
         if is_reverse_strand {
             // On reverse strand, deamination of C on the original strand
             // appears as G>A
-            if *base == b'G' && rng.gen::<f64>() < effective_rate {
+            if *base == b'G' && rng.random::<f64>() < effective_rate {
                 *base = b'A';
             }
         } else {
             // On forward strand, C>T deamination
-            if *base == b'C' && rng.gen::<f64>() < effective_rate {
+            if *base == b'C' && rng.random::<f64>() < effective_rate {
                 *base = b'T';
             }
         }
@@ -46,7 +46,7 @@ pub fn inject_oxog_damage<R: Rng>(seq: &mut [u8], damage_rate: f64, is_read1: bo
     };
 
     for base in seq.iter_mut() {
-        if *base == b'G' && rng.gen::<f64>() < effective_rate {
+        if *base == b'G' && rng.random::<f64>() < effective_rate {
             *base = b'T';
         }
     }

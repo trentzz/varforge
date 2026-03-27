@@ -172,7 +172,7 @@ fn run_from_config(
 ) -> Result<()> {
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("failed to read edit config: {}", config_path.display()))?;
-    let cfg: EditYamlConfig = serde_yml::from_str(&content)
+    let cfg: EditYamlConfig = serde_yaml::from_str(&content)
         .with_context(|| format!("failed to parse edit config: {}", config_path.display()))?;
 
     let seed = cfg.seed.unwrap_or(seed_override);
@@ -239,7 +239,7 @@ fn run_from_config(
 /// This is a simple line-by-line parser that handles SNVs and indels.
 /// VCF records with symbolic ALT alleles (e.g. `<DEL>`) are skipped.
 // Called only in tests; not yet wired into the production edit command.
-#[allow(dead_code)]
+#[cfg(test)]
 fn load_variants_from_vcf(vcf_path: &PathBuf) -> Result<Vec<Variant>> {
     use std::io::{BufRead, BufReader};
 
@@ -321,7 +321,7 @@ fn load_variants_from_vcf(vcf_path: &PathBuf) -> Result<Vec<Variant>> {
 
 /// Extract AF or EXPECTED_VAF from a VCF INFO field string.
 // Called only from load_variants_from_vcf which is test-only.
-#[allow(dead_code)]
+#[cfg(test)]
 fn parse_vaf_from_info(info: &str) -> Option<f64> {
     for field in info.split(';') {
         if let Some(val) = field
@@ -465,7 +465,7 @@ mod tests {
         // `purity_override` reflects a CLI-supplied value.
         let effective = {
             let content = std::fs::read_to_string(tmp.path()).unwrap();
-            let _cfg: EditYamlConfig = serde_yml::from_str(&content).unwrap();
+            let _cfg: EditYamlConfig = serde_yaml::from_str(&content).unwrap();
             let _purity_override: Option<f64> = Some(0.8);
             0.8_f64
         };
@@ -492,7 +492,7 @@ mod tests {
 
         let effective = {
             let content = std::fs::read_to_string(tmp.path()).unwrap();
-            let cfg: EditYamlConfig = serde_yml::from_str(&content).unwrap();
+            let cfg: EditYamlConfig = serde_yaml::from_str(&content).unwrap();
             let _purity_override: Option<f64> = None;
             cfg.purity
         };

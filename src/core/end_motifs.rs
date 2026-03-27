@@ -79,7 +79,7 @@ pub fn accept_fragment_by_end_motif<R: Rng>(motif_5p: Option<[u8; 4]>, rng: &mut
         None => true,
         Some(ref m) => {
             let freq = plasma_end_motif_freq(m);
-            rng.gen::<f64>() < freq / MAX_PLASMA_FREQ
+            rng.random::<f64>() < freq / MAX_PLASMA_FREQ
         }
     }
 }

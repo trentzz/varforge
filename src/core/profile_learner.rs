@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::io::BufReader;
-use std::num::NonZeroUsize;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -218,7 +217,7 @@ impl ProfileLearner {
     /// Learn a profile directly from in-memory [`RecordBuf`] records (useful for testing
     /// without writing a full BAM to disk).
     // Called only in tests; production entry point is learn_from_bam.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn learn_from_records(
         &self,
         records: &[RecordBuf],
@@ -467,6 +466,8 @@ pub fn write_quality_tsv(profile: &ProfileJson, path: &std::path::Path) -> anyho
 /// Returns a `Vec` of `[quality, weight]` entry lists per cycle, in the same
 /// format used by `ProfileJson.quality_distribution.read1`.
 /// Positions with no non-zero weight fall back to a single Q30 entry.
+// Called by load_quality_tsv; not yet wired into the production engine.
+#[allow(dead_code)]
 pub fn read_quality_tsv(path: &std::path::Path) -> anyhow::Result<Vec<Vec<[f64; 2]>>> {
     use std::io::BufRead as _;
     let f = std::fs::File::open(path)
@@ -518,7 +519,7 @@ pub fn read_quality_tsv(path: &std::path::Path) -> anyhow::Result<Vec<Vec<[f64; 
 /// - `template_len`: SAM TLEN field (positive for R1, negative for R2 in practice)
 // Lives outside the test module so it can be called across test functions without
 // visibility issues; not used in production code.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn make_test_record(
     seq: &[u8],
     quals: &[u8],
@@ -569,46 +570,6 @@ pub fn make_test_record(
         .build();
 
     Ok(record)
-}
-
-/// Write a list of [`RecordBuf`]s to a BAM file and return the path.
-// Lives outside the test module for the same reason as make_test_record.
-#[allow(dead_code)]
-pub fn write_test_bam(
-    path: &Path,
-    records: &[RecordBuf],
-    ref_name: &str,
-    ref_len: u64,
-) -> Result<()> {
-    use noodles_sam::header::record::value::{
-        map::{self, header::Version, ReferenceSequence},
-        Map,
-    };
-
-    let ref_len_nz =
-        NonZeroUsize::try_from(ref_len as usize).context("reference length must be > 0")?;
-
-    let hd = Map::<map::Header>::new(Version::new(1, 6));
-    let header = sam::Header::builder()
-        .set_header(hd)
-        .add_reference_sequence(ref_name, Map::<ReferenceSequence>::new(ref_len_nz))
-        .build();
-
-    let file = std::fs::File::create(path).context("failed to create test BAM")?;
-    let mut writer = bam::io::Writer::new(file);
-    writer
-        .write_header(&header)
-        .context("failed to write test BAM header")?;
-
-    for record in records {
-        use noodles_sam::alignment::io::Write as _;
-        writer
-            .write_alignment_record(&header, record)
-            .context("failed to write test BAM record")?;
-    }
-
-    writer.try_finish().context("failed to finalize test BAM")?;
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------

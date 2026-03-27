@@ -453,7 +453,7 @@ fn reservoir_sample(items: &[usize], k: usize, rng: &mut StdRng) -> Vec<usize> {
     let k = k.min(items.len());
     let mut result: Vec<usize> = items[..k].to_vec();
     for (i, &item) in items[k..].iter().enumerate() {
-        let j = rng.gen_range(0..=(i + k));
+        let j = rng.random_range(0..=(i + k));
         if j < k {
             result[j] = item;
         }
@@ -690,16 +690,6 @@ mod tests {
                 )
             })
             .collect()
-    }
-
-    #[allow(dead_code)]
-    fn write_and_reload(
-        records: Vec<RecordBuf>,
-        header: &sam::Header,
-    ) -> (sam::Header, Vec<RecordBuf>) {
-        let tmp = NamedTempFile::new().unwrap();
-        write_bam(tmp.path(), header, &records).unwrap();
-        load_bam(tmp.path()).unwrap()
     }
 
     // ------------------------------------------------------------------

@@ -64,8 +64,9 @@
 
 \varforge{} covers a feature space that no existing simulator addresses with a single tool.
 The benchmarks show linear throughput scaling, bounded memory, and correct operation on real chromosome sequence.
-The current limitation is the absence of output correctness validation: VAF accuracy, cfDNA fragment distributions, and UMI family structure are not yet independently verified.
-This validation is the most important next step before the tool can be used to benchmark callers with confidence.
+VAF accuracy is validated by a chi-squared goodness-of-fit test against the theoretical binomial distribution.
+The remaining limitation is cfDNA fragment distributions and UMI family structure, which are not yet independently verified.
+This validation is the most important next step before the tool can be used to benchmark callers with full confidence.
 Source code, documentation, and example configurations are available under the MIT licence at \url{https://github.com/trentzz/varforge}.
 
 \printbibliography

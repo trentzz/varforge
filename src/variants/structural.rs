@@ -1,8 +1,14 @@
-use rand::Rng;
-
-use crate::core::types::{Read, SvType};
+//! Structural variant types and read-level application logic.
+//!
+//! Defines [`StructuralVariant`] (deletions, insertions, inversions,
+//! duplications, translocations) and functions that modify simulated reads to
+//! produce the correct signal at each breakpoint.
+use crate::core::types::Read;
 use crate::seq_utils::complement;
+#[cfg(test)]
 use crate::variants::vaf::sample_alt_count;
+#[cfg(test)]
+use rand::Rng;
 
 /// A structural variant with all parameters needed to generate affected reads.
 #[derive(Debug, Clone, PartialEq)]
@@ -45,19 +51,6 @@ impl StructuralVariant {
             Self::Inversion { chrom, .. } => chrom,
             Self::Duplication { chrom, .. } => chrom,
             Self::Translocation { chrom1, .. } => chrom1,
-        }
-    }
-
-    /// Return the `SvType` tag for use in `MutationType::Sv`.
-    // Not called yet; retained for callers that need to inspect the SV class programmatically.
-    #[allow(dead_code)]
-    pub fn sv_type(&self) -> SvType {
-        match self {
-            Self::Deletion { .. } => SvType::Deletion,
-            Self::Insertion { .. } => SvType::Insertion,
-            Self::Inversion { .. } => SvType::Inversion,
-            Self::Duplication { .. } => SvType::Duplication,
-            Self::Translocation { .. } => SvType::Translocation,
         }
     }
 
@@ -337,7 +330,7 @@ pub fn apply_translocation(
 /// allele.  Returns the number of alt reads to generate using binomial
 /// sampling (same model as small variants).
 // Called only in tests.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn sample_sv_alt_count<R: Rng>(total_depth: u32, expected_vaf: f64, rng: &mut R) -> u32 {
     sample_alt_count(total_depth, expected_vaf, rng)
 }

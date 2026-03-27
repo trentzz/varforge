@@ -26,6 +26,9 @@ output:
   bam: true
   truth_vcf: true
   manifest: true
+  # annotate_reads: true  # append VT:Z:<chrom>:<pos>:<type> tags to read names
+                          # for reads carrying a spiked-in variant. Disabled by
+                          # default; enable for debugging or truth-labelled datasets.
 
 sample:
   name: CUSTOM_MUT

@@ -63,7 +63,7 @@ impl FastqWriter {
     }
 
     /// Write a batch of [`ReadPair`]s, naming each record `{name_prefix}:{index}` (1-based).
-    // Called only in tests; not yet used in the production write path.
+    // Called from benchmarks; not yet used in the production write path.
     #[allow(dead_code)]
     pub fn write_pairs(&mut self, pairs: &[ReadPair], name_prefix: &str) -> Result<()> {
         for (i, pair) in pairs.iter().enumerate() {

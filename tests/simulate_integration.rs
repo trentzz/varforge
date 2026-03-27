@@ -1036,7 +1036,7 @@ seed: 33
     for sample in &resolved {
         let sample_cfg_path = dir.path().join(format!("{}_config.yaml", sample.name));
         let sample_cfg_str =
-            serde_yml::to_string(&sample.config).expect("failed to serialize sample config");
+            serde_yaml::to_string(&sample.config).expect("failed to serialize sample config");
         std::fs::write(&sample_cfg_path, sample_cfg_str.as_bytes()).unwrap();
 
         let sample_opts = default_opts(sample_cfg_path);
@@ -2427,6 +2427,132 @@ seed: 42
             line.contains("SVTYPE=DUP"),
             "SV record should have SVTYPE=DUP in INFO, got: {}",
             line
+        );
+    }
+}
+
+/// annotate_reads=true appends VT:Z: tags to read names for variant-carrying reads.
+///
+/// We run at high coverage with a single high-VAF SNV so that most reads covering
+/// the variant position carry the alt allele. With annotate_reads enabled, at
+/// least some read headers should contain "VT:Z:".
+#[test]
+fn test_annotate_reads_enabled() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = TempDir::new().unwrap();
+    let fa = write_minimal_fasta(dir.path());
+
+    let cfg_path = dir.path().join("config.yaml");
+    let content = format!(
+        r#"
+reference: {ref}
+output:
+  directory: {out}
+  fastq: true
+  bam: false
+  truth_vcf: false
+  manifest: false
+  annotate_reads: true
+sample:
+  name: ANNOT
+  read_length: 50
+  coverage: 30.0
+fragment:
+  model: normal
+  mean: 200.0
+  sd: 30.0
+chromosomes:
+  - chr1
+seed: 77
+mutations:
+  random:
+    count: 3
+    vaf_min: 0.90
+    vaf_max: 0.99
+    snv_fraction: 1.0
+    indel_fraction: 0.0
+    mnv_fraction: 0.0
+"#,
+        ref = fa.display(),
+        out = out_dir.path().display(),
+    );
+    std::fs::write(&cfg_path, content.as_bytes()).unwrap();
+    simulate::run(default_opts(cfg_path), None).expect("annotate_reads simulation should succeed");
+
+    let r1 = out_dir.path().join("ANNOT_R1.fastq.gz");
+    assert!(r1.exists(), "R1 FASTQ not found");
+    let content = decompress_gz(&r1);
+
+    let headers: Vec<&str> = content.lines().filter(|l| l.starts_with('@')).collect();
+    assert!(!headers.is_empty(), "should have some reads");
+
+    // With high-VAF variants and 30x coverage at least some headers should be annotated.
+    let annotated = headers.iter().filter(|h| h.contains("VT:Z:")).count();
+    assert!(
+        annotated > 0,
+        "annotate_reads=true should produce at least one annotated header (VT:Z:), got 0 out of {}",
+        headers.len()
+    );
+}
+
+/// annotate_reads=false (default) leaves read names clean — no VT:Z: tags.
+#[test]
+fn test_annotate_reads_disabled() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = TempDir::new().unwrap();
+    let fa = write_minimal_fasta(dir.path());
+
+    let cfg_path = dir.path().join("config.yaml");
+    let content = format!(
+        r#"
+reference: {ref}
+output:
+  directory: {out}
+  fastq: true
+  bam: false
+  truth_vcf: false
+  manifest: false
+  annotate_reads: false
+sample:
+  name: NANNOT
+  read_length: 50
+  coverage: 30.0
+fragment:
+  model: normal
+  mean: 200.0
+  sd: 30.0
+chromosomes:
+  - chr1
+seed: 77
+mutations:
+  random:
+    count: 3
+    vaf_min: 0.90
+    vaf_max: 0.99
+    snv_fraction: 1.0
+    indel_fraction: 0.0
+    mnv_fraction: 0.0
+"#,
+        ref = fa.display(),
+        out = out_dir.path().display(),
+    );
+    std::fs::write(&cfg_path, content.as_bytes()).unwrap();
+    simulate::run(default_opts(cfg_path), None)
+        .expect("disabled annotate_reads simulation should succeed");
+
+    let r1 = out_dir.path().join("NANNOT_R1.fastq.gz");
+    assert!(r1.exists(), "R1 FASTQ not found");
+    let content = decompress_gz(&r1);
+
+    let headers: Vec<&str> = content.lines().filter(|l| l.starts_with('@')).collect();
+    assert!(!headers.is_empty(), "should have some reads");
+
+    // No header should contain a VT:Z: annotation.
+    for header in &headers {
+        assert!(
+            !header.contains("VT:Z:"),
+            "annotate_reads=false should produce no VT:Z: tags, but got: {}",
+            header
         );
     }
 }

@@ -189,7 +189,7 @@ impl EmpiricalQualityModel {
     fn sample_quality_at<R: Rng>(&self, pos: usize, rng: &mut R) -> u8 {
         let table_pos = pos.min(self.quality_distributions.len() - 1);
         let cdf = &self.quality_distributions[table_pos];
-        let r: f64 = rng.gen();
+        let r: f64 = rng.random();
         for &(q, cum) in cdf {
             if r <= cum {
                 return q;
@@ -220,7 +220,7 @@ impl EmpiricalQualityModel {
         if total <= 0.0 {
             return from;
         }
-        let r: f64 = rng.gen::<f64>() * total;
+        let r: f64 = rng.random::<f64>() * total;
         let mut cumulative = 0.0;
         for &to in BASES.iter().filter(|&&b| b != from) {
             cumulative += self
@@ -267,14 +267,14 @@ impl QualityModel for EmpiricalQualityModel {
             let from = sequence[i];
             let error_prob = ParametricQualityModel::error_probability(effective[i]);
 
-            if rng.gen::<f64>() < error_prob {
+            if rng.random::<f64>() < error_prob {
                 let total_sub = self.total_substitution_prob(from);
                 if total_sub > 0.0 {
                     sequence[i] = self.sample_substitution(from, rng);
                 } else {
                     const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
                     loop {
-                        let new_base = BASES[rng.gen_range(0..4)];
+                        let new_base = BASES[rng.random_range(0..4)];
                         if new_base != from {
                             sequence[i] = new_base;
                             break;
@@ -294,7 +294,7 @@ impl QualityModel for EmpiricalQualityModel {
 ///
 /// `None` signals the caller to fall back to `ParametricQualityModel`.
 // Called only in tests; production code uses `build_empirical_quality` in engine.rs.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn load_from_config(profile_path: Option<&Path>) -> Result<Option<EmpiricalQualityModel>> {
     match profile_path {
         Some(path) => Ok(Some(EmpiricalQualityModel::from_file(path)?)),

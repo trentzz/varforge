@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.74"
 description = "Synthetic cancer sequencing test data generator"
-repository = "https://github.com/varforge/varforge"
-homepage = "https://github.com/varforge/varforge"
+repository = "https://github.com/trentzz/varforge"
+homepage = "https://github.com/trentzz/varforge"
 documentation = "https://docs.rs/varforge"
 license = "MIT"
 readme = "README.md"
@@ -32,33 +32,37 @@ exclude = [
     ".github/**",
     "scripts/**",
     "CLAUDE.md",
+    # Claude agent files
+    ".claude/**",
+    # Integration tests (not needed in published crate)
+    "tests/**",
 ]
 
 [dependencies]
 # Pure Rust bioinformatics I/O (no C dependencies)
-noodles-bam = "0.68"
-noodles-sam = "0.65"
-noodles-fasta = "0.42"
-noodles-bgzf = "0.33"
-noodles-core = "0.15"
+noodles-bam = "0.87"
+noodles-sam = "0.83"
+noodles-fasta = "0.60"
+noodles-bgzf = "0.46"
+noodles-core = "0.19"
 
 # RNG and distributions
-rand = "0.8"
-rand_distr = "0.4"
+rand = "0.9"
+rand_distr = "0.5"
 
 # Parallelism
 rayon = "1.10"
 crossbeam-channel = "0.5"
 
 # Compression — pure-Rust backend (miniz_oxide) avoids the libz-sys/cmake dependency
-flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
 
 # Config / serialization
 serde = { version = "1", features = ["derive"] }
-serde_yml = "0.0"
+serde_yaml = "0.9"
 serde_json = "1"
 
 # Logging
@@ -66,17 +70,17 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Progress
-indicatif = "0.17"
+indicatif = "0.18"
 
 # Error handling
 anyhow = "1"
-noodles-tabix = "0.61.0"
-noodles-csi = "0.39.0"
+noodles-tabix = "0.61"
+noodles-csi = "0.55"
 
 [dev-dependencies]
 tempfile = "3"
 approx = "0.5"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "varforge_benchmarks"

@@ -107,6 +107,15 @@ pub struct OutputConfig {
     /// alignment is perfect. Lower values suit error-prone platforms.
     #[serde(default = "default_mapq")]
     pub mapq: u8,
+    /// Annotate FASTQ read names with variant information for reads that carry
+    /// a spiked-in variant.
+    ///
+    /// When enabled, each read name gains one or more space-separated tags of
+    /// the form `VT:Z:<chrom>:<pos>:<type>` (e.g. `VT:Z:chr1:1000:SNV`).
+    /// Disabled by default to keep read names clean for production use.
+    /// Enable for debugging or truth-labelled benchmarking datasets.
+    #[serde(default)]
+    pub annotate_reads: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -686,6 +695,16 @@ pub enum ChemistryPreset {
 
 impl ChemistryPreset {
     /// Parse a preset name from a string, returning `None` for unknown names.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use varforge::io::config::ChemistryPreset;
+    ///
+    /// assert!(ChemistryPreset::from_name("illumina-wgs").is_some());
+    /// assert!(ChemistryPreset::from_name("twist-umi-duplex").is_some());
+    /// assert!(ChemistryPreset::from_name("unknown-preset").is_none());
+    /// ```
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "twist-umi-duplex" => Some(Self::TwistUmiDuplex),
@@ -837,7 +856,7 @@ fn fill_umi(config: &mut Config, length: usize, duplex: bool, inline: bool) {
 pub fn load(path: &Path) -> Result<Config> {
     let contents = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config file: {}", path.display()))?;
-    let mut config: Config = serde_yml::from_str(&contents)
+    let mut config: Config = serde_yaml::from_str(&contents)
         .with_context(|| format!("failed to parse config file: {}", path.display()))?;
     if let Some(preset_name) = config.preset.clone() {
         if let Some(preset) = ChemistryPreset::from_name(&preset_name) {
@@ -860,7 +879,7 @@ pub fn load_with_vars(
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config file: {}", path.display()))?;
     let substituted = substitute_vars(&raw, vars)?;
-    let mut config: Config = serde_yml::from_str(&substituted)
+    let mut config: Config = serde_yaml::from_str(&substituted)
         .with_context(|| format!("failed to parse config file: {}", path.display()))?;
     if let Some(preset_name) = config.preset.clone() {
         if let Some(preset) = ChemistryPreset::from_name(&preset_name) {
@@ -907,6 +926,23 @@ fn substitute_vars(text: &str, vars: &std::collections::HashMap<String, String>)
 /// Returns `(chrom, start, end)` on success. Returns an error if the string
 /// is missing a colon, missing a dash, or if the coordinates are not valid
 /// integers.
+///
+/// # Examples
+///
+/// ```
+/// use varforge::io::config::parse_region;
+///
+/// let (chrom, start, end) = parse_region("chr7:55000000-55200000").unwrap();
+/// assert_eq!(chrom, "chr7");
+/// assert_eq!(start, 55_000_000);
+/// assert_eq!(end, 55_200_000);
+///
+/// // Missing colon is an error.
+/// assert!(parse_region("chr1_1000_2000").is_err());
+///
+/// // Non-integer coordinates are an error.
+/// assert!(parse_region("chr1:abc-2000").is_err());
+/// ```
 pub fn parse_region(s: &str) -> Result<(String, u64, u64)> {
     let colon = s
         .find(':')
@@ -1072,6 +1108,13 @@ pub fn validate(config: &Config) -> Result<()> {
             "UMI length ({}) must be less than read_length ({})",
             umi.length,
             config.sample.read_length
+        );
+
+        // T134: inline UMI trimming is not implemented in v1. Reject early
+        // so users get a clear message rather than silently incorrect output.
+        anyhow::ensure!(
+            !umi.inline,
+            "inline UMI mode is not supported in v1; set umi.inline to false or omit it"
         );
     }
 
@@ -1320,6 +1363,26 @@ umi:
         let umi = cfg.umi.expect("umi should be set");
         // Explicit length 12 overrides the preset default of 8.
         assert_eq!(umi.length, 12);
+    }
+
+    /// `umi.inline: true` is rejected by validation with a clear error.
+    #[test]
+    fn test_inline_umi_rejected() {
+        let yaml = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+umi:
+  length: 8
+  inline: true
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        let err = validate(&cfg).unwrap_err();
+        assert!(
+            err.to_string().contains("inline UMI mode is not supported"),
+            "unexpected error message: {err}"
+        );
     }
 
     /// Explicit `fragment.ctdna_fraction` is parsed and validated correctly.

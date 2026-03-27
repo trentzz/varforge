@@ -1,3 +1,8 @@
+//! Truth VCF writer for variants spiked into the simulation.
+//!
+//! Writes a bgzip-compressed, coordinate-sorted VCF 4.3 file containing every
+//! variant applied to the simulated reads, annotated with expected VAF, clone
+//! assignment, variant type, and cancer-cell fraction.
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
@@ -77,7 +82,7 @@ impl TruthVcfWriter {
 
     /// Write the VCF header to an open bgzip writer.
     fn write_header(
-        writer: &mut bgzf::Writer<std::fs::File>,
+        writer: &mut bgzf::io::Writer<std::fs::File>,
         sample_name: &str,
         contigs: &[(String, u64)],
     ) -> Result<()> {
@@ -284,7 +289,7 @@ impl TruthVcfWriter {
 
         let file = std::fs::File::create(&self.path)
             .with_context(|| format!("failed to create truth VCF: {}", self.path.display()))?;
-        let mut writer = bgzf::Writer::new(file);
+        let mut writer = bgzf::io::Writer::new(file);
 
         Self::write_header(&mut writer, &self.sample_name, &self.contigs)?;
 
@@ -459,7 +464,7 @@ mod tests {
     fn read_vcf(path: &std::path::Path) -> String {
         use std::io::Read;
         let file = std::fs::File::open(path).expect("failed to open VCF");
-        let mut reader = bgzf::Reader::new(file);
+        let mut reader = bgzf::io::Reader::new(file);
         let mut buf = String::new();
         reader.read_to_string(&mut buf).expect("failed to read VCF");
         buf
