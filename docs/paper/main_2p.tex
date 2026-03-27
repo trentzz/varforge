@@ -109,11 +109,12 @@ All six hg38 chr22 feature configurations (UMI, duplex, cfDNA, FFPE) completed w
 \section{Discussion and Future Work}
 
 \varforge{} covers a feature space unavailable in any single existing tool.
-The main limitation is that output correctness is not yet independently validated: VAF accuracy, cfDNA fragment distributions, and UMI family structure require quantitative comparison against their respective models.
+VAF accuracy is validated by a chi-squared goodness-of-fit test against the theoretical binomial distribution.
+cfDNA fragment distributions and UMI family structure are not yet independently verified and require quantitative comparison against their respective models.
 Thread scaling only helps for compute-heavy workloads (UMI simulation); the I/O-bound WGS workload runs fastest at one thread.
 
 A four-scenario downstream benchmark (bwa-mem2, Mutect2, rtg-tools vcfeval) confirms that VarForge data exposes real caller behaviour: the SNV baseline achieves F1\,=\,0.857, while FFPE artefacts overwhelm stock Mutect2 with 113K false positives.
-Priority next steps: (1) chi-squared VAF accuracy test; (2) cfDNA fragment distribution validation; (3) extending the variant caller benchmark to additional tools (VarDict, Strelka2, fgbio).
+Priority next steps: (1) end-to-end VAF validation via alignment and pileup; (2) cfDNA fragment distribution validation; (3) extending the variant caller benchmark to additional tools (VarDict, Strelka2, fgbio).
 
 %%─────────────────────────────────────────────────────────────────────────
 \printbibliography[heading=bibintoc, title={References}]

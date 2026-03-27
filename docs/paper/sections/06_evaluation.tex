@@ -22,8 +22,10 @@ The claim holds.
 
 \textbf{(iv) Stochastic VAF.}
 All variant-containing benchmarks used per-read Bernoulli sampling.
-Quantitative validation (chi-squared test against Binomial) is needed but not yet included.
-The claim is supported by design but not yet independently validated.
+An integration test (\texttt{vaf\_chi\_squared}) draws 500 samples from $\text{Binomial}(100, \text{VAF})$ at four VAF levels (0.05, 0.1, 0.25, 0.5) and applies a chi-squared goodness-of-fit test against the theoretical binomial PMF.
+All four levels pass at $\alpha = 0.01$.
+A companion test confirms that the chi-squared test rejects a deterministic spike-in, verifying that the test has power.
+The claim holds.
 
 \textbf{(v) Streaming Rust with bounded memory.}
 Per-pair memory converges to ${\sim}0.86$\,KB at high coverage on the 1\,MB reference (Figure~\ref{fig:mem}).
