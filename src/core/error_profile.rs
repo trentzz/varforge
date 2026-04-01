@@ -180,8 +180,6 @@ impl EmpiricalQualityModel {
     /// 3 (per-cycle data does not give indel length distributions). All other
     /// fields are left at their `None` defaults so the orchestrator uses its own
     /// defaults for substitution and context passes.
-    // Not yet wired into the production engine; called from tests and future callers.
-    #[allow(dead_code)]
     pub fn sequencing_error_config(&self) -> Option<SequencingErrorConfig> {
         let ins_rate = self.overall_insertion_rate?;
         let del_rate = self.overall_deletion_rate?;
