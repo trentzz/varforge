@@ -386,17 +386,22 @@ Both `vcf` and `random` may be specified simultaneously. VCF variants are inject
 
 ```yaml
 umi:
-  length: 8              # UMI barcode length in bases (default: 8)
-  duplex: false          # enable duplex (double-stranded) UMI mode (default: false)
-  pcr_cycles: 10         # number of PCR amplification cycles (default: 10)
-  family_size_mean: 3.0  # mean read family size (default: 3.0)
-  family_size_sd: 1.5    # standard deviation of family size (default: 1.5)
-  inline: true           # prepend UMI to read sequence (default: false)
+  length: 8                    # UMI barcode length in bases (default: 8)
+  duplex: false                # enable duplex (double-stranded) UMI mode (default: false)
+  pcr_cycles: 10               # number of PCR amplification cycles (default: 10)
+  family_size_mean: 3.0        # mean read family size (default: 3.0)
+  family_size_sd: 1.5          # standard deviation of family size (default: 1.5)
+  inline: true                 # prepend UMI to read sequence (default: false)
+  spacer: "AT"                 # fixed spacer bases appended after the inline UMI (optional; null = no spacer)
+  duplex_conversion_rate: 0.90 # fraction of molecules where both AB and BA strands are recovered (default: 1.0)
+  error_rate: 0.001            # per-base sequencing error rate in UMI bases (default: 0.0)
 ```
 
-When `inline: true`, the UMI is prepended to the read sequence (e.g. for fgbio `ExtractUmisFromBam`). When `inline: false`, the UMI is written into the read name (e.g. `@READ:ACGTACGT`).
+When `inline: true`, the UMI (and optional spacer) is prepended to the read sequence, e.g. for fgbio `ExtractUmisFromBam`. When `inline: false`, the UMI is written into the read name (e.g. `@READ:ACGTACGT`).
 
-When `duplex: true`, each molecule is tagged with a strand-specific UMI pair supporting duplex consensus calling tools such as fgbio `CallDuplexConsensusReads`.
+When `duplex: true`, each molecule is tagged with a strand-specific UMI pair supporting duplex consensus calling tools such as fgbio `CallDuplexConsensusReads`. The `duplex_conversion_rate` controls what fraction of molecules produce both an AB and a BA family; the remainder produce only the AB strand, simulating real library preparation losses.
+
+`error_rate` injects random base-call errors into UMI sequences at the specified per-base rate, producing near-miss UMI families that test the error-correction tolerance of deduplication tools.
 
 ---
 

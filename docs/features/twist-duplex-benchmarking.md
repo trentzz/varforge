@@ -6,11 +6,12 @@ Twist Biosciences hybrid-capture data.
 
 ## Sequencing model
 
-Twist Biosciences Comprehensive Exome Panel duplex sequencing uses 9 bp inline
-dual UMIs. Each original molecule produces two read families: AB (forward strand,
-UMI `A-B`) and BA (reverse strand, UMI `B-A`). After duplex consensus calling,
-each molecule contributes one consensus read. At 2 000× raw coverage with a mean
-family size of 3.5×, the expected duplex consensus depth is approximately 500–600×.
+Twist Biosciences Comprehensive Exome Panel duplex sequencing uses 5 bp inline
+dual UMIs with a 2 bp AT spacer between the UMI and template sequence. Each
+original molecule produces two read families: AB (forward strand, UMI `A-B`) and
+BA (reverse strand, UMI `B-A`). After duplex consensus calling, each molecule
+contributes one consensus read. At 2 000× raw coverage with a mean family size of
+3.5×, the expected duplex consensus depth is approximately 500–600×.
 
 Key parameters in the benchmark config:
 
@@ -20,8 +21,11 @@ Key parameters in the benchmark config:
 | Read length | 150 bp |
 | Fragment mean | 170 bp |
 | Fragment SD | 30 bp |
-| UMI length | 9 bp |
+| UMI length | 5 bp |
+| UMI spacer | AT (2 bp) |
 | UMI mode | Inline dual, duplex |
+| Duplex conversion rate | 90 % |
+| UMI error rate | 0.1 % |
 | PCR cycles | 10 |
 | Mean family size | 3.5× |
 | On-target fraction | >= 95 % |
@@ -104,9 +108,10 @@ run, it contains the following fields relevant to the benchmark:
 ```
 
 `duplex_conversion_rate` is the fraction of simulated molecules for which both
-AB and BA families were generated. In VarForge, this is always 1.0 because both
-strands are simulated deterministically. In real data, conversion rates of 0.85–0.95
-are typical due to library preparation losses.
+AB and BA families were generated. VarForge simulates this loss via the
+`umi.duplex_conversion_rate` config field (default: 1.0; the benchmark preset uses 0.90).
+In real data, conversion rates of 0.85–0.95 are typical due to library preparation
+losses.
 
 `strand_concordance` per variant measures the fraction of alt molecules where both
 strands carry the variant. A value below 0.95 indicates that a variant may be
@@ -141,8 +146,9 @@ samtools index consensus_aligned.bam
 ### HUMID
 
 ```bash
-# HUMID handles duplex consensus natively from FASTQ
-humid --umi-length 9 \
+# HUMID handles duplex consensus natively from FASTQ.
+# UMI length 5 bp + 2 bp AT spacer = 7 bp total prefix to strip.
+humid --umi-length 5 --spacer AT \
   output/TWIST_DUPLEX_R1.fastq.gz \
   output/TWIST_DUPLEX_R2.fastq.gz \
   --out-prefix humid_consensus
