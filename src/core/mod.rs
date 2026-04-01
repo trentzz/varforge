@@ -10,4 +10,5 @@ pub mod gc_bias;
 pub mod multi_sample;
 pub mod profile_learner;
 pub mod quality;
+pub mod seq_errors;
 pub mod types;
