@@ -12,8 +12,8 @@
 //! individual fields without deserialising YAML.
 
 use crate::io::config::{
-    ArtifactConfig, CaptureConfig, FragmentConfig, FragmentModel, MutationConfig,
-    RandomMutationConfig, SampleConfig, UmiConfig,
+    ArtifactConfig, CaptureConfig, ContextRuleConfig, FragmentConfig, FragmentModel,
+    MutationConfig, RandomMutationConfig, SampleConfig, SequencingErrorConfig, UmiConfig,
 };
 
 /// A partial configuration overlay produced by a preset.
@@ -31,6 +31,8 @@ pub struct PresetOverlay {
     pub artifacts: Option<ArtifactConfig>,
     pub purity: Option<f64>,
     pub capture: Option<CaptureConfig>,
+    /// Optional sequencing error model configuration to apply as a preset default.
+    pub sequencing_errors: Option<SequencingErrorConfig>,
 }
 
 /// Return the overlay for a named preset, or an error if the name is unknown.
@@ -54,8 +56,12 @@ pub fn get(name: &str) -> anyhow::Result<PresetOverlay> {
         "ffpe" => Ok(preset_ffpe()),
         "umi" => Ok(preset_umi()),
         "twist" => Ok(preset_twist()),
+        "illumina_novaseq" => Ok(preset_illumina_novaseq()),
+        "pacbio_hifi" => Ok(preset_pacbio_hifi()),
+        "nanopore_r10" => Ok(preset_nanopore_r10()),
         other => anyhow::bail!(
             "unknown preset '{}'; valid choices: small, panel, wgs, cfdna, ffpe, umi, twist, \
+             illumina_novaseq, pacbio_hifi, nanopore_r10, \
              or cancer:<type> (e.g. cancer:lung_adeno)",
             other
         ),
@@ -66,7 +72,18 @@ pub fn get(name: &str) -> anyhow::Result<PresetOverlay> {
 /// are accessible via the `cancer:` prefix — see
 /// [`crate::cli::cancer_presets::all_names`]).
 pub fn all_names() -> &'static [&'static str] {
-    &["small", "panel", "wgs", "cfdna", "ffpe", "umi", "twist"]
+    &[
+        "small",
+        "panel",
+        "wgs",
+        "cfdna",
+        "ffpe",
+        "umi",
+        "twist",
+        "illumina_novaseq",
+        "pacbio_hifi",
+        "nanopore_r10",
+    ]
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +353,84 @@ fn preset_twist() -> PresetOverlay {
     }
 }
 
+/// `illumina_novaseq` – Illumina NovaSeq 6000/X platform preset.
+///
+/// 30× coverage with realistic NovaSeq sequencing error parameters: 0.1%
+/// base error rate, exponential tail rise over the last 20 % of cycles,
+/// low sequencing indel rate, GGG and GGC context elevation, and R2
+/// asymmetry (1.3× error rate, Q2 quality offset).
+fn preset_illumina_novaseq() -> PresetOverlay {
+    PresetOverlay {
+        coverage: Some(30.0),
+        sequencing_errors: Some(SequencingErrorConfig {
+            base_error_rate: Some(0.001),
+            cycle_error_model: Some("exponential".to_string()),
+            tail_start_fraction: Some(0.8),
+            tail_rate_multiplier: Some(5.0),
+            indel_rate: Some(0.00005),
+            indel_insertion_fraction: Some(0.5),
+            max_indel_length: Some(1),
+            r2_error_multiplier: Some(1.3),
+            r2_quality_offset: Some(2),
+            context_rules: vec![
+                ContextRuleConfig {
+                    context: "GGG".to_string(),
+                    sub_multiplier: 3.0,
+                    indel_multiplier: 2.0,
+                },
+                ContextRuleConfig {
+                    context: "GGC".to_string(),
+                    sub_multiplier: 2.0,
+                    indel_multiplier: 1.5,
+                },
+            ],
+            kmer_length: Some(3),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// `pacbio_hifi` – PacBio HiFi (CCS) long-read platform preset.
+///
+/// 15× coverage with HiFi-typical sequencing parameters: flat 0.01%
+/// base error rate, low indel rate biased towards insertions (consistent
+/// with PacBio's characteristic error mode).
+fn preset_pacbio_hifi() -> PresetOverlay {
+    PresetOverlay {
+        coverage: Some(15.0),
+        sequencing_errors: Some(SequencingErrorConfig {
+            base_error_rate: Some(0.0001),
+            cycle_error_model: Some("flat".to_string()),
+            indel_rate: Some(0.001),
+            indel_insertion_fraction: Some(0.6),
+            max_indel_length: Some(2),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// `nanopore_r10` – Oxford Nanopore R10.4 pore long-read platform preset.
+///
+/// 30× coverage with R10-typical error parameters: higher indel rate
+/// biased towards insertions, reflecting R10.4's characteristic deletion
+/// and insertion error modes at homopolymers.
+fn preset_nanopore_r10() -> PresetOverlay {
+    PresetOverlay {
+        coverage: Some(30.0),
+        sequencing_errors: Some(SequencingErrorConfig {
+            base_error_rate: Some(0.005),
+            cycle_error_model: Some("flat".to_string()),
+            indel_rate: Some(0.03),
+            indel_insertion_fraction: Some(0.55),
+            max_indel_length: Some(5),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Apply a preset overlay onto a Config
 // ---------------------------------------------------------------------------
@@ -417,6 +512,13 @@ pub fn apply_preset_to_config(config: &mut Config, overlay: &PresetOverlay) {
     if let Some(ref cap) = overlay.capture {
         if config.capture.is_none() {
             config.capture = Some(cap.clone());
+        }
+    }
+
+    if let Some(ref se) = overlay.sequencing_errors {
+        // Only apply preset defaults when the YAML has not configured sequencing_errors.
+        if config.quality.sequencing_errors.is_none() {
+            config.quality.sequencing_errors = Some(se.clone());
         }
     }
 }

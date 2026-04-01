@@ -13,6 +13,7 @@ use crate::artifacts::ffpe::{inject_ffpe_damage, inject_oxog_damage};
 use crate::core::capture::CaptureModel;
 use crate::core::coverage::read_pairs_for_coverage;
 use crate::core::end_motifs::accept_fragment_by_end_motif;
+use crate::core::error_orchestrator::ErrorOrchestrator;
 use crate::core::error_profile::EmpiricalQualityModel;
 use crate::core::fragment::{sample_long_read_length, CfdnaFragmentSampler, NormalFragmentSampler};
 use crate::core::gc_bias::GcBiasModel;
@@ -304,6 +305,15 @@ impl SimulationEngine {
             self.config.quality.tail_decay,
         );
 
+        // Build the error orchestrator once per region. None when sequencing_errors
+        // is absent from config, which preserves v0.1.x behaviour exactly.
+        let error_orchestrator: Option<ErrorOrchestrator> =
+            if let Some(ref se_cfg) = self.config.quality.sequencing_errors {
+                ErrorOrchestrator::from_config(se_cfg, read_length)?
+            } else {
+                None
+            };
+
         // Determine whether duplex UMI mode is active. In duplex mode, every alt
         // molecule produces both an AB and a BA strand family, so the duplex alt
         // count equals the molecule-level alt count.
@@ -390,6 +400,7 @@ impl SimulationEngine {
                 fragment_variant_tags,
                 &qual_model,
                 &mut self.rng,
+                error_orchestrator.as_ref(),
             );
 
             read_pairs.push(pair);
@@ -825,6 +836,7 @@ fn build_read_pair(
     variant_tags: Vec<VariantTag>,
     qual_model: &QualModel<'_>,
     rng: &mut StdRng,
+    orchestrator: Option<&ErrorOrchestrator>,
 ) -> ReadPair {
     let actual_frag_len = frag_seq.len();
     let r1_len = read_length.min(actual_frag_len);
@@ -865,7 +877,7 @@ fn build_read_pair(
     }
 
     // Quality scoring and error injection.
-    let (r1_qual, r2_qual) = match qual_model {
+    let (mut r1_qual, mut r2_qual) = match qual_model {
         QualModel::Empirical(emp) => {
             let q1 = emp.generate_qualities(read_length, rng);
             let q2 = emp.generate_qualities(read_length, rng);
@@ -899,6 +911,14 @@ fn build_read_pair(
             (q1, q2)
         }
     };
+
+    // Apply the layered sequencing error model when configured. This runs after
+    // quality-score-driven substitutions, adding cycle-position, context-dependent,
+    // indel, and burst passes. When orchestrator is None the block is skipped,
+    // preserving bit-for-bit v0.1.x behaviour.
+    if let Some(orch) = orchestrator {
+        orch.inject_all_errors(&mut r1_seq, &mut r1_qual, &mut r2_seq, &mut r2_qual, rng);
+    }
 
     ReadPair {
         name: name.to_string(),
@@ -1449,6 +1469,7 @@ mod tests {
                 mean_quality: 36,
                 tail_decay: 0.001,
                 profile_path: None,
+                sequencing_errors: None,
             },
             tumour: None,
             mutations: None,

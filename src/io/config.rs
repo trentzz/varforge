@@ -250,6 +250,10 @@ pub struct QualityConfig {
     pub tail_decay: f64,
     #[serde(default)]
     pub profile_path: Option<PathBuf>,
+    /// Optional sequencing error model configuration. Absent means identical
+    /// behaviour to v0.1.x (quality-score-driven substitutions only).
+    #[serde(default)]
+    pub sequencing_errors: Option<SequencingErrorConfig>,
 }
 
 impl Default for QualityConfig {
@@ -258,8 +262,80 @@ impl Default for QualityConfig {
             mean_quality: default_mean_quality(),
             tail_decay: default_quality_decay(),
             profile_path: None,
+            sequencing_errors: None,
         }
     }
+}
+
+/// Configuration for the layered sequencing error model.
+///
+/// All fields are optional. Absent fields apply sensible defaults within each
+/// sub-model. When this struct is absent from the YAML entirely, no additional
+/// error passes are run and behaviour is bit-for-bit identical to v0.1.x.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SequencingErrorConfig {
+    /// Flat per-base substitution rate independent of quality scores.
+    #[serde(default)]
+    pub base_error_rate: Option<f64>,
+    /// Cycle error curve model: `"flat"`, `"exponential"`, or `"custom"`.
+    #[serde(default)]
+    pub cycle_error_model: Option<String>,
+    /// For the exponential model: fraction of read where the tail begins (0.0–1.0).
+    #[serde(default)]
+    pub tail_start_fraction: Option<f64>,
+    /// For the exponential model: error rate multiplier at the last cycle.
+    #[serde(default)]
+    pub tail_rate_multiplier: Option<f64>,
+    /// For the custom model: path to TSV file with `(cycle, error_rate)` pairs.
+    #[serde(default)]
+    pub cycle_error_tsv: Option<String>,
+    /// Per-base probability of a sequencing indel error.
+    #[serde(default)]
+    pub indel_rate: Option<f64>,
+    /// Fraction of sequencing indels that are insertions (remainder are deletions).
+    #[serde(default)]
+    pub indel_insertion_fraction: Option<f64>,
+    /// Maximum sequencing indel length (drawn from a geometric distribution).
+    #[serde(default)]
+    pub max_indel_length: Option<usize>,
+    /// k-mer length for context-dependent error model (1–5).
+    #[serde(default)]
+    pub kmer_length: Option<usize>,
+    /// Inline context rules: list of `{context, sub_multiplier, indel_multiplier}`.
+    #[serde(default)]
+    pub context_rules: Vec<ContextRuleConfig>,
+    /// Path to a JSON file with a k-mer error profile.
+    #[serde(default)]
+    pub context_profile_path: Option<String>,
+    /// R2 error rate = R1 rate × this multiplier.
+    #[serde(default)]
+    pub r2_error_multiplier: Option<f64>,
+    /// Shift R2 quality scores down by this many Phred points.
+    #[serde(default)]
+    pub r2_quality_offset: Option<i8>,
+    /// Per-base probability of initiating a phasing burst.
+    #[serde(default)]
+    pub burst_rate: Option<f64>,
+    /// Mean burst length (geometric distribution).
+    #[serde(default)]
+    pub burst_length_mean: Option<f64>,
+}
+
+/// A single context-dependent error multiplier rule.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextRuleConfig {
+    /// k-mer context string (e.g. `"GGG"` for a 3-mer).
+    pub context: String,
+    /// Substitution error rate multiplier for this context.
+    #[serde(default = "default_one_f32")]
+    pub sub_multiplier: f32,
+    /// Indel error rate multiplier for this context.
+    #[serde(default = "default_one_f32")]
+    pub indel_multiplier: f32,
+}
+
+fn default_one_f32() -> f32 {
+    1.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1200,6 +1276,67 @@ pub fn validate(config: &Config) -> Result<()> {
         }
     }
 
+    // T155: validate sequencing_errors fields.
+    if let Some(ref se) = config.quality.sequencing_errors {
+        if let Some(rate) = se.base_error_rate {
+            anyhow::ensure!(
+                (0.0..=1.0).contains(&rate),
+                "quality.sequencing_errors.base_error_rate ({}) must be in [0.0, 1.0]",
+                rate
+            );
+        }
+        if let Some(rate) = se.indel_rate {
+            anyhow::ensure!(
+                (0.0..=1.0).contains(&rate),
+                "quality.sequencing_errors.indel_rate ({}) must be in [0.0, 1.0]",
+                rate
+            );
+        }
+        if let Some(k) = se.kmer_length {
+            anyhow::ensure!(
+                (1..=5).contains(&k),
+                "quality.sequencing_errors.kmer_length ({}) must be in 1..=5",
+                k
+            );
+        }
+        if let Some(frac) = se.tail_start_fraction {
+            anyhow::ensure!(
+                (0.0..=1.0).contains(&frac),
+                "quality.sequencing_errors.tail_start_fraction ({}) must be in [0.0, 1.0]",
+                frac
+            );
+        }
+        if let Some(mult) = se.tail_rate_multiplier {
+            anyhow::ensure!(
+                mult >= 1.0,
+                "quality.sequencing_errors.tail_rate_multiplier ({}) must be >= 1.0",
+                mult
+            );
+        }
+        if let Some(mult) = se.r2_error_multiplier {
+            anyhow::ensure!(
+                mult >= 0.0,
+                "quality.sequencing_errors.r2_error_multiplier ({}) must be >= 0.0",
+                mult
+            );
+        }
+        if let Some(frac) = se.indel_insertion_fraction {
+            anyhow::ensure!(
+                (0.0..=1.0).contains(&frac),
+                "quality.sequencing_errors.indel_insertion_fraction ({}) must be in [0.0, 1.0]",
+                frac
+            );
+        }
+        if let Some(rate) = se.burst_rate {
+            anyhow::ensure!(
+                (0.0..=1.0).contains(&rate),
+                "quality.sequencing_errors.burst_rate ({}) must be in [0.0, 1.0]",
+                rate
+            );
+        }
+        // r2_quality_offset: any i8 is valid (no constraint needed).
+    }
+
     if let Some(vafs) = &config.vafs {
         for &vaf in vafs {
             anyhow::ensure!(
@@ -1603,5 +1740,26 @@ fragment:
         let f = write_yaml(yaml);
         let cfg = load(f.path()).unwrap();
         assert!(validate(&cfg).is_err(), "di_sd: 0.0 should fail validation");
+    }
+
+    /// T155: `indel_rate` outside [0, 1] must fail validation.
+    #[test]
+    fn test_sequencing_errors_validation() {
+        let yaml = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+quality:
+  sequencing_errors:
+    indel_rate: 2.0
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        let err = validate(&cfg).unwrap_err();
+        assert!(
+            err.to_string().contains("indel_rate"),
+            "error should mention 'indel_rate', got: {}",
+            err
+        );
     }
 }
