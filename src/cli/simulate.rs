@@ -2896,6 +2896,7 @@ mod tests {
                 mean_quality: 36,
                 tail_decay: 0.001,
                 profile_path: None,
+                sequencing_errors: None,
             },
             tumour: None,
             mutations: None,

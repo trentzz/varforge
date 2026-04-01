@@ -213,6 +213,27 @@ impl CycleErrorCurve {
         Ok(Self { curve })
     }
 
+    /// Return a read-only slice of per-cycle error rates.
+    // Used by T155 ErrorOrchestrator to build scaled R2 curves.
+    pub fn rates(&self) -> &[f64] {
+        &self.curve
+    }
+
+    /// Build from an iterator of per-cycle rates.
+    ///
+    /// `read_length` sets the expected length. If the iterator produces fewer
+    /// values, remaining positions receive 0.0.
+    // Used by T155 ErrorOrchestrator to build scaled R2 curves.
+    #[allow(dead_code)]
+    pub fn from_rates(iter: impl Iterator<Item = f64>, read_length: usize) -> Self {
+        let mut curve = Vec::with_capacity(read_length);
+        for rate in iter {
+            curve.push(rate);
+        }
+        curve.resize(read_length, 0.0);
+        Self { curve }
+    }
+
     /// Linearly interpolate (or extrapolate) the rate for cycle `i`.
     fn interpolate(points: &[(usize, f64)], i: usize) -> f64 {
         // Before the first point: use the first rate.
@@ -370,6 +391,45 @@ pub fn inject_burst_errors(
     }
 }
 
+/// Apply context-dependent substitution errors to a read.
+///
+/// At each position, looks up the k-mer substitution multiplier and performs a
+/// Bernoulli draw against `base_rate * multiplier`. When triggered, substitutes
+/// with a uniformly random different base.
+///
+/// This pass is additive to any quality-driven or cycle-position errors already
+/// applied. Having no rules set (all multipliers = 1.0) and a zero `base_rate`
+/// makes this a no-op.
+// Used by T155 ErrorOrchestrator.
+#[allow(dead_code)]
+pub fn inject_context_errors(
+    seq: &mut [u8],
+    base_rate: f64,
+    model: &KmerErrorModel,
+    rng: &mut impl Rng,
+) {
+    const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
+    let len = seq.len();
+    for i in 0..len {
+        let multiplier = model.sub_multiplier_at(seq, i) as f64;
+        let effective_rate = base_rate * multiplier;
+        if effective_rate <= 0.0 {
+            continue;
+        }
+        if rng.random::<f64>() < effective_rate {
+            let original = seq[i];
+            let alts: [u8; 3] = match original {
+                b'A' => [b'C', b'G', b'T'],
+                b'C' => [b'A', b'G', b'T'],
+                b'G' => [b'A', b'C', b'T'],
+                b'T' => [b'A', b'C', b'G'],
+                _ => [b'A', b'C', b'G'],
+            };
+            seq[i] = alts[rng.random_range(0..3)];
+        }
+    }
+}
+
 /// Map a single base byte to its 2-bit representation.
 ///
 /// A=0, C=1, G=2, T=3. Any unrecognised byte maps to 0 (treated as A).
@@ -499,7 +559,6 @@ impl KmerErrorModel {
         Ok(model)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
