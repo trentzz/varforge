@@ -12,6 +12,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::core::quality::{ParametricQualityModel, QualityModel};
+use crate::io::config::SequencingErrorConfig;
 
 // ---------------------------------------------------------------------------
 // On-disk profile format
@@ -38,6 +39,21 @@ pub struct ProfileJson {
     pub substitution_matrix: HashMap<String, f64>,
     #[serde(default)]
     pub context_effects: HashMap<String, ContextEffectJson>,
+    /// Overall insertion rate across all cycles (insertions / total aligned bases).
+    #[serde(default)]
+    pub overall_insertion_rate: Option<f64>,
+    /// Overall deletion rate across all cycles (deletions / total aligned bases).
+    #[serde(default)]
+    pub overall_deletion_rate: Option<f64>,
+    /// Fraction of indel events that are insertions.
+    #[serde(default)]
+    pub indel_insertion_fraction: Option<f64>,
+    /// Per-cycle insertion rates (length = read_length).
+    #[serde(default)]
+    pub per_cycle_insertion_rates: Vec<f64>,
+    /// Per-cycle deletion rates (length = read_length).
+    #[serde(default)]
+    pub per_cycle_deletion_rates: Vec<f64>,
 }
 
 /// Per-position quality distributions for each read in a pair.
@@ -89,6 +105,18 @@ pub struct EmpiricalQualityModel {
     // Stored for future diagnostic output; not yet read by any caller.
     #[allow(dead_code)]
     pub platform: Option<String>,
+    /// Overall insertion rate (insertions / total aligned bases).
+    // Used by sequencing_error_config; not yet wired into the production engine.
+    #[allow(dead_code)]
+    pub overall_insertion_rate: Option<f64>,
+    /// Overall deletion rate (deletions / total aligned bases).
+    // Used by sequencing_error_config; not yet wired into the production engine.
+    #[allow(dead_code)]
+    pub overall_deletion_rate: Option<f64>,
+    /// Fraction of indels that are insertions.
+    // Used by sequencing_error_config; not yet wired into the production engine.
+    #[allow(dead_code)]
+    pub indel_insertion_fraction: Option<f64>,
 }
 
 impl EmpiricalQualityModel {
@@ -136,6 +164,37 @@ impl EmpiricalQualityModel {
             substitution_matrix,
             context_effects,
             platform: profile.platform,
+            overall_insertion_rate: profile.overall_insertion_rate,
+            overall_deletion_rate: profile.overall_deletion_rate,
+            indel_insertion_fraction: profile.indel_insertion_fraction,
+        })
+    }
+
+    /// Build a [`SequencingErrorConfig`] from the profile's indel data.
+    ///
+    /// Returns `None` if the profile has no indel information (i.e., the profile
+    /// was learned without CIGAR parsing or from a BAM with no indels).
+    ///
+    /// The config is intentionally conservative: it uses the overall indel rate
+    /// and insertion fraction from the profile, with `max_indel_length` capped at
+    /// 3 (per-cycle data does not give indel length distributions). All other
+    /// fields are left at their `None` defaults so the orchestrator uses its own
+    /// defaults for substitution and context passes.
+    // Not yet wired into the production engine; called from tests and future callers.
+    #[allow(dead_code)]
+    pub fn sequencing_error_config(&self) -> Option<SequencingErrorConfig> {
+        let ins_rate = self.overall_insertion_rate?;
+        let del_rate = self.overall_deletion_rate?;
+        let total_indel_rate = ins_rate + del_rate;
+        if total_indel_rate <= 0.0 {
+            return None;
+        }
+        Some(SequencingErrorConfig {
+            indel_rate: Some(total_indel_rate),
+            indel_insertion_fraction: self.indel_insertion_fraction,
+            max_indel_length: Some(3),
+            base_error_rate: Some(total_indel_rate),
+            ..Default::default()
         })
     }
 
@@ -548,5 +607,84 @@ mod tests {
         for &b in &seq {
             assert!(matches!(b, b'A' | b'C' | b'G' | b'T'));
         }
+    }
+
+    // Test 8 – old profile JSON without indel fields loads without error.
+    #[test]
+    fn test_profile_json_backward_compat() {
+        // This JSON deliberately omits the new indel fields.
+        let old_json = r#"{
+            "platform": "OldSeq",
+            "read_length": 50,
+            "quality_distribution": {
+                "read1": [
+                    [[30, 1.0]]
+                ]
+            }
+        }"#;
+        let model = EmpiricalQualityModel::from_json_str(old_json)
+            .expect("old profile without indel fields must load without error");
+        assert_eq!(model.platform.as_deref(), Some("OldSeq"));
+        // New fields default to None.
+        assert!(
+            model.overall_insertion_rate.is_none(),
+            "overall_insertion_rate must be None for old profiles"
+        );
+        assert!(
+            model.overall_deletion_rate.is_none(),
+            "overall_deletion_rate must be None for old profiles"
+        );
+        assert!(
+            model.indel_insertion_fraction.is_none(),
+            "indel_insertion_fraction must be None for old profiles"
+        );
+        // sequencing_error_config must return None when no indel data is present.
+        assert!(
+            model.sequencing_error_config().is_none(),
+            "sequencing_error_config must be None when profile has no indel data"
+        );
+    }
+
+    // Test 9 – sequencing_error_config returns a valid config from indel fields.
+    #[test]
+    fn test_sequencing_error_config_from_profile() {
+        let json = r#"{
+            "platform": "TestSeq",
+            "read_length": 10,
+            "quality_distribution": {
+                "read1": [
+                    [[30, 1.0]],
+                    [[30, 1.0]],
+                    [[30, 1.0]]
+                ]
+            },
+            "overall_insertion_rate": 0.001,
+            "overall_deletion_rate": 0.001,
+            "indel_insertion_fraction": 0.5
+        }"#;
+        let model = EmpiricalQualityModel::from_json_str(json).expect("profile must load");
+        let cfg = model
+            .sequencing_error_config()
+            .expect("sequencing_error_config must be Some when indel data is present");
+
+        let indel_rate = cfg.indel_rate.expect("indel_rate must be set");
+        assert!(
+            (indel_rate - 0.002).abs() < 1e-10,
+            "indel_rate {indel_rate} should be ~0.002 (0.001 + 0.001)"
+        );
+
+        let ins_frac = cfg
+            .indel_insertion_fraction
+            .expect("indel_insertion_fraction must be set");
+        assert!(
+            (ins_frac - 0.5).abs() < 1e-10,
+            "indel_insertion_fraction {ins_frac} should be 0.5"
+        );
+
+        assert_eq!(
+            cfg.max_indel_length,
+            Some(3),
+            "max_indel_length should default to 3"
+        );
     }
 }

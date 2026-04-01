@@ -66,6 +66,12 @@ pub struct LearnerStats {
     pub context_total_counts: HashMap<String, u64>,
     /// Maximum read-length seen (used to size position arrays).
     pub max_read_length: usize,
+    /// Per-cycle insertion counts (from CIGAR `I` operations, MAPQ ≥ 30 only).
+    pub insertion_counts_by_cycle: Vec<u64>,
+    /// Per-cycle deletion counts (from CIGAR `D` operations, MAPQ ≥ 30 only).
+    pub deletion_counts_by_cycle: Vec<u64>,
+    /// Total aligned bases observed per cycle (denominator for per-cycle indel rates).
+    pub bases_by_cycle: Vec<u64>,
 }
 
 impl LearnerStats {
@@ -81,6 +87,21 @@ impl LearnerStats {
             context_error_counts: HashMap::new(),
             context_total_counts: HashMap::new(),
             max_read_length,
+            insertion_counts_by_cycle: vec![0u64; max_read_length],
+            deletion_counts_by_cycle: vec![0u64; max_read_length],
+            bases_by_cycle: vec![0u64; max_read_length],
+        }
+    }
+
+    /// Grow the per-cycle indel and base count vectors to `new_len`.
+    ///
+    /// Called whenever a read longer than `max_read_length` is encountered so
+    /// that bounds checks never fail.
+    fn grow_cycle_vecs(&mut self, new_len: usize) {
+        if new_len > self.insertion_counts_by_cycle.len() {
+            self.insertion_counts_by_cycle.resize(new_len, 0);
+            self.deletion_counts_by_cycle.resize(new_len, 0);
+            self.bases_by_cycle.resize(new_len, 0);
         }
     }
 }
@@ -135,6 +156,7 @@ impl ProfileLearner {
                 stats.quality_counts_r1.resize(new_len, HashMap::new());
                 stats.quality_counts_r2.resize(new_len, HashMap::new());
                 stats.max_read_length = new_len;
+                stats.grow_cycle_vecs(new_len);
             }
 
             let is_r2 = record.flags().is_last_segment();
@@ -167,6 +189,23 @@ impl ProfileLearner {
                 let depth = 1u64; // each read contributes 1 unit of "depth"
                 stats.gc_bias[gc].0 += depth;
                 stats.gc_bias[gc].1 += 1;
+            }
+
+            // CIGAR-based per-cycle indel counts.
+            // Only process reads with MAPQ ≥ 30 to reduce false positives from
+            // misaligned reads carrying true variants. A VCF exclusion filter
+            // is deferred.
+            let mapq_ok = record
+                .mapping_quality()
+                .map(|m| u8::from(m) >= 30)
+                .unwrap_or(false);
+            if mapq_ok {
+                accumulate_cigar_counts(
+                    record.cigar().as_ref(),
+                    &mut stats.insertion_counts_by_cycle,
+                    &mut stats.deletion_counts_by_cycle,
+                    &mut stats.bases_by_cycle,
+                );
             }
 
             stats.reads_examined += 1;
@@ -205,12 +244,60 @@ impl ProfileLearner {
         let context_effects =
             build_context_effects(&stats.context_error_counts, &stats.context_total_counts);
 
+        // Compute per-cycle and overall indel rates from CIGAR-derived counts.
+        let total_insertions: u64 = stats.insertion_counts_by_cycle.iter().sum();
+        let total_deletions: u64 = stats.deletion_counts_by_cycle.iter().sum();
+        let total_bases: u64 = stats.bases_by_cycle.iter().sum();
+
+        let (
+            overall_insertion_rate,
+            overall_deletion_rate,
+            indel_insertion_fraction,
+            per_cycle_insertion_rates,
+            per_cycle_deletion_rates,
+        ) = if total_bases > 0 {
+            let ins_rate = total_insertions as f64 / total_bases as f64;
+            let del_rate = total_deletions as f64 / total_bases as f64;
+            let total_indels = total_insertions + total_deletions;
+            let ins_fraction = if total_indels > 0 {
+                total_insertions as f64 / total_indels as f64
+            } else {
+                0.5
+            };
+            let per_ins: Vec<f64> = stats
+                .insertion_counts_by_cycle
+                .iter()
+                .zip(stats.bases_by_cycle.iter())
+                .map(|(&i, &b)| if b > 0 { i as f64 / b as f64 } else { 0.0 })
+                .collect();
+            let per_del: Vec<f64> = stats
+                .deletion_counts_by_cycle
+                .iter()
+                .zip(stats.bases_by_cycle.iter())
+                .map(|(&d, &b)| if b > 0 { d as f64 / b as f64 } else { 0.0 })
+                .collect();
+            (
+                Some(ins_rate),
+                Some(del_rate),
+                Some(ins_fraction),
+                per_ins,
+                per_del,
+            )
+        } else {
+            (None, None, None, Vec::new(), Vec::new())
+        };
+
         Ok(ProfileJson {
             platform: None,
             read_length,
             quality_distribution: QualityDistributionJson { read1, read2 },
             substitution_matrix,
             context_effects,
+            overall_insertion_rate,
+            overall_deletion_rate,
+            indel_insertion_fraction,
+            per_cycle_insertion_rates,
+            per_cycle_deletion_rates,
         })
     }
 
@@ -240,6 +327,7 @@ impl ProfileLearner {
                 stats.quality_counts_r1.resize(rlen, HashMap::new());
                 stats.quality_counts_r2.resize(rlen, HashMap::new());
                 stats.max_read_length = rlen;
+                stats.grow_cycle_vecs(rlen);
             }
 
             let is_r2 = record.flags().is_last_segment();
@@ -270,6 +358,20 @@ impl ProfileLearner {
                 stats.gc_bias[gc].1 += 1;
             }
 
+            // CIGAR-based per-cycle indel counts (MAPQ ≥ 30 only).
+            let mapq_ok = record
+                .mapping_quality()
+                .map(|m| u8::from(m) >= 30)
+                .unwrap_or(false);
+            if mapq_ok {
+                accumulate_cigar_counts(
+                    record.cigar().as_ref(),
+                    &mut stats.insertion_counts_by_cycle,
+                    &mut stats.deletion_counts_by_cycle,
+                    &mut stats.bases_by_cycle,
+                );
+            }
+
             stats.reads_examined += 1;
         }
 
@@ -280,6 +382,66 @@ impl ProfileLearner {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Walk a CIGAR and update per-cycle insertion, deletion, and base counts.
+///
+/// `read_pos` tracks the current position in the read (not the reference).
+/// Only `M`/`=`/`X` operations contribute to `bases_by_cycle`. Soft-clipped
+/// bases advance `read_pos` but are not counted as aligned bases or errors.
+/// Hard clips, pads, and skips do not move `read_pos`.
+///
+/// MAPQ filtering must be applied by the caller; this function counts
+/// unconditionally.
+pub fn accumulate_cigar_counts(
+    cigar: &[noodles_sam::alignment::record::cigar::Op],
+    insertion_counts: &mut [u64],
+    deletion_counts: &mut [u64],
+    bases_by_cycle: &mut [u64],
+) {
+    use noodles_sam::alignment::record::cigar::op::Kind;
+
+    let cap = bases_by_cycle.len();
+    let mut read_pos: usize = 0;
+
+    for op in cigar {
+        let len = op.len();
+        match op.kind() {
+            Kind::Match | Kind::SequenceMatch | Kind::SequenceMismatch => {
+                // These operations consume both read and reference.
+                for i in 0..len {
+                    let p = read_pos + i;
+                    if p < cap {
+                        bases_by_cycle[p] += 1;
+                    }
+                }
+                read_pos += len;
+            }
+            Kind::Insertion => {
+                // An insertion at `read_pos`: the read has extra bases here.
+                if read_pos < cap {
+                    insertion_counts[read_pos] += 1;
+                }
+                read_pos += len;
+            }
+            Kind::Deletion => {
+                // A deletion at `read_pos`: the reference has bases the read
+                // skips. The read position does not advance.
+                if read_pos < cap {
+                    deletion_counts[read_pos] += 1;
+                }
+                // Do not advance read_pos.
+            }
+            Kind::SoftClip => {
+                // Soft-clipped bases are present in the read but are not
+                // counted as aligned bases or errors.
+                read_pos += len;
+            }
+            Kind::HardClip | Kind::Pad | Kind::Skip => {
+                // These do not consume read bases.
+            }
+        }
+    }
+}
 
 /// Return true if the read should be excluded from learning.
 fn should_skip(record: &RecordBuf, min_mapq: u8) -> bool {
@@ -572,6 +734,56 @@ pub fn make_test_record(
     Ok(record)
 }
 
+/// Build an in-memory [`RecordBuf`] with an explicit CIGAR string (used in tests).
+///
+/// Unlike [`make_test_record`], this function lets the caller supply the CIGAR
+/// directly, which is needed for testing CIGAR-based indel counting.
+#[cfg(test)]
+pub fn make_test_record_with_cigar(
+    seq: &[u8],
+    quals: &[u8],
+    cigar_str: &str,
+    mapq: u8,
+    pos: usize,
+    ref_id: usize,
+) -> Result<RecordBuf> {
+    use crate::io::bam::parse_cigar;
+    use noodles_core::Position;
+    use noodles_sam::alignment::{
+        record::MappingQuality,
+        record_buf::{Cigar, QualityScores, Sequence},
+    };
+
+    let cigar_ops = parse_cigar(cigar_str)?;
+
+    let flags = noodles_sam::alignment::record::Flags::SEGMENTED
+        | noodles_sam::alignment::record::Flags::PROPERLY_SEGMENTED
+        | noodles_sam::alignment::record::Flags::MATE_REVERSE_COMPLEMENTED
+        | noodles_sam::alignment::record::Flags::FIRST_SEGMENT;
+
+    let alignment_pos =
+        Position::new(pos + 1).ok_or_else(|| anyhow::anyhow!("invalid position"))?;
+    let mate_pos = Position::new(pos + seq.len() + 1)
+        .ok_or_else(|| anyhow::anyhow!("invalid mate position"))?;
+
+    let record = RecordBuf::builder()
+        .set_flags(flags)
+        .set_reference_sequence_id(ref_id)
+        .set_alignment_start(alignment_pos)
+        .set_mapping_quality(
+            MappingQuality::new(mapq).ok_or_else(|| anyhow::anyhow!("invalid mapq"))?,
+        )
+        .set_cigar(cigar_ops.into_iter().collect::<Cigar>())
+        .set_mate_reference_sequence_id(ref_id)
+        .set_mate_alignment_start(mate_pos)
+        .set_template_length(seq.len() as i32)
+        .set_sequence(Sequence::from(seq))
+        .set_quality_scores(QualityScores::from(quals.to_vec()))
+        .build();
+
+    Ok(record)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -820,6 +1032,112 @@ mod tests {
         assert!(
             (mean_q - 30.0).abs() < 1.0,
             "mean quality {mean_q} should be close to 30"
+        );
+    }
+
+    // Test 7 – CIGAR parsing correctly counts insertions, deletions, and bases.
+    //
+    // CIGAR: 5M2I3M1D4M, MAPQ 40.
+    // Read: 5 + 2 + 3 + 4 = 14 bases consumed from read.
+    // Reference consumed: 5 + 3 + 1 + 4 = 13 bases.
+    //
+    // Expected counts:
+    //   bases_by_cycle: positions 0–4 (first 5M), then 7–9 (3M after 2I),
+    //                   then 10–13 (4M after 1D).
+    //   insertion at read_pos 5 (where the 2I starts).
+    //   deletion at read_pos 8 (after 5M + 2I + 3M — note: 3M advances to 10, deletion
+    //                           is at read_pos 10, not 8). Let's be precise:
+    //   After 5M: read_pos = 5, bases[0..4] += 1.
+    //   After 2I: insertion_counts[5] += 1, read_pos = 7.
+    //   After 3M: bases[7..9] += 1, read_pos = 10.
+    //   After 1D: deletion_counts[10] += 1, read_pos stays 10.
+    //   After 4M: bases[10..13] += 1, read_pos = 14.
+    #[test]
+    fn test_learner_stats_cigar_counts() {
+        // The read has 14 bases (5 + 2 + 3 + 4 = 14).
+        let seq = vec![b'A'; 14];
+        let quals = vec![40u8; 14];
+        let record = make_test_record_with_cigar(&seq, &quals, "5M2I3M1D4M", 40, 0, 0)
+            .expect("make_test_record_with_cigar should not fail");
+
+        let mut ins = vec![0u64; 14];
+        let mut del = vec![0u64; 14];
+        let mut bases = vec![0u64; 14];
+
+        accumulate_cigar_counts(record.cigar().as_ref(), &mut ins, &mut del, &mut bases);
+
+        // Insertion at read_pos 5 (where the 2I begins).
+        assert_eq!(ins[5], 1, "expected insertion at read_pos 5");
+
+        // Deletion at read_pos 10 (after 5M + 2I + 3M).
+        assert_eq!(del[10], 1, "expected deletion at read_pos 10");
+
+        // Aligned bases: positions 0–4 (5M), 7–9 (3M), 10–13 (4M).
+        for (p, &b) in bases.iter().enumerate().take(5) {
+            assert_eq!(b, 1, "bases[{p}] should be 1 (from first 5M)");
+        }
+        for (p, &b) in bases.iter().enumerate().skip(7).take(3) {
+            assert_eq!(b, 1, "bases[{p}] should be 1 (from 3M after 2I)");
+        }
+        for (p, &b) in bases.iter().enumerate().skip(10).take(4) {
+            assert_eq!(b, 1, "bases[{p}] should be 1 (from 4M after 1D)");
+        }
+
+        // Positions 5–6 are inside the insertion: not counted as aligned bases.
+        assert_eq!(bases[5], 0, "bases[5] should be 0 (insertion, not aligned)");
+        assert_eq!(bases[6], 0, "bases[6] should be 0 (insertion, not aligned)");
+
+        // Total aligned bases: 5 + 3 + 4 = 12.
+        let total: u64 = bases.iter().sum();
+        assert_eq!(total, 12, "total aligned bases should be 12");
+    }
+
+    // Test 8 – build_profile computes indel rates from known counts.
+    #[test]
+    fn test_build_profile_indel_rates() {
+        let read_len = 10usize;
+        let mut stats = LearnerStats::new(read_len);
+        stats.reads_examined = 1;
+
+        // 100 bases observed at every cycle, 2 insertions at cycle 3.
+        for b in stats.bases_by_cycle.iter_mut() {
+            *b = 100;
+        }
+        stats.insertion_counts_by_cycle[3] = 2;
+
+        let learner = ProfileLearner::new(LearnerConfig {
+            sample_size: 1,
+            min_mapq: 0,
+        });
+
+        // build_profile needs at least one quality entry.
+        stats.quality_counts_r1[0].insert(30, 1);
+        // Pad the remaining positions so build_quality_distribution doesn't panic.
+        for pos in 1..read_len {
+            stats.quality_counts_r1[pos].insert(30, 1);
+        }
+
+        let profile = learner
+            .build_profile(stats)
+            .expect("build_profile should succeed");
+
+        let total_bases = 100u64 * read_len as u64;
+        let expected_ins_rate = 2.0 / total_bases as f64;
+        let actual = profile
+            .overall_insertion_rate
+            .expect("overall_insertion_rate should be Some");
+        assert!(
+            (actual - expected_ins_rate).abs() < 1e-12,
+            "overall_insertion_rate {actual} != expected {expected_ins_rate}"
+        );
+
+        // Deletion rate should be 0 (no deletions added).
+        let del_rate = profile
+            .overall_deletion_rate
+            .expect("overall_deletion_rate should be Some");
+        assert!(
+            del_rate < 1e-12,
+            "overall_deletion_rate should be ~0, got {del_rate}"
         );
     }
 }
