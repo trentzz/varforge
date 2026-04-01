@@ -13,7 +13,6 @@ use rand::Rng;
 /// instrument artefacts that cause spurious insertions or deletions in the
 /// read sequence at a very low per-base rate.
 // Used by downstream tasks in EPIC-ERROR-MODEL (T155 ErrorOrchestrator).
-#[allow(dead_code)]
 pub struct IndelErrorModel {
     /// Per-base probability that an indel event occurs at each position.
     pub indel_rate: f64,
@@ -35,7 +34,6 @@ pub struct IndelErrorModel {
 ///
 /// The caller must ensure `seq.len() == qual.len() == read_length` on entry.
 // Used by downstream tasks in EPIC-ERROR-MODEL (T155 ErrorOrchestrator).
-#[allow(dead_code)]
 pub fn inject_indel_errors(
     seq: &mut Vec<u8>,
     qual: &mut Vec<u8>,
@@ -117,13 +115,11 @@ pub fn inject_indel_errors(
 /// Models the gap between reported quality scores and actual instrument error
 /// rates, including the characteristic 3' error rise in Illumina reads.
 // Used by downstream tasks in EPIC-ERROR-MODEL (T155 ErrorOrchestrator).
-#[allow(dead_code)]
 pub struct CycleErrorCurve {
     /// Per-position error probabilities, length equals read_length.
     curve: Vec<f64>,
 }
 
-#[allow(dead_code)]
 impl CycleErrorCurve {
     /// Build a flat curve: every position gets `base_error_rate`.
     pub fn flat(read_length: usize, base_error_rate: f64) -> Self {
@@ -224,7 +220,6 @@ impl CycleErrorCurve {
     /// `read_length` sets the expected length. If the iterator produces fewer
     /// values, remaining positions receive 0.0.
     // Used by T155 ErrorOrchestrator to build scaled R2 curves.
-    #[allow(dead_code)]
     pub fn from_rates(iter: impl Iterator<Item = f64>, read_length: usize) -> Self {
         let mut curve = Vec::with_capacity(read_length);
         for rate in iter {
@@ -260,9 +255,7 @@ impl CycleErrorCurve {
 /// For each position `i`, a Bernoulli trial fires with probability `model.curve[i]`.
 /// When triggered, the base is replaced with a uniformly random different base.
 // Used by downstream tasks in EPIC-ERROR-MODEL (T155 ErrorOrchestrator).
-#[allow(dead_code)]
 pub fn inject_cycle_errors(seq: &mut [u8], model: &CycleErrorCurve, rng: &mut impl Rng) {
-    const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
     for (i, base) in seq.iter_mut().enumerate() {
         let rate = if i < model.curve.len() {
             model.curve[i]
@@ -293,9 +286,11 @@ pub fn inject_cycle_errors(seq: &mut [u8], model: &CycleErrorCurve, rng: &mut im
 /// calling injection functions for R2. `apply_to_r2_qual` adjusts quality
 /// scores before error injection.
 // Used by T155 ErrorOrchestrator.
-#[allow(dead_code)]
 pub struct StrandBiasModel {
     /// R2 error rate = R1 rate × this multiplier. Default 1.0 (no bias).
+    // The orchestrator reads this via its own `r2_error_multiplier` field; the
+    // field here is retained for struct completeness and future use.
+    #[allow(dead_code)]
     pub r2_error_multiplier: f64,
     /// Shift R2 quality scores by this many Phred points.
     /// Positive values lower quality (subtract); negative values raise quality (add).
@@ -309,7 +304,6 @@ impl StrandBiasModel {
     /// Positive `r2_quality_offset` lowers quality (saturating subtract).
     /// Negative `r2_quality_offset` raises quality (saturating add, capped at 93).
     // Used by T155 ErrorOrchestrator.
-    #[allow(dead_code)]
     pub fn apply_to_r2_qual(&self, qual: &mut [u8]) {
         for q in qual.iter_mut() {
             if self.r2_quality_offset > 0 {
@@ -329,7 +323,6 @@ impl StrandBiasModel {
 /// several adjacent positions. All bases in a burst are substituted to the same
 /// wrong base, and their quality scores are set to Q12 to indicate unreliability.
 // Used by T155 ErrorOrchestrator.
-#[allow(dead_code)]
 pub struct CorrelatedErrorModel {
     /// Per-base probability of initiating a phasing error burst.
     pub burst_rate: f64,
@@ -347,7 +340,6 @@ pub struct CorrelatedErrorModel {
 ///
 /// The caller must ensure `seq.len() == qual.len()` on entry.
 // Used by T155 ErrorOrchestrator.
-#[allow(dead_code)]
 pub fn inject_burst_errors(
     seq: &mut [u8],
     qual: &mut [u8],
@@ -401,14 +393,12 @@ pub fn inject_burst_errors(
 /// applied. Having no rules set (all multipliers = 1.0) and a zero `base_rate`
 /// makes this a no-op.
 // Used by T155 ErrorOrchestrator.
-#[allow(dead_code)]
 pub fn inject_context_errors(
     seq: &mut [u8],
     base_rate: f64,
     model: &KmerErrorModel,
     rng: &mut impl Rng,
 ) {
-    const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
     let len = seq.len();
     for i in 0..len {
         let multiplier = model.sub_multiplier_at(seq, i) as f64;
@@ -448,7 +438,6 @@ fn base_to_bits(b: u8) -> usize {
 /// Produced by T156 (empirical profile extraction). Loaded via
 /// `KmerErrorModel::from_profile_json`.
 // Used by downstream tasks in EPIC-ERROR-MODEL (T155 ErrorOrchestrator, T156 profile extraction).
-#[allow(dead_code)]
 #[derive(serde::Deserialize)]
 pub struct KmerProfileJson {
     pub kmer_length: usize,
@@ -457,7 +446,6 @@ pub struct KmerProfileJson {
 
 /// A single context rule inside a `KmerProfileJson`.
 // Used by downstream tasks in EPIC-ERROR-MODEL (T155 ErrorOrchestrator, T156 profile extraction).
-#[allow(dead_code)]
 #[derive(serde::Deserialize)]
 pub struct KmerRuleJson {
     pub context: String,
@@ -475,7 +463,6 @@ pub struct KmerRuleJson {
 /// `k` must be in 1..=5 (table sizes 4..=1024 entries). Values outside that
 /// range are accepted but will use larger allocations.
 // Used by downstream tasks in EPIC-ERROR-MODEL (T155 ErrorOrchestrator).
-#[allow(dead_code)]
 pub struct KmerErrorModel {
     /// k-mer length (1..=5).
     pub k: usize,
@@ -485,7 +472,6 @@ pub struct KmerErrorModel {
     indel_multipliers: Vec<f32>,
 }
 
-#[allow(dead_code)]
 impl KmerErrorModel {
     /// Create a uniform model where all k-mer multipliers are 1.0.
     pub fn uniform(k: usize) -> Self {
@@ -536,6 +522,8 @@ impl KmerErrorModel {
     /// Return the indel multiplier for the k-mer ending at `pos`.
     ///
     /// Returns 1.0 if there is not yet enough context (pos + 1 < k).
+    // Reserved for T156 empirical profile extraction; not yet called from the orchestrator.
+    #[allow(dead_code)]
     pub fn indel_multiplier_at(&self, seq: &[u8], pos: usize) -> f32 {
         if pos + 1 < self.k {
             return 1.0;

@@ -1320,6 +1320,20 @@ pub fn validate(config: &Config) -> Result<()> {
                 mult
             );
         }
+        if let Some(frac) = se.indel_insertion_fraction {
+            anyhow::ensure!(
+                (0.0..=1.0).contains(&frac),
+                "quality.sequencing_errors.indel_insertion_fraction ({}) must be in [0.0, 1.0]",
+                frac
+            );
+        }
+        if let Some(rate) = se.burst_rate {
+            anyhow::ensure!(
+                (0.0..=1.0).contains(&rate),
+                "quality.sequencing_errors.burst_rate ({}) must be in [0.0, 1.0]",
+                rate
+            );
+        }
         // r2_quality_offset: any i8 is valid (no constraint needed).
     }
 
