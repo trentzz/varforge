@@ -262,6 +262,114 @@ pub fn inject_cycle_errors(seq: &mut [u8], model: &CycleErrorCurve, rng: &mut im
     }
 }
 
+/// Models the tendency for R2 reads to accumulate more errors than R1.
+///
+/// R2 undergoes more synthesis cycles before sequencing, so phasing errors
+/// accumulate. This manifests as both a higher per-base error rate and lower
+/// quality scores relative to R1.
+///
+/// The `r2_error_multiplier` is consumed by the orchestrator (T155) when
+/// calling injection functions for R2. `apply_to_r2_qual` adjusts quality
+/// scores before error injection.
+// Used by T155 ErrorOrchestrator.
+#[allow(dead_code)]
+pub struct StrandBiasModel {
+    /// R2 error rate = R1 rate × this multiplier. Default 1.0 (no bias).
+    pub r2_error_multiplier: f64,
+    /// Shift R2 quality scores by this many Phred points.
+    /// Positive values lower quality (subtract); negative values raise quality (add).
+    /// Default 0 (no shift).
+    pub r2_quality_offset: i8,
+}
+
+impl StrandBiasModel {
+    /// Apply the quality offset to an R2 quality array in place.
+    ///
+    /// Positive `r2_quality_offset` lowers quality (saturating subtract).
+    /// Negative `r2_quality_offset` raises quality (saturating add, capped at 93).
+    // Used by T155 ErrorOrchestrator.
+    #[allow(dead_code)]
+    pub fn apply_to_r2_qual(&self, qual: &mut [u8]) {
+        for q in qual.iter_mut() {
+            if self.r2_quality_offset > 0 {
+                *q = q.saturating_sub(self.r2_quality_offset as u8);
+            } else if self.r2_quality_offset < 0 {
+                *q = q
+                    .saturating_add(self.r2_quality_offset.unsigned_abs())
+                    .min(93);
+            }
+        }
+    }
+}
+
+/// Models correlated phasing burst errors caused by cluster phasing failures.
+///
+/// A phasing failure at one cycle causes the same miscall to propagate across
+/// several adjacent positions. All bases in a burst are substituted to the same
+/// wrong base, and their quality scores are set to Q12 to indicate unreliability.
+// Used by T155 ErrorOrchestrator.
+#[allow(dead_code)]
+pub struct CorrelatedErrorModel {
+    /// Per-base probability of initiating a phasing error burst.
+    pub burst_rate: f64,
+    /// Mean burst length. Lengths are drawn from a Geometric distribution
+    /// with success probability `1 / burst_length_mean`.
+    pub burst_length_mean: f64,
+}
+
+/// Inject correlated phasing burst errors into a read.
+///
+/// Walks positions 0..seq.len(). At each position, rolls against `burst_rate`.
+/// If a burst starts, draws a length from Geometric(1/burst_length_mean),
+/// then forces all burst positions to the same randomly chosen wrong base and
+/// sets their quality scores to 12.
+///
+/// The caller must ensure `seq.len() == qual.len()` on entry.
+// Used by T155 ErrorOrchestrator.
+#[allow(dead_code)]
+pub fn inject_burst_errors(
+    seq: &mut [u8],
+    qual: &mut [u8],
+    model: &CorrelatedErrorModel,
+    rng: &mut impl Rng,
+) {
+    const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
+    let len = seq.len();
+    let mut burst_remaining: usize = 0;
+    let mut burst_base: u8 = b'A';
+
+    for i in 0..len {
+        if burst_remaining > 0 {
+            seq[i] = burst_base;
+            qual[i] = 12;
+            burst_remaining -= 1;
+        } else if rng.random::<f64>() < model.burst_rate {
+            // Draw burst length from Geometric(1/burst_length_mean).
+            // Each additional step continues with probability 1 - 1/mean.
+            let p_continue = 1.0 - 1.0 / model.burst_length_mean;
+            let mut drawn_len = 1usize;
+            let max_len = len - i;
+            while drawn_len < max_len && rng.random::<f64>() < p_continue {
+                drawn_len += 1;
+            }
+
+            // Choose a wrong base different from the current base.
+            let current = seq[i];
+            let wrong: u8 = loop {
+                let candidate = BASES[rng.random_range(0..4)];
+                if candidate != current {
+                    break candidate;
+                }
+            };
+
+            burst_base = wrong;
+            seq[i] = burst_base;
+            qual[i] = 12;
+            burst_remaining = drawn_len - 1;
+        }
+    }
+}
+
 /// Map a single base byte to its 2-bit representation.
 ///
 /// A=0, C=1, G=2, T=3. Any unrecognised byte maps to 0 (treated as A).
@@ -391,6 +499,7 @@ impl KmerErrorModel {
         Ok(model)
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -582,6 +691,151 @@ mod tests {
             "expected non-A rate in [0.04, 0.09], got {:.4}",
             observed_rate
         );
+    }
+
+    // --- StrandBiasModel tests ---
+
+    #[test]
+    fn test_strand_bias_lowers_quality() {
+        let model = StrandBiasModel {
+            r2_error_multiplier: 1.3,
+            r2_quality_offset: 3,
+        };
+        let mut qual = vec![40u8; 20];
+        model.apply_to_r2_qual(&mut qual);
+        assert!(
+            qual.iter().all(|&q| q == 37),
+            "all qualities should be 37 after subtracting offset 3 from 40"
+        );
+    }
+
+    #[test]
+    fn test_strand_bias_zero_offset_noop() {
+        let model = StrandBiasModel {
+            r2_error_multiplier: 1.3,
+            r2_quality_offset: 0,
+        };
+        let original = vec![30u8, 25u8, 40u8, 10u8, 5u8];
+        let mut qual = original.clone();
+        model.apply_to_r2_qual(&mut qual);
+        assert_eq!(qual, original, "zero offset must leave quality unchanged");
+    }
+
+    #[test]
+    fn test_strand_bias_negative_offset_raises_quality() {
+        // Negative offset raises quality; result is capped at 93.
+        let model = StrandBiasModel {
+            r2_error_multiplier: 1.0,
+            r2_quality_offset: -5,
+        };
+        let mut qual = vec![30u8; 10];
+        model.apply_to_r2_qual(&mut qual);
+        assert!(
+            qual.iter().all(|&q| q == 35),
+            "negative offset -5 should raise quality from 30 to 35"
+        );
+    }
+
+    // --- CorrelatedErrorModel tests ---
+
+    #[test]
+    fn test_burst_errors_correlated() {
+        // With burst_rate 0.1 and burst_length_mean 5.0, bursts should be
+        // clearly longer than 1 base on average. Run 10000 reads of 50 bp
+        // all-A and measure average run length of the first non-A run per read.
+        let model = CorrelatedErrorModel {
+            burst_rate: 0.1,
+            burst_length_mean: 5.0,
+        };
+        let mut rng = StdRng::seed_from_u64(42);
+        let n_reads = 10_000usize;
+        let read_len = 50usize;
+        let mut total_run_len = 0usize;
+        let mut run_count = 0usize;
+
+        for _ in 0..n_reads {
+            let mut seq = vec![b'A'; read_len];
+            let mut qual = vec![30u8; read_len];
+            inject_burst_errors(&mut seq, &mut qual, &model, &mut rng);
+
+            // Find the first non-A position and measure the run from there.
+            if let Some(start) = seq.iter().position(|&b| b != b'A') {
+                let run_base = seq[start];
+                let run_len = seq[start..].iter().take_while(|&&b| b == run_base).count();
+                total_run_len += run_len;
+                run_count += 1;
+            }
+        }
+
+        assert!(run_count > 0, "expected some reads to have bursts");
+        let avg_run = total_run_len as f64 / run_count as f64;
+        assert!(
+            avg_run > 1.5,
+            "expected average burst run length > 1.5, got {:.3}",
+            avg_run
+        );
+    }
+
+    #[test]
+    fn test_burst_base_consistent() {
+        // All bases within a burst must be the same wrong base.
+        let model = CorrelatedErrorModel {
+            burst_rate: 0.5,
+            burst_length_mean: 4.0,
+        };
+        let mut rng = StdRng::seed_from_u64(99);
+        let read_len = 50usize;
+
+        // Try up to 1000 reads to find one with a burst longer than 1 base.
+        let mut found_multi_base_burst = false;
+        for _ in 0..1_000 {
+            let mut seq = vec![b'A'; read_len];
+            let mut qual = vec![30u8; read_len];
+            inject_burst_errors(&mut seq, &mut qual, &model, &mut rng);
+
+            if let Some(start) = seq.iter().position(|&b| b != b'A') {
+                let burst_base = seq[start];
+                // Measure contiguous run of burst_base.
+                let run_len = seq[start..]
+                    .iter()
+                    .take_while(|&&b| b == burst_base)
+                    .count();
+                if run_len > 1 {
+                    // Verify all bases in the run are identical.
+                    assert!(
+                        seq[start..start + run_len].iter().all(|&b| b == burst_base),
+                        "burst bases are not all identical"
+                    );
+                    found_multi_base_burst = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(
+            found_multi_base_burst,
+            "expected to find at least one burst longer than 1 base"
+        );
+    }
+
+    #[test]
+    fn test_burst_rate_zero_noop() {
+        let model = CorrelatedErrorModel {
+            burst_rate: 0.0,
+            burst_length_mean: 3.0,
+        };
+        let mut rng = StdRng::seed_from_u64(7);
+        let read_len = 50usize;
+
+        for _ in 0..1_000 {
+            let original_seq = vec![b'A'; read_len];
+            let original_qual = vec![30u8; read_len];
+            let mut seq = original_seq.clone();
+            let mut qual = original_qual.clone();
+            inject_burst_errors(&mut seq, &mut qual, &model, &mut rng);
+            assert_eq!(seq, original_seq, "burst_rate 0.0 must not change seq");
+            assert_eq!(qual, original_qual, "burst_rate 0.0 must not change qual");
+        }
     }
 
     #[test]
