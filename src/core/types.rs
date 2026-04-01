@@ -139,7 +139,6 @@ pub enum MutationType {
         alt_seq: Vec<u8>,
     },
     /// Structural variant (>50 bp) with breakend notation for truth VCF.
-    // Variant is constructed by the SV pipeline; retain to avoid breaking match arms.
     Sv {
         sv_type: SvType,
         chrom: String,
@@ -174,7 +173,8 @@ impl MutationType {
 }
 
 /// Structural variant type classifications.
-// Variants are produced by StructuralVariant::sv_type(); retain all arms.
+// Insertion and Translocation variants are matched in engine.rs but never constructed
+// in the current simulation path; retain all arms for future completeness.
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SvType {
