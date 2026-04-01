@@ -311,10 +311,23 @@ impl BamWriter {
             | Flags::REVERSE_COMPLEMENTED
             | Flags::LAST_SEGMENT;
 
-        let cigar_ops_r1 =
-            parse_cigar(cigar_r1).with_context(|| format!("failed to parse CIGAR: {cigar_r1}"))?;
-        let cigar_ops_r2 =
-            parse_cigar(cigar_r2).with_context(|| format!("failed to parse CIGAR: {cigar_r2}"))?;
+        // Build CIGAR ops, prepending a soft-clip for any inline UMI prefix.
+        let cigar_ops_r1 = {
+            let mut ops = parse_cigar(cigar_r1)
+                .with_context(|| format!("failed to parse CIGAR: {cigar_r1}"))?;
+            if let Some(ref pfx) = pair.inline_prefix_r1 {
+                ops.insert(0, Op::new(Kind::SoftClip, pfx.len()));
+            }
+            ops
+        };
+        let cigar_ops_r2 = {
+            let mut ops = parse_cigar(cigar_r2)
+                .with_context(|| format!("failed to parse CIGAR: {cigar_r2}"))?;
+            if let Some(ref pfx) = pair.inline_prefix_r2 {
+                ops.insert(0, Op::new(Kind::SoftClip, pfx.len()));
+            }
+            ops
+        };
 
         // R2 sequence must be reverse-complemented: BAM stores the sequence as it
         // appears on the forward strand, but R2 aligns to the reverse strand.
@@ -322,11 +335,49 @@ impl BamWriter {
         let mut r2_qual_rev = pair.read2.qual.clone();
         r2_qual_rev.reverse();
 
+        // Build final sequences: prepend any inline UMI prefix to the template sequence.
+        let r1_seq_final: Vec<u8>;
+        let r1_qual_final: Vec<u8>;
+        let r2_seq_final: Vec<u8>;
+        let r2_qual_final: Vec<u8>;
+
+        if let Some(ref pfx) = pair.inline_prefix_r1 {
+            let pfx_qual = vec![37u8; pfx.len()];
+            r1_seq_final = pfx.iter().chain(pair.read1.seq.iter()).copied().collect();
+            r1_qual_final = pfx_qual
+                .iter()
+                .chain(pair.read1.qual.iter())
+                .copied()
+                .collect();
+        } else {
+            r1_seq_final = pair.read1.seq.clone();
+            r1_qual_final = pair.read1.qual.clone();
+        }
+
+        if let Some(ref pfx) = pair.inline_prefix_r2 {
+            let pfx_qual = vec![37u8; pfx.len()];
+            // R2 is stored RC in BAM. Prepend prefix in forward orientation, then
+            // the whole sequence (prefix + template) is reversed for storage.
+            let seq_fwd: Vec<u8> = pfx.iter().chain(pair.read2.seq.iter()).copied().collect();
+            let qual_fwd: Vec<u8> = pfx_qual
+                .iter()
+                .chain(pair.read2.qual.iter())
+                .copied()
+                .collect();
+            r2_seq_final = crate::seq_utils::reverse_complement(&seq_fwd);
+            r2_qual_final = qual_fwd.into_iter().rev().collect();
+        } else {
+            r2_seq_final = r2_seq_rc;
+            r2_qual_final = r2_qual_rev;
+        }
+
         // Compute MD strings. R1 compares forward read against forward reference.
         // R2 is stored as RC, so the reference must also be RC for comparison.
+        // MD is computed from the template bases only (no UMI prefix in the reference).
         let md_r1 = build_md_string(&pair.read1.seq, &pair.ref_seq_r1);
         let ref_r2_rc = crate::seq_utils::reverse_complement(&pair.ref_seq_r2);
-        let md_r2 = build_md_string(&r2_seq_rc, &ref_r2_rc);
+        let r2_seq_template_rc = crate::seq_utils::reverse_complement(&pair.read2.seq);
+        let md_r2 = build_md_string(&r2_seq_template_rc, &ref_r2_rc);
 
         // Insert MD tags into the auxiliary data for each read.
         let mut data_r1 = data_r1;
@@ -344,8 +395,8 @@ impl BamWriter {
             mapq,
             cigar_ops_r1,
             template_len,
-            &pair.read1.seq,
-            pair.read1.qual.clone(),
+            &r1_seq_final,
+            r1_qual_final,
             data_r1,
         );
 
@@ -358,8 +409,8 @@ impl BamWriter {
             mapq,
             cigar_ops_r2,
             -template_len,
-            &r2_seq_rc,
-            r2_qual_rev,
+            &r2_seq_final,
+            r2_qual_final,
             data_r2,
         );
 
@@ -709,6 +760,8 @@ mod tests {
             variant_tags: Vec::new(),
             ref_seq_r1: Vec::new(),
             ref_seq_r2: Vec::new(),
+            inline_prefix_r1: None,
+            inline_prefix_r2: None,
         }
     }
 
@@ -1062,6 +1115,8 @@ mod tests {
             variant_tags: Vec::new(),
             ref_seq_r1: ref1,
             ref_seq_r2: ref2,
+            inline_prefix_r1: None,
+            inline_prefix_r2: None,
         };
 
         let mut writer = BamWriter::new(tmp.path(), &refs, &cfg, 60).unwrap();

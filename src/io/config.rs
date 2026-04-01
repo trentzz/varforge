@@ -345,6 +345,19 @@ pub struct UmiConfig {
     pub family_size_sd: f64,
     #[serde(default)]
     pub inline: bool,
+    /// Optional spacer sequence appended after the UMI in inline mode (e.g. `"AT"` for Twist).
+    #[serde(default)]
+    pub spacer: Option<String>,
+    /// Probability that a duplex molecule produces both AB and BA strand families.
+    ///
+    /// Defaults to 1.0 (both strands always emitted). Set to ~0.90 for realistic Twist data.
+    #[serde(default)]
+    pub duplex_conversion_rate: Option<f64>,
+    /// Per-base sequencing error rate for inline UMI bases.
+    ///
+    /// Defaults to 0.0 (no UMI errors). Set to ~0.001 for realistic error injection.
+    #[serde(default)]
+    pub error_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -836,6 +849,9 @@ fn fill_umi(config: &mut Config, length: usize, duplex: bool, inline: bool) {
             pcr_cycles: default_pcr_cycles(),
             family_size_mean: default_family_size_mean(),
             family_size_sd: default_family_size_sd(),
+            spacer: None,
+            duplex_conversion_rate: None,
+            error_rate: None,
         });
     } else if let Some(umi) = config.umi.as_mut() {
         // `default_umi_length()` is 8, so we cannot distinguish "not set"
@@ -1110,12 +1126,21 @@ pub fn validate(config: &Config) -> Result<()> {
             config.sample.read_length
         );
 
-        // T134: inline UMI trimming is not implemented in v1. Reject early
-        // so users get a clear message rather than silently incorrect output.
-        anyhow::ensure!(
-            !umi.inline,
-            "inline UMI mode is not supported in v1; set umi.inline to false or omit it"
-        );
+        if let Some(rate) = umi.duplex_conversion_rate {
+            anyhow::ensure!(
+                (0.0..=1.0).contains(&rate),
+                "umi.duplex_conversion_rate ({}) must be in [0.0, 1.0]",
+                rate
+            );
+        }
+
+        if let Some(rate) = umi.error_rate {
+            anyhow::ensure!(
+                (0.0..=1.0).contains(&rate),
+                "umi.error_rate ({}) must be in [0.0, 1.0]",
+                rate
+            );
+        }
     }
 
     // T086: validate copy number region strings.
@@ -1365,24 +1390,29 @@ umi:
         assert_eq!(umi.length, 12);
     }
 
-    /// `umi.inline: true` is rejected by validation with a clear error.
+    /// `umi.inline: true` is accepted by validation (inline mode is supported).
     #[test]
-    fn test_inline_umi_rejected() {
+    fn test_inline_umi_accepted() {
         let yaml = r#"
 reference: /dev/null
 output:
   directory: /tmp/out
+sample:
+  read_length: 150
 umi:
-  length: 8
+  length: 5
   inline: true
+  spacer: "AT"
 "#;
         let f = write_yaml(yaml);
         let cfg = load(f.path()).unwrap();
-        let err = validate(&cfg).unwrap_err();
         assert!(
-            err.to_string().contains("inline UMI mode is not supported"),
-            "unexpected error message: {err}"
+            validate(&cfg).is_ok(),
+            "inline UMI mode should be accepted by validation"
         );
+        let umi = cfg.umi.expect("umi should be set");
+        assert!(umi.inline);
+        assert_eq!(umi.spacer.as_deref(), Some("AT"));
     }
 
     /// Explicit `fragment.ctdna_fraction` is parsed and validated correctly.
