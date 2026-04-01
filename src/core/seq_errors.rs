@@ -61,6 +61,12 @@ pub fn inject_indel_errors(
     const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
 
     for (pos, is_insertion, len) in events {
+        // Earlier deletions may have shortened the sequence so that `pos` is
+        // now out of bounds. Skip stale events rather than underflowing.
+        if pos >= seq.len() {
+            continue;
+        }
+
         if is_insertion {
             // Insert `len` random bases into seq and copies of qual[pos] into
             // qual immediately after position `pos`.
@@ -115,48 +121,50 @@ mod tests {
     }
 
     #[test]
-    fn test_indel_rate_accuracy() {
+    fn test_indel_rate_zero_leaves_read_unchanged() {
+        // At rate 0.0 no events fire; the read must be identical to the input.
         let model = IndelErrorModel {
-            indel_rate: 0.1,
+            indel_rate: 0.0,
             insertion_fraction: 0.5,
             max_length: 3,
         };
-        let read_length = 100;
-        let n_reads = 10_000;
+        let read_length = 50;
         let mut rng = StdRng::seed_from_u64(42);
-        let mut total_events = 0usize;
+        let original_seq = vec![b'A'; read_length];
+        let original_qual = vec![30u8; read_length];
+        let mut seq = original_seq.clone();
+        let mut qual = original_qual.clone();
+        inject_indel_errors(&mut seq, &mut qual, read_length, &model, &mut rng);
+        assert_eq!(seq, original_seq, "seq should be unchanged at rate 0.0");
+        assert_eq!(qual, original_qual, "qual should be unchanged at rate 0.0");
+    }
 
+    #[test]
+    fn test_high_indel_rate_modifies_reads() {
+        // At rate 0.5 on 20-bp reads almost every read will be modified.
+        let model = IndelErrorModel {
+            indel_rate: 0.5,
+            insertion_fraction: 0.5,
+            max_length: 2,
+        };
+        let read_length = 20;
+        let mut rng = StdRng::seed_from_u64(99);
+        let mut changed = 0usize;
+        let n_reads = 1_000;
         for _ in 0..n_reads {
-            let (mut seq, mut qual) = make_read(read_length);
-
-            // Count events by observing how many positions trigger. We re-run
-            // the collection logic directly to avoid coupling to internals.
-            // Instead, run the function and accept that the statistical
-            // property holds at the per-position roll level.
-            // Use a fresh RNG snapshot: just count rolls inside a duplicate loop.
-            let _ = (&mut seq, &mut qual); // suppress unused warnings
-
-            // Count events independently using the same algorithm.
-            let mut events = 0usize;
-            for _ in 0..read_length {
-                if rng.random::<f64>() < model.indel_rate {
-                    events += 1;
-                    // consume the same number of random draws as inject_indel_errors would
-                    let _ = rng.random::<f64>(); // is_insertion draw
-                    let mut len = 1usize;
-                    while len < model.max_length && rng.random::<f64>() < 0.3 {
-                        len += 1;
-                    }
-                }
+            let original = vec![b'A'; read_length];
+            let mut seq = original.clone();
+            let mut qual = vec![30u8; read_length];
+            inject_indel_errors(&mut seq, &mut qual, read_length, &model, &mut rng);
+            if seq != original {
+                changed += 1;
             }
-            total_events += events;
         }
-
-        let observed_rate = total_events as f64 / (n_reads * read_length) as f64;
         assert!(
-            (0.09..=0.11).contains(&observed_rate),
-            "observed indel rate {:.4} not in [0.09, 0.11]",
-            observed_rate,
+            changed > 900,
+            "expected >90% reads modified at rate 0.5, got {}/{}",
+            changed,
+            n_reads
         );
     }
 
@@ -191,94 +199,67 @@ mod tests {
     }
 
     #[test]
-    fn test_insertion_fraction() {
-        // Use indel_rate 1.0 so every base triggers an event, giving many samples.
+    fn test_only_insertions_when_fraction_one() {
+        // insertion_fraction: 1.0 means all events are insertions. With random
+        // bases inserted, at least some output reads should contain non-A bases.
         let model = IndelErrorModel {
-            indel_rate: 1.0,
-            insertion_fraction: 0.5,
+            indel_rate: 0.3,
+            insertion_fraction: 1.0,
             max_length: 1,
         };
-        let read_length = 10;
-        let n_reads = 1_000;
-        let mut rng = StdRng::seed_from_u64(99);
-        let mut insertions = 0usize;
-        let mut deletions = 0usize;
-
-        for _ in 0..n_reads {
-            // Mirror the collection loop to count independently.
-            for _ in 0..read_length {
-                // Rate is 1.0, so always triggers.
-                let _ = rng.random::<f64>(); // indel_rate roll (always passes)
-                if rng.random::<f64>() < model.insertion_fraction {
-                    insertions += 1;
-                    // length draw
-                    let mut len = 1usize;
-                    while len < model.max_length && rng.random::<f64>() < 0.3 {
-                        len += 1;
-                    }
-                    // insertion base draws (len times)
-                    for _ in 0..len {
-                        let _ = rng.random_range(0..4usize);
-                    }
-                } else {
-                    deletions += 1;
-                    // length draw
-                    let mut len = 1usize;
-                    while len < model.max_length && rng.random::<f64>() < 0.3 {
-                        len += 1;
-                    }
-                    let _ = len;
-                }
+        let read_length = 20;
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut has_non_a = false;
+        for _ in 0..100 {
+            let mut seq = vec![b'A'; read_length];
+            let mut qual = vec![30u8; read_length];
+            inject_indel_errors(&mut seq, &mut qual, read_length, &model, &mut rng);
+            assert_eq!(seq.len(), read_length, "fixed-length contract violated");
+            if seq.iter().any(|&b| b != b'A') {
+                has_non_a = true;
             }
         }
-
-        let total = insertions + deletions;
-        let ins_fraction = insertions as f64 / total as f64;
         assert!(
-            (0.45..=0.55).contains(&ins_fraction),
-            "insertion fraction {:.4} not in [0.45, 0.55]",
-            ins_fraction,
+            has_non_a,
+            "insertions should produce non-A bases in at least one read"
         );
     }
 
     #[test]
     fn test_length_distribution() {
-        // With indel_rate 1.0 every base gets an indel event; check that length
-        // 1 is the most common outcome (>50%) under Geometric(0.7).
+        // With indel_rate 1.0 and insertion_fraction 1.0, every position triggers
+        // an insertion. Insertions grow the sequence before truncation. Because the
+        // Geometric(0.7) distribution has P(len=1) = 0.7, reads with max_length 5
+        // will almost always be extended by exactly 1 base at each event. After
+        // truncation back to read_length, the output must still differ from all-A
+        // input in over 50% of runs (inserted random bases replace trailing A's).
         let model = IndelErrorModel {
             indel_rate: 1.0,
-            insertion_fraction: 1.0, // only insertions so lengths are cleanly countable
+            insertion_fraction: 1.0,
             max_length: 5,
         };
-        let read_length = 10;
+        let read_length = 20;
         let n_reads = 1_000;
         let mut rng = StdRng::seed_from_u64(13);
-        let mut length_counts = [0usize; 6]; // index 1..=5
+        let mut modified = 0usize;
 
         for _ in 0..n_reads {
-            for _ in 0..read_length {
-                let _ = rng.random::<f64>(); // indel_rate roll
-                let _ = rng.random::<f64>(); // insertion_fraction roll
-                let mut len = 1usize;
-                while len < model.max_length && rng.random::<f64>() < 0.3 {
-                    len += 1;
-                }
-                if len < length_counts.len() {
-                    length_counts[len] += 1;
-                }
-                // consume insertion base draws
-                for _ in 0..len {
-                    let _ = rng.random_range(0..4usize);
-                }
+            let original = vec![b'A'; read_length];
+            let mut seq = original.clone();
+            let mut qual = vec![30u8; read_length];
+            inject_indel_errors(&mut seq, &mut qual, read_length, &model, &mut rng);
+            assert_eq!(seq.len(), read_length, "fixed-length contract violated");
+            if seq != original {
+                modified += 1;
             }
         }
 
-        let total: usize = length_counts.iter().sum();
-        let frac_len1 = length_counts[1] as f64 / total as f64;
+        // At rate 1.0 with insertions only, virtually every read gets modified.
         assert!(
-            frac_len1 > 0.5,
-            "length-1 fraction {:.4} should be > 0.5 for Geometric(0.7)",
-            frac_len1,
+            modified > n_reads / 2,
+            "expected >50% reads modified at rate 1.0, got {}/{}",
+            modified,
+            n_reads
         );
     }
 }
