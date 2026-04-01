@@ -78,6 +78,8 @@ mod tests {
                 variant_tags: Vec::new(),
                 ref_seq_r1: Vec::new(),
                 ref_seq_r2: Vec::new(),
+                inline_prefix_r1: None,
+                inline_prefix_r2: None,
             },
             family_size,
         }

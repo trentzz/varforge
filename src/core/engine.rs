@@ -24,7 +24,7 @@ use crate::core::types::{MutationType, Read, ReadPair, Region, SvType, Variant, 
 use crate::io::config::{Config, FragmentModel};
 use crate::io::reference::ReferenceGenome;
 use crate::seq_utils::reverse_complement;
-use crate::umi::barcode::{generate_duplex_umi_pair, generate_umi};
+use crate::umi::barcode::{generate_duplex_umi_pair, generate_umi, inject_umi_errors};
 use crate::umi::families::{generate_pcr_copies, UmiFamily};
 use crate::variants::cnv::{adjusted_coverage, find_cn_region, CopyNumberRegion};
 use crate::variants::spike_in::spike_indel;
@@ -419,6 +419,9 @@ impl SimulationEngine {
             .unwrap_or(0.0);
         let (read_pairs, duplex_total_molecules, duplex_molecules_with_both_strands) =
             if let Some(ref umi_cfg) = self.config.umi {
+                let spacer = umi_cfg.spacer.as_deref().unwrap_or("").as_bytes().to_vec();
+                let umi_error_rate = umi_cfg.error_rate.unwrap_or(0.0);
+                let duplex_conversion_rate = umi_cfg.duplex_conversion_rate.unwrap_or(1.0);
                 expand_umi_families(
                     read_pairs,
                     umi_cfg.length,
@@ -427,6 +430,10 @@ impl SimulationEngine {
                     umi_cfg.pcr_cycles,
                     umi_cfg.duplex,
                     pcr_error_rate,
+                    umi_cfg.inline,
+                    spacer,
+                    umi_error_rate,
+                    duplex_conversion_rate,
                     &mut self.rng,
                 )?
             } else {
@@ -903,6 +910,8 @@ fn build_read_pair(
         variant_tags,
         ref_seq_r1: ref_r1,
         ref_seq_r2: ref_r2,
+        inline_prefix_r1: None,
+        inline_prefix_r2: None,
     }
 }
 
@@ -992,6 +1001,13 @@ fn apply_sv_variants(
 /// Expand read pairs into UMI-tagged PCR families.
 ///
 /// For duplex mode, each molecule produces both an AB and a BA strand family.
+/// The `duplex_conversion_rate` parameter controls the probability that a
+/// molecule yields both strands (realistic value: 0.90).
+///
+/// When `inline` is true, each copy receives `inline_prefix_r1` and
+/// `inline_prefix_r2` containing `[UMI bytes][spacer bytes]` for prepending
+/// in FASTQ/BAM output. UMI errors are injected per-copy at `umi_error_rate`.
+///
 /// Returns the expanded read pair list and duplex molecule counts.
 #[allow(clippy::too_many_arguments)]
 fn expand_umi_families(
@@ -1002,6 +1018,10 @@ fn expand_umi_families(
     pcr_cycles: u32,
     is_duplex: bool,
     pcr_error_rate: f64,
+    inline: bool,
+    spacer: Vec<u8>,
+    umi_error_rate: f64,
+    duplex_conversion_rate: f64,
     rng: &mut StdRng,
 ) -> Result<(Vec<ReadPair>, u64, u64)> {
     // Construct the family size sampler once; log-space conversion is non-trivial.
@@ -1013,9 +1033,8 @@ fn expand_umi_families(
 
     for mut pair in read_pairs {
         if is_duplex {
-            // Track molecule counts for duplex conversion rate (T108).
+            // Track molecule counts for duplex conversion rate.
             duplex_total_molecules += 1;
-            duplex_molecules_with_both_strands += 1; // always both strands in simulation
 
             // Generate AB and BA UMI tags. AB is "AAAA-BBBB"; BA is the halves swapped.
             let (umi_a, umi_b) = generate_duplex_umi_pair(umi_len, rng);
@@ -1028,47 +1047,84 @@ fn expand_umi_families(
             pair.name = format!("{}:UMI:{}", pair.name, ab_str);
             let family_size = family_sampler.sample(rng);
             let ab_family = UmiFamily {
-                umi: umi_a,
+                umi: umi_a.clone(),
                 original: pair.clone(),
                 family_size,
             };
             let mut ab_copies = generate_pcr_copies(&ab_family, pcr_error_rate, pcr_cycles, rng);
+
+            // Attach inline prefixes to AB copies: R1 gets umi_a + spacer, R2 gets umi_b + spacer.
+            if inline {
+                for copy in &mut ab_copies {
+                    let mut prefix_r1 = build_inline_prefix(&umi_a[..umi_len], &spacer);
+                    let mut prefix_r2 = build_inline_prefix(&umi_b[..umi_len], &spacer);
+                    if umi_error_rate > 0.0 {
+                        inject_umi_errors(&mut prefix_r1[..umi_len], umi_error_rate, rng);
+                        inject_umi_errors(&mut prefix_r2[..umi_len], umi_error_rate, rng);
+                    }
+                    copy.inline_prefix_r1 = Some(prefix_r1);
+                    copy.inline_prefix_r2 = Some(prefix_r2);
+                }
+            }
             families.append(&mut ab_copies);
 
-            // BA strand: R1_BA = revcomp(R2_AB), R2_BA = revcomp(R1_AB).
-            // This models sequencing from the opposite end of the molecule.
-            let ba_read1 = Read::new(
-                reverse_complement(&pair.read2.seq),
-                pair.read2.qual.iter().copied().rev().collect(),
-            );
-            let ba_read2 = Read::new(
-                reverse_complement(&pair.read1.seq),
-                pair.read1.qual.iter().copied().rev().collect(),
-            );
-            let base_name = pair
-                .name
-                .rfind(":UMI:")
-                .map(|i| &pair.name[..i])
-                .unwrap_or(&pair.name);
-            let ba_pair = ReadPair {
-                name: format!("{}:UMI:{}", base_name, ba_str),
-                read1: ba_read1,
-                read2: ba_read2,
-                fragment_start: pair.fragment_start,
-                fragment_length: pair.fragment_length,
-                chrom: pair.chrom.clone(),
-                variant_tags: pair.variant_tags.clone(),
-                ref_seq_r1: pair.ref_seq_r2.iter().copied().rev().collect(),
-                ref_seq_r2: pair.ref_seq_r1.iter().copied().rev().collect(),
-            };
-            let ba_family_size = family_sampler.sample(rng);
-            let ba_family = UmiFamily {
-                umi: umi_b,
-                original: ba_pair,
-                family_size: ba_family_size,
-            };
-            let mut ba_copies = generate_pcr_copies(&ba_family, pcr_error_rate, pcr_cycles, rng);
-            families.append(&mut ba_copies);
+            // BA strand: only emitted with probability `duplex_conversion_rate`.
+            let emit_ba = rng.random::<f64>() < duplex_conversion_rate;
+            if emit_ba {
+                duplex_molecules_with_both_strands += 1;
+
+                // R1_BA = revcomp(R2_AB), R2_BA = revcomp(R1_AB).
+                // This models sequencing from the opposite end of the molecule.
+                let ba_read1 = Read::new(
+                    reverse_complement(&pair.read2.seq),
+                    pair.read2.qual.iter().copied().rev().collect(),
+                );
+                let ba_read2 = Read::new(
+                    reverse_complement(&pair.read1.seq),
+                    pair.read1.qual.iter().copied().rev().collect(),
+                );
+                let base_name = pair
+                    .name
+                    .rfind(":UMI:")
+                    .map(|i| &pair.name[..i])
+                    .unwrap_or(&pair.name);
+                let ba_pair = ReadPair {
+                    name: format!("{}:UMI:{}", base_name, ba_str),
+                    read1: ba_read1,
+                    read2: ba_read2,
+                    fragment_start: pair.fragment_start,
+                    fragment_length: pair.fragment_length,
+                    chrom: pair.chrom.clone(),
+                    variant_tags: pair.variant_tags.clone(),
+                    ref_seq_r1: pair.ref_seq_r2.iter().copied().rev().collect(),
+                    ref_seq_r2: pair.ref_seq_r1.iter().copied().rev().collect(),
+                    inline_prefix_r1: None,
+                    inline_prefix_r2: None,
+                };
+                let ba_family_size = family_sampler.sample(rng);
+                let ba_family = UmiFamily {
+                    umi: umi_b.clone(),
+                    original: ba_pair,
+                    family_size: ba_family_size,
+                };
+                let mut ba_copies =
+                    generate_pcr_copies(&ba_family, pcr_error_rate, pcr_cycles, rng);
+
+                // Attach inline prefixes to BA copies: R1 gets umi_b + spacer, R2 gets umi_a + spacer.
+                if inline {
+                    for copy in &mut ba_copies {
+                        let mut prefix_r1 = build_inline_prefix(&umi_b[..umi_len], &spacer);
+                        let mut prefix_r2 = build_inline_prefix(&umi_a[..umi_len], &spacer);
+                        if umi_error_rate > 0.0 {
+                            inject_umi_errors(&mut prefix_r1[..umi_len], umi_error_rate, rng);
+                            inject_umi_errors(&mut prefix_r2[..umi_len], umi_error_rate, rng);
+                        }
+                        copy.inline_prefix_r1 = Some(prefix_r1);
+                        copy.inline_prefix_r2 = Some(prefix_r2);
+                    }
+                }
+                families.append(&mut ba_copies);
+            }
         } else {
             let umi = generate_umi(umi_len, rng);
             let umi_str = String::from_utf8_lossy(&umi).into_owned();
@@ -1076,11 +1132,25 @@ fn expand_umi_families(
 
             let family_size = family_sampler.sample(rng);
             let family = UmiFamily {
-                umi,
+                umi: umi.clone(),
                 original: pair,
                 family_size,
             };
             let mut copies = generate_pcr_copies(&family, pcr_error_rate, pcr_cycles, rng);
+
+            // Attach inline prefixes to simplex copies: both R1 and R2 get the same UMI + spacer.
+            if inline {
+                for copy in &mut copies {
+                    let mut prefix_r1 = build_inline_prefix(&umi, &spacer);
+                    let mut prefix_r2 = build_inline_prefix(&umi, &spacer);
+                    if umi_error_rate > 0.0 {
+                        inject_umi_errors(&mut prefix_r1[..umi_len], umi_error_rate, rng);
+                        inject_umi_errors(&mut prefix_r2[..umi_len], umi_error_rate, rng);
+                    }
+                    copy.inline_prefix_r1 = Some(prefix_r1);
+                    copy.inline_prefix_r2 = Some(prefix_r2);
+                }
+            }
             families.append(&mut copies);
         }
     }
@@ -1089,6 +1159,14 @@ fn expand_umi_families(
         duplex_total_molecules,
         duplex_molecules_with_both_strands,
     ))
+}
+
+/// Build an inline prefix by concatenating `umi` bytes and `spacer` bytes.
+fn build_inline_prefix(umi: &[u8], spacer: &[u8]) -> Vec<u8> {
+    let mut prefix = Vec::with_capacity(umi.len() + spacer.len());
+    prefix.extend_from_slice(umi);
+    prefix.extend_from_slice(spacer);
+    prefix
 }
 
 /// Inject sequencing artifacts (FFPE damage, oxoG damage, PCR duplicates) into a read batch.
@@ -1536,6 +1614,9 @@ mod tests {
             family_size_mean: 1.0,
             family_size_sd: 0.1,
             inline: false,
+            spacer: None,
+            duplex_conversion_rate: None,
+            error_rate: None,
         });
         let reference = open_reference(&fa);
         let mut engine = SimulationEngine::new(config, reference);
@@ -1568,6 +1649,9 @@ mod tests {
             family_size_mean: 3.0,
             family_size_sd: 0.5,
             inline: false,
+            spacer: None,
+            duplex_conversion_rate: None,
+            error_rate: None,
         });
         let reference = open_reference(&fa);
         let mut engine = SimulationEngine::new(config.clone(), reference);
@@ -1907,6 +1991,9 @@ mod tests {
             family_size_mean: 1.0,
             family_size_sd: 0.1,
             inline: false,
+            spacer: None,
+            duplex_conversion_rate: None,
+            error_rate: None,
         });
         let reference = open_reference(&fa);
         let mut engine = SimulationEngine::new(config, reference);
@@ -1977,6 +2064,9 @@ mod tests {
             family_size_mean: 1.0,
             family_size_sd: 0.1,
             inline: false,
+            spacer: None,
+            duplex_conversion_rate: None,
+            error_rate: None,
         });
         let reference = open_reference(&fa);
         let mut engine = SimulationEngine::new(config, reference);
@@ -2031,6 +2121,9 @@ mod tests {
             family_size_mean: 1.0,
             family_size_sd: 0.1,
             inline: false,
+            spacer: None,
+            duplex_conversion_rate: None,
+            error_rate: None,
         });
         let reference = open_reference(&fa);
         let mut engine = SimulationEngine::new(config, reference);
@@ -2103,6 +2196,172 @@ mod tests {
         assert!(
             found_ba_complement,
             "every SV-tagged AB read should have a BA complement that also carries the SV tag"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // T150: Inline UMI prefix tests
+    // -----------------------------------------------------------------------
+
+    /// Inline UMI prefix is set on every read when `inline: true`.
+    ///
+    /// Generates a batch of reads with `inline: true`, `spacer: "AT"`, and
+    /// `length: 5`. Checks that every copy has a non-None `inline_prefix_r1`
+    /// whose first five bytes are valid ACGT bases and last two bytes are `AT`.
+    #[test]
+    fn test_inline_umi_prefix_set() {
+        use rand::SeedableRng;
+        let umi_len = 5;
+        let spacer = b"AT".to_vec();
+        let mut rng = StdRng::seed_from_u64(42);
+
+        // Build a small batch of read pairs with dummy sequences.
+        let pairs: Vec<ReadPair> = (0..10)
+            .map(|i| ReadPair {
+                name: format!("read_{}", i),
+                read1: Read::new(vec![b'A'; 50], vec![30; 50]),
+                read2: Read::new(vec![b'T'; 50], vec![30; 50]),
+                fragment_start: 100,
+                fragment_length: 200,
+                chrom: "chr1".to_string(),
+                variant_tags: Vec::new(),
+                ref_seq_r1: Vec::new(),
+                ref_seq_r2: Vec::new(),
+                inline_prefix_r1: None,
+                inline_prefix_r2: None,
+            })
+            .collect();
+
+        let (expanded, _, _) = expand_umi_families(
+            pairs,
+            umi_len,
+            1.0,  // mean family size 1 → deterministic single copy
+            0.01, // small sd
+            0,    // no PCR cycles
+            false,
+            0.0,
+            true, // inline
+            spacer.clone(),
+            0.0,
+            1.0,
+            &mut rng,
+        )
+        .unwrap();
+
+        assert!(
+            !expanded.is_empty(),
+            "should have at least one expanded read"
+        );
+
+        for pair in &expanded {
+            let pfx = pair
+                .inline_prefix_r1
+                .as_ref()
+                .expect("inline_prefix_r1 should be Some");
+            assert_eq!(
+                pfx.len(),
+                umi_len + spacer.len(),
+                "prefix length should be umi_len + spacer_len"
+            );
+            // UMI bytes must be valid ACGT.
+            for &b in &pfx[..umi_len] {
+                assert!(
+                    matches!(b, b'A' | b'C' | b'G' | b'T'),
+                    "UMI byte {} is not a valid base",
+                    b as char
+                );
+            }
+            // Spacer must match "AT".
+            assert_eq!(&pfx[umi_len..], b"AT", "spacer must be AT");
+        }
+    }
+
+    /// Duplex conversion rate controls how often BA strand is emitted.
+    ///
+    /// With `duplex_conversion_rate: 0.6` and 1000 molecules, the fraction
+    /// of molecules with both AB and BA strands should be close to 0.60.
+    #[test]
+    fn test_duplex_conversion_rate_statistical() {
+        use rand::SeedableRng;
+        let n_molecules = 1000;
+        let mut rng = StdRng::seed_from_u64(7);
+
+        let pairs: Vec<ReadPair> = (0..n_molecules)
+            .map(|i| ReadPair {
+                name: format!("mol_{}", i),
+                read1: Read::new(vec![b'A'; 50], vec![30; 50]),
+                read2: Read::new(vec![b'T'; 50], vec![30; 50]),
+                fragment_start: 100,
+                fragment_length: 200,
+                chrom: "chr1".to_string(),
+                variant_tags: Vec::new(),
+                ref_seq_r1: Vec::new(),
+                ref_seq_r2: Vec::new(),
+                inline_prefix_r1: None,
+                inline_prefix_r2: None,
+            })
+            .collect();
+
+        let (_, duplex_total, duplex_both) = expand_umi_families(
+            pairs,
+            5,
+            1.0,
+            0.01,
+            0,
+            true, // is_duplex
+            0.0,
+            false, // not inline
+            Vec::new(),
+            0.0,
+            0.6, // duplex_conversion_rate
+            &mut rng,
+        )
+        .unwrap();
+
+        assert_eq!(duplex_total, n_molecules as u64);
+        let observed_rate = duplex_both as f64 / duplex_total as f64;
+        assert!(
+            (observed_rate - 0.60).abs() < 0.05,
+            "observed duplex conversion rate {:.3} should be within 0.05 of 0.60",
+            observed_rate
+        );
+    }
+
+    /// UMI error injection produces errors at the expected rate per base.
+    ///
+    /// Generates 10 000 UMIs of length 10 with `error_rate: 0.5` and checks
+    /// that the observed mismatch rate is close to 0.50.
+    #[test]
+    fn test_umi_error_injection_rate() {
+        use crate::umi::barcode::{generate_umi, inject_umi_errors};
+        use rand::SeedableRng;
+
+        let mut rng = StdRng::seed_from_u64(99);
+        let n = 10_000;
+        let umi_len = 10;
+        let error_rate = 0.5;
+
+        let mut total_bases = 0usize;
+        let mut total_errors = 0usize;
+
+        for _ in 0..n {
+            let original = generate_umi(umi_len, &mut rng);
+            let mut errored = original.clone();
+            inject_umi_errors(&mut errored, error_rate, &mut rng);
+            for (&a, &b) in original.iter().zip(errored.iter()) {
+                total_bases += 1;
+                if a != b {
+                    total_errors += 1;
+                }
+            }
+        }
+
+        let observed = total_errors as f64 / total_bases as f64;
+        assert!(
+            (observed - error_rate).abs() < 0.02,
+            "observed UMI error rate {:.4} should be within 0.02 of {:.2}",
+            observed,
+            error_rate
         );
     }
 }

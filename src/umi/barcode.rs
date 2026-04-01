@@ -30,8 +30,9 @@ pub fn generate_duplex_umi_pair<R: Rng>(length: usize, rng: &mut R) -> (Vec<u8>,
 }
 
 /// Inject sequencing errors into a UMI sequence.
-// Called only in tests; not yet wired into the simulation write path.
-#[cfg(test)]
+///
+/// Each base is independently substituted with a different random base at the
+/// given `error_rate`. Used to model realistic UMI sequencing errors.
 pub fn inject_umi_errors<R: Rng>(umi: &mut [u8], error_rate: f64, rng: &mut R) {
     for base in umi.iter_mut() {
         if rng.random::<f64>() < error_rate {
