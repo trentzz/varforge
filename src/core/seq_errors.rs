@@ -1,6 +1,10 @@
 //! Sequencing error injection: indels, cycle-position errors, context-dependent
 //! multipliers, strand bias, and phasing bursts.
 
+use std::io::{self, BufRead};
+use std::path::Path;
+
+use anyhow::Result;
 use rand::Rng;
 
 /// Parameters controlling sequencing indel error injection.
@@ -106,6 +110,156 @@ pub fn inject_indel_errors(
         read_length,
         "qual length mismatch after indel injection"
     );
+}
+
+/// Precomputed per-cycle error probabilities for a read.
+///
+/// Models the gap between reported quality scores and actual instrument error
+/// rates, including the characteristic 3' error rise in Illumina reads.
+// Used by downstream tasks in EPIC-ERROR-MODEL (T155 ErrorOrchestrator).
+#[allow(dead_code)]
+pub struct CycleErrorCurve {
+    /// Per-position error probabilities, length equals read_length.
+    curve: Vec<f64>,
+}
+
+#[allow(dead_code)]
+impl CycleErrorCurve {
+    /// Build a flat curve: every position gets `base_error_rate`.
+    pub fn flat(read_length: usize, base_error_rate: f64) -> Self {
+        Self {
+            curve: vec![base_error_rate; read_length],
+        }
+    }
+
+    /// Build an exponential-tail curve.
+    ///
+    /// Positions before `tail_start_fraction * read_length` get `base_error_rate`.
+    /// Positions at or after that point ramp exponentially up to
+    /// `base_error_rate * tail_rate_multiplier` at the last cycle.
+    ///
+    /// Formula: `rate(i) = base_error_rate * exp(k * (i - tail_start) / (read_length - 1 - tail_start))`
+    /// where `k = ln(tail_rate_multiplier)`, for `i >= tail_start`.
+    pub fn exponential(
+        read_length: usize,
+        base_error_rate: f64,
+        tail_start_fraction: f64,
+        tail_rate_multiplier: f64,
+    ) -> Self {
+        let tail_start = (tail_start_fraction * read_length as f64) as usize;
+        let k = tail_rate_multiplier.ln();
+        let denom = if read_length > 1 && tail_start < read_length - 1 {
+            (read_length - 1 - tail_start) as f64
+        } else {
+            1.0
+        };
+
+        let curve = (0..read_length)
+            .map(|i| {
+                if i < tail_start {
+                    base_error_rate
+                } else {
+                    let t = (i - tail_start) as f64 / denom;
+                    base_error_rate * (k * t).exp()
+                }
+            })
+            .collect();
+
+        Self { curve }
+    }
+
+    /// Load from a two-column TSV: `cycle\terror_rate` (tab-separated, no header).
+    ///
+    /// Cycle values are 0-based. Linearly interpolates between provided points.
+    /// Extrapolates the last known rate for cycles beyond the last provided point.
+    pub fn from_tsv(path: &Path, read_length: usize) -> Result<Self> {
+        let file = std::fs::File::open(path)?;
+        let reader = io::BufReader::new(file);
+
+        let mut points: Vec<(usize, f64)> = Vec::new();
+        for line in reader.lines() {
+            let line = line?;
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let mut parts = line.splitn(2, '\t');
+            let cycle: usize = parts
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("missing cycle column in TSV"))?
+                .trim()
+                .parse()?;
+            let rate: f64 = parts
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("missing rate column in TSV"))?
+                .trim()
+                .parse()?;
+            points.push((cycle, rate));
+        }
+
+        anyhow::ensure!(
+            !points.is_empty(),
+            "cycle error TSV is empty: {}",
+            path.display()
+        );
+
+        // Sort by cycle ascending for interpolation.
+        points.sort_by_key(|&(c, _)| c);
+
+        let curve = (0..read_length)
+            .map(|i| Self::interpolate(&points, i))
+            .collect();
+
+        Ok(Self { curve })
+    }
+
+    /// Linearly interpolate (or extrapolate) the rate for cycle `i`.
+    fn interpolate(points: &[(usize, f64)], i: usize) -> f64 {
+        // Before the first point: use the first rate.
+        if i <= points[0].0 {
+            return points[0].1;
+        }
+        // After the last point: use the last rate.
+        let last = points[points.len() - 1];
+        if i >= last.0 {
+            return last.1;
+        }
+        // Find the surrounding pair.
+        let pos = points.partition_point(|&(c, _)| c <= i);
+        let (c0, r0) = points[pos - 1];
+        let (c1, r1) = points[pos];
+        let t = (i - c0) as f64 / (c1 - c0) as f64;
+        r0 + t * (r1 - r0)
+    }
+}
+
+/// Apply cycle-position-dependent substitutions to a read.
+///
+/// This is an independent error pass on top of quality-driven errors.
+/// For each position `i`, a Bernoulli trial fires with probability `model.curve[i]`.
+/// When triggered, the base is replaced with a uniformly random different base.
+// Used by downstream tasks in EPIC-ERROR-MODEL (T155 ErrorOrchestrator).
+#[allow(dead_code)]
+pub fn inject_cycle_errors(seq: &mut [u8], model: &CycleErrorCurve, rng: &mut impl Rng) {
+    const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
+    for (i, base) in seq.iter_mut().enumerate() {
+        let rate = if i < model.curve.len() {
+            model.curve[i]
+        } else {
+            0.0
+        };
+        if rng.random::<f64>() < rate {
+            // Pick a different base uniformly from the 3 remaining.
+            let alts: [u8; 3] = match *base {
+                b'A' => [b'C', b'G', b'T'],
+                b'C' => [b'A', b'G', b'T'],
+                b'G' => [b'A', b'C', b'T'],
+                b'T' => [b'A', b'C', b'G'],
+                _ => [b'A', b'C', b'G'], // treat non-ACGT as T-like
+            };
+            *base = alts[rng.random_range(0..3)];
+        }
+    }
 }
 
 #[cfg(test)]
@@ -343,6 +497,76 @@ mod tests {
                 (0.60..=0.80).contains(&observed_insertion_fraction),
                 "expected insertion fraction ~0.7, got {:.4}",
                 observed_insertion_fraction
+            );
+        }
+    }
+
+    // --- CycleErrorCurve tests ---
+
+    #[test]
+    fn test_flat_curve_rate() {
+        // Flat curve with base_error_rate 0.1, 10000 reads of 50 bp all-A.
+        // Count total non-A bases and assert rate is within [0.09, 0.11].
+        let model = CycleErrorCurve::flat(50, 0.1);
+        let mut rng = StdRng::seed_from_u64(1001);
+        let n_reads = 10_000usize;
+        let read_length = 50usize;
+        let mut non_a = 0usize;
+        for _ in 0..n_reads {
+            let mut seq = vec![b'A'; read_length];
+            inject_cycle_errors(&mut seq, &model, &mut rng);
+            non_a += seq.iter().filter(|&&b| b != b'A').count();
+        }
+        let rate = non_a as f64 / (n_reads * read_length) as f64;
+        assert!(
+            (0.09..=0.11).contains(&rate),
+            "expected flat rate in [0.09, 0.11], got {:.4}",
+            rate
+        );
+    }
+
+    #[test]
+    fn test_exponential_tail_rises() {
+        // Exponential curve: base_error_rate 0.01, tail_start_fraction 0.8,
+        // tail_rate_multiplier 10.0, read_length 100.
+        // curve[99] should be ≈ 0.1 (within 5%), curve[0] should be 0.01.
+        let model = CycleErrorCurve::exponential(100, 0.01, 0.8, 10.0);
+        let expected_last = 0.1f64;
+        let actual_last = model.curve[99];
+        assert!(
+            (actual_last - expected_last).abs() / expected_last < 0.05,
+            "expected curve[99] ≈ {:.4}, got {:.6}",
+            expected_last,
+            actual_last
+        );
+        assert_eq!(
+            model.curve[0], 0.01,
+            "curve[0] should equal base_error_rate"
+        );
+    }
+
+    #[test]
+    fn test_exponential_curve_len() {
+        // Both constructors must produce a curve of exactly read_length.
+        let flat = CycleErrorCurve::flat(75, 0.005);
+        assert_eq!(flat.curve.len(), 75, "flat curve length mismatch");
+        let exp = CycleErrorCurve::exponential(120, 0.005, 0.7, 8.0);
+        assert_eq!(exp.curve.len(), 120, "exponential curve length mismatch");
+    }
+
+    #[test]
+    fn test_substitution_not_identity() {
+        // Every substituted base must differ from the original.
+        // Run with a high rate so virtually all positions are hit.
+        let model = CycleErrorCurve::flat(1, 1.0); // single-position, always fires
+        let mut rng = StdRng::seed_from_u64(7777);
+        for _ in 0..10_000 {
+            let original = b'A';
+            let mut seq = vec![original];
+            inject_cycle_errors(&mut seq, &model, &mut rng);
+            assert_ne!(
+                seq[0], original,
+                "substituted base must differ from original"
             );
         }
     }
