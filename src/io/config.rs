@@ -1126,6 +1126,28 @@ pub fn validate(config: &Config) -> Result<()> {
             config.sample.read_length
         );
 
+        // T085b: when inline, UMI + spacer must fit within the read length.
+        if umi.inline {
+            let spacer_len = umi.spacer.as_deref().unwrap_or("").len();
+            anyhow::ensure!(
+                umi.length + spacer_len < config.sample.read_length,
+                "umi.length ({}) plus spacer length ({}) must be less than read_length ({})",
+                umi.length,
+                spacer_len,
+                config.sample.read_length
+            );
+        }
+
+        // T085c: spacer must contain only ACGT bases.
+        if let Some(ref spacer) = umi.spacer {
+            anyhow::ensure!(
+                spacer
+                    .chars()
+                    .all(|c| matches!(c, 'A' | 'C' | 'G' | 'T' | 'a' | 'c' | 'g' | 't')),
+                "umi.spacer must contain only A, C, G, T bases"
+            );
+        }
+
         if let Some(rate) = umi.duplex_conversion_rate {
             anyhow::ensure!(
                 (0.0..=1.0).contains(&rate),
@@ -1139,6 +1161,18 @@ pub fn validate(config: &Config) -> Result<()> {
                 (0.0..=1.0).contains(&rate),
                 "umi.error_rate ({}) must be in [0.0, 1.0]",
                 rate
+            );
+        }
+
+        // T085d: warn about set-but-inactive fields.
+        if umi.duplex_conversion_rate.is_some() && !umi.duplex {
+            tracing::warn!(
+                "umi.duplex_conversion_rate is set but umi.duplex is false; the value has no effect"
+            );
+        }
+        if umi.error_rate.is_some_and(|r| r > 0.0) && !umi.inline {
+            tracing::warn!(
+                "umi.error_rate is set but umi.inline is false; UMI error injection has no effect"
             );
         }
     }

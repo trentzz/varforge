@@ -324,7 +324,10 @@ impl BamWriter {
             let mut ops = parse_cigar(cigar_r2)
                 .with_context(|| format!("failed to parse CIGAR: {cigar_r2}"))?;
             if let Some(ref pfx) = pair.inline_prefix_r2 {
-                ops.insert(0, Op::new(Kind::SoftClip, pfx.len()));
+                // R2 is stored reverse-complemented in BAM, so the UMI prefix
+                // (which was at the start of the original read) maps to the END
+                // of the CIGAR after reversal.
+                ops.push(Op::new(Kind::SoftClip, pfx.len()));
             }
             ops
         };
