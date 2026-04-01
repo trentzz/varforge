@@ -1140,4 +1140,39 @@ mod tests {
             "overall_deletion_rate should be ~0, got {del_rate}"
         );
     }
+
+    // Test 9 – end-to-end indel rate extraction accuracy.
+    //
+    // 1000 synthetic records each with CIGAR "10M1I10M":
+    //   - 20 aligned bases per record (10M + 10M; the insertion does not count).
+    //   - 1 insertion per record at read_pos 10.
+    // Expected overall insertion rate: 1 / 20 = 0.05.
+    // Assert the observed rate falls within ±20 % (i.e. [0.04, 0.06]).
+    #[test]
+    fn test_indel_rate_extraction_accuracy() {
+        let n_records = 1000usize;
+        // read_length = 21 (10 read bases + 1 inserted base + 10 read bases).
+        let read_len = 21usize;
+        let mut ins = vec![0u64; read_len];
+        let mut del = vec![0u64; read_len];
+        let mut bases = vec![0u64; read_len];
+
+        let seq = vec![b'A'; read_len];
+        let quals = vec![40u8; read_len];
+
+        for i in 0..n_records {
+            let record = make_test_record_with_cigar(&seq, &quals, "10M1I10M", 40, i * 100, 0)
+                .expect("make_test_record_with_cigar should not fail");
+            accumulate_cigar_counts(record.cigar().as_ref(), &mut ins, &mut del, &mut bases);
+        }
+
+        let total_bases: u64 = bases.iter().sum();
+        let total_insertions: u64 = ins.iter().sum();
+
+        let observed_rate = total_insertions as f64 / total_bases as f64;
+        assert!(
+            (0.04..=0.06).contains(&observed_rate),
+            "expected insertion rate ~0.05, got {observed_rate:.4}"
+        );
+    }
 }

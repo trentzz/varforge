@@ -305,11 +305,19 @@ impl SimulationEngine {
             self.config.quality.tail_decay,
         );
 
-        // Build the error orchestrator once per region. None when sequencing_errors
-        // is absent from config, which preserves v0.1.x behaviour exactly.
+        // Build the error orchestrator once per region.
+        // Explicit config takes priority. When absent and an empirical quality
+        // model is loaded, fall back to the profile-derived config so indel
+        // rates learned from real data are applied automatically.
         let error_orchestrator: Option<ErrorOrchestrator> =
             if let Some(ref se_cfg) = self.config.quality.sequencing_errors {
                 ErrorOrchestrator::from_config(se_cfg, read_length)?
+            } else if let QualModel::Empirical(emp_model) = qual_model {
+                if let Some(ref profile_cfg) = emp_model.sequencing_error_config() {
+                    ErrorOrchestrator::from_config(profile_cfg, read_length)?
+                } else {
+                    None
+                }
             } else {
                 None
             };
