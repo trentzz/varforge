@@ -27,6 +27,9 @@ use crate::io::config::SequencingErrorConfig;
 pub struct ErrorOrchestrator {
     /// Per-cycle additional substitution probabilities for R1.
     pub cycle_curve: Option<CycleErrorCurve>,
+    /// Pre-scaled cycle curve for R2. `None` when `r2_error_multiplier == 1.0`,
+    /// in which case `cycle_curve` is reused for R2.
+    pub cycle_curve_r2: Option<CycleErrorCurve>,
     /// Sequencing indel model (shared between R1 and R2).
     pub indel_model: Option<IndelErrorModel>,
     /// Context-dependent k-mer error multiplier model.
@@ -156,8 +159,22 @@ impl ErrorOrchestrator {
 
         let r2_error_multiplier = seq_err_cfg.r2_error_multiplier.unwrap_or(1.0);
 
+        // Pre-scale the cycle curve for R2 at construction time so that
+        // inject_all_errors never rebuilds it on the hot path.
+        let cycle_curve_r2 = if (r2_error_multiplier - 1.0).abs() > f64::EPSILON {
+            cycle_curve.as_ref().map(|curve| {
+                CycleErrorCurve::from_rates(
+                    curve.rates().iter().map(|&r| r * r2_error_multiplier),
+                    read_length,
+                )
+            })
+        } else {
+            None
+        };
+
         Ok(Some(Self {
             cycle_curve,
+            cycle_curve_r2,
             indel_model,
             kmer_model,
             strand_bias,
@@ -193,17 +210,10 @@ impl ErrorOrchestrator {
         if let Some(ref curve) = self.cycle_curve {
             inject_cycle_errors(r1_seq, curve, rng);
 
-            if (self.r2_error_multiplier - 1.0).abs() > f64::EPSILON {
-                // Build a scaled curve for R2 without allocating a new struct by
-                // applying the multiplier to each position inline.
-                let r2_curve = CycleErrorCurve::from_rates(
-                    curve.rates().iter().map(|&r| r * self.r2_error_multiplier),
-                    self.read_length,
-                );
-                inject_cycle_errors(r2_seq, &r2_curve, rng);
-            } else {
-                inject_cycle_errors(r2_seq, curve, rng);
-            }
+            // Use the pre-scaled R2 curve when the multiplier differs from 1.0;
+            // otherwise reuse the R1 curve directly.
+            let r2_curve = self.cycle_curve_r2.as_ref().unwrap_or(curve);
+            inject_cycle_errors(r2_seq, r2_curve, rng);
         }
 
         // Pass 3: context-dependent k-mer substitutions.
@@ -375,5 +385,71 @@ mod tests {
         for &q in &r2_qual {
             assert_eq!(q, 25, "R2 quality should be 30 - 5 = 25, got {q}");
         }
+    }
+
+    /// NovaSeq-like config: observed R1 substitution rate must fall within
+    /// [0.0005, 0.003] across 5 000 reads of length 150.
+    #[test]
+    fn test_novaseq_rates_end_to_end() {
+        let cfg = SequencingErrorConfig {
+            base_error_rate: Some(0.001),
+            cycle_error_model: Some("exponential".to_string()),
+            tail_start_fraction: Some(0.8),
+            tail_rate_multiplier: Some(5.0),
+            indel_rate: Some(0.00005),
+            indel_insertion_fraction: Some(0.5),
+            max_indel_length: Some(1),
+            r2_error_multiplier: Some(1.3),
+            r2_quality_offset: Some(2),
+            ..Default::default()
+        };
+        let orch = ErrorOrchestrator::from_config(&cfg, 150)
+            .unwrap()
+            .expect("NovaSeq config must produce an orchestrator");
+
+        let mut rng = StdRng::seed_from_u64(42);
+        let n_reads = 5_000usize;
+        let read_length = 150usize;
+        let mut total_subs = 0usize;
+        let mut total_bases = 0usize;
+
+        for _ in 0..n_reads {
+            let original: Vec<u8> = (0..read_length)
+                .map(|i| match i % 4 {
+                    0 => b'A',
+                    1 => b'C',
+                    2 => b'G',
+                    _ => b'T',
+                })
+                .collect();
+            let mut r1_seq = original.clone();
+            let mut r1_qual = vec![37u8; read_length];
+            let mut r2_seq = original.clone();
+            let mut r2_qual = vec![37u8; read_length];
+
+            orch.inject_all_errors(
+                &mut r1_seq,
+                &mut r1_qual,
+                &mut r2_seq,
+                &mut r2_qual,
+                &mut rng,
+            );
+
+            total_subs += r1_seq
+                .iter()
+                .zip(original.iter())
+                .filter(|(&a, &b)| a != b && a != b'N')
+                .count();
+            total_bases += read_length;
+        }
+
+        let sub_rate = total_subs as f64 / total_bases as f64;
+        // The exponential tail (multiplier 5×, starting at 80 % of the read)
+        // drives the average above the flat base rate of 0.001. The upper
+        // bound of 0.006 covers that tail while still catching broken configs.
+        assert!(
+            (0.0005..=0.006).contains(&sub_rate),
+            "NovaSeq sub rate {sub_rate:.5} outside [0.0005, 0.006]"
+        );
     }
 }
