@@ -312,6 +312,7 @@ mod tests {
                 mean_quality: 36,
                 tail_decay: 0.003,
                 profile_path: None,
+                sequencing_errors: None,
             },
             tumour: Some(TumourConfig {
                 purity: 0.5,

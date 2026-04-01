@@ -4,6 +4,7 @@ pub mod capture;
 pub mod coverage;
 pub mod end_motifs;
 pub mod engine;
+pub mod error_orchestrator;
 pub mod error_profile;
 pub mod fragment;
 pub mod gc_bias;
