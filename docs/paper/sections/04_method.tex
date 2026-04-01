@@ -99,8 +99,14 @@ The effective VAF integrates purity, ploidy, CCF, and copy number:
 Each molecule receives a UMI barcode of configurable length.
 Family sizes follow a log-normal distribution reflecting real PCR kinetics.
 In duplex mode\autocite{schmitt2012duplex}, each double-stranded molecule yields two strand families with swapped UMI pairs $(\alpha,\beta)$ and $(\beta,\alpha)$.
+A configurable duplex conversion rate (\texttt{umi.duplex\_conversion\_rate}) controls the probability that a molecule produces both AB and BA strand families; the default is 1.0, and realistic Twist data uses ${\sim}0.90$.
 True mutations appear on both strands.
 Artefacts are strand-specific, reproducing the error suppression that makes duplex sequencing valuable.
+
+When \texttt{umi.inline} is true, the UMI sequence and an optional spacer are prepended to R1 and R2 in both FASTQ and BAM output.
+BAM records receive a leading soft-clip CIGAR op covering the prefix.
+This format is compatible with downstream tools that expect inline UMIs (e.g.\ fgbio \texttt{ExtractUmisFromBam}, UMI-tools \texttt{extract}).
+A per-base UMI sequencing error rate (\texttt{umi.error\_rate}) injects substitution errors into the inline UMI bases of each PCR copy, modelling the sequencing noise that UMI grouping algorithms must tolerate.
 
 \subsection{Cell-free DNA fragmentation}
 \label{sec:cfdna}
