@@ -262,4 +262,88 @@ mod tests {
             n_reads
         );
     }
+
+    #[test]
+    fn test_indel_rate_statistical() {
+        // At rate 0.1 on 20-bp reads, expected events per read ≈ 2.0.
+        // With insertion_fraction 1.0, all events insert a random base.
+        // The input is all b'A'. After truncation to read_length, inserted
+        // non-A bases remain in the output.
+        //
+        // Truncation significantly reduces the visible non-A rate: insertions
+        // near the 3' end push existing bases off the read. Empirically the
+        // observed non-A fraction sits around 0.065 at this rate and read
+        // length. Bounds [0.04, 0.09] confirm the rate is non-zero and scales
+        // with the configured indel_rate without over-constraining for
+        // truncation effects.
+        let model = IndelErrorModel {
+            indel_rate: 0.1,
+            insertion_fraction: 1.0,
+            max_length: 1,
+        };
+        let mut rng = StdRng::seed_from_u64(12345);
+        let read_length = 20usize;
+        let n_reads = 10_000usize;
+        let mut non_a_count = 0usize;
+        let total_bases = n_reads * read_length;
+        for _ in 0..n_reads {
+            let mut seq = vec![b'A'; read_length];
+            let mut qual = vec![30u8; read_length];
+            inject_indel_errors(&mut seq, &mut qual, read_length, &model, &mut rng);
+            non_a_count += seq.iter().filter(|&&b| b != b'A').count();
+        }
+        let observed_rate = non_a_count as f64 / total_bases as f64;
+        assert!(
+            (0.04..=0.09).contains(&observed_rate),
+            "expected non-A rate in [0.04, 0.09], got {:.4}",
+            observed_rate
+        );
+    }
+
+    #[test]
+    fn test_insertion_fraction_statistical() {
+        // Use a low indel_rate (0.01) so that most reads receive at most one
+        // event. This makes the insertion vs deletion proxy reliable:
+        // - A single insertion adds a random non-A base (detected as non-A,
+        //   non-N in the output from an all-A input).
+        // - A single deletion removes a base and pads with b'N' at the end.
+        // At high rates, multiple interacting events make the N-padding proxy
+        // ambiguous because insertions can displace the trailing N bytes.
+        // With insertion_fraction 0.7 and 10 000 reads at rate 0.01 on 20-bp
+        // reads, roughly 2000 events fire total, giving enough signal with
+        // clean single-event classification. Bounds [0.60, 0.80] confirm the
+        // configured 0.7 split is respected.
+        let model = IndelErrorModel {
+            indel_rate: 0.01,
+            insertion_fraction: 0.7,
+            max_length: 1,
+        };
+        let mut rng = StdRng::seed_from_u64(54321);
+        let read_length = 20usize;
+        let n_reads = 10_000usize;
+        let mut insertion_evidence = 0usize; // non-A, non-N bases (inserted random bases)
+        let mut deletion_evidence = 0usize; // N bases from padding
+        for _ in 0..n_reads {
+            let mut seq = vec![b'A'; read_length];
+            let mut qual = vec![30u8; read_length];
+            inject_indel_errors(&mut seq, &mut qual, read_length, &model, &mut rng);
+            for &b in &seq {
+                if b != b'A' && b != b'N' {
+                    insertion_evidence += 1;
+                }
+                if b == b'N' {
+                    deletion_evidence += 1;
+                }
+            }
+        }
+        let total_evidence = insertion_evidence + deletion_evidence;
+        if total_evidence > 100 {
+            let observed_insertion_fraction = insertion_evidence as f64 / total_evidence as f64;
+            assert!(
+                (0.60..=0.80).contains(&observed_insertion_fraction),
+                "expected insertion fraction ~0.7, got {:.4}",
+                observed_insertion_fraction
+            );
+        }
+    }
 }
