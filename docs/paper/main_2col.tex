@@ -2,7 +2,12 @@
 \usepackage[margin=2cm]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
-\usepackage[protrusion=true,expansion=true,final]{microtype}
+\usepackage{ifxetex}
+\ifxetex
+  \usepackage[protrusion=true,final]{microtype}
+\else
+  \usepackage[protrusion=true,expansion=true,final]{microtype}
+\fi
 \usepackage[hidelinks]{hyperref}
 \setlength{\columnsep}{0.6cm}
 \setlength{\parindent}{0pt}
@@ -39,9 +44,9 @@
 \begin{document}
 
 \title{\varforge: A Rust Framework for Synthetic Cancer Sequencing Data Generation\\[0.4ex]
-       \normalsize\texttt{v0.1}}
+       \normalsize\texttt{v0.1.1}}
 \author{Trent Zeng}
-\date{March 2026}
+\date{April 2026}
 \maketitle
 
 \begin{abstract}

@@ -128,7 +128,7 @@ This error-suppression property makes duplex sequencing the most sensitive avail
 
 \varforge{} simulates this protocol via the Twist-style duplex configuration (Table~\ref{tab:hg38}, config~4).
 At 5x coverage on chr22, \varforge{} produces 3.39\,M read pairs in 299\,s using 2.9\,GB RAM.
-The output includes paired FASTQ files with correctly formatted UMI tags (compatible with fgbio and HUMID) and a truth VCF listing injected variants.
+The output includes paired FASTQ files with UMI tags in both BAM auxiliary fields and, when \texttt{umi.inline} is enabled, as inline sequence prefixes (compatible with fgbio, HUMID, and UMI-tools), plus a truth VCF listing injected variants.
 This dataset can be used to benchmark duplex-aware callers (e.g.\ Mutect2 with duplex mode, VarDict) under controlled VAF and tumour purity conditions without requiring patient samples.
 
 \subsection{Memory efficiency}
