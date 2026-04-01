@@ -45,20 +45,47 @@ impl FastqWriter {
     /// {quality_as_phred33_ascii}
     /// ```
     pub fn write_pair(&mut self, pair: &ReadPair, read_name: &str) -> Result<()> {
-        write_fastq_record(
-            &mut self.r1,
-            read_name,
-            1,
-            &pair.read1.seq,
-            &pair.read1.qual,
-        )?;
-        write_fastq_record(
-            &mut self.r2,
-            read_name,
-            2,
-            &pair.read2.seq,
-            &pair.read2.qual,
-        )?;
+        // When an inline UMI prefix is present, prepend it to the sequence and
+        // quality. Quality bytes for the prefix use Phred 37 (F), a high-quality
+        // score appropriate for UMI bases. Build concatenated slices without
+        // mutating the ReadPair.
+        if let Some(ref pfx) = pair.inline_prefix_r1 {
+            let pfx_qual = vec![37u8; pfx.len()];
+            let seq: Vec<u8> = pfx.iter().chain(pair.read1.seq.iter()).copied().collect();
+            let qual: Vec<u8> = pfx_qual
+                .iter()
+                .chain(pair.read1.qual.iter())
+                .copied()
+                .collect();
+            write_fastq_record(&mut self.r1, read_name, 1, &seq, &qual)?;
+        } else {
+            write_fastq_record(
+                &mut self.r1,
+                read_name,
+                1,
+                &pair.read1.seq,
+                &pair.read1.qual,
+            )?;
+        }
+
+        if let Some(ref pfx) = pair.inline_prefix_r2 {
+            let pfx_qual = vec![37u8; pfx.len()];
+            let seq: Vec<u8> = pfx.iter().chain(pair.read2.seq.iter()).copied().collect();
+            let qual: Vec<u8> = pfx_qual
+                .iter()
+                .chain(pair.read2.qual.iter())
+                .copied()
+                .collect();
+            write_fastq_record(&mut self.r2, read_name, 2, &seq, &qual)?;
+        } else {
+            write_fastq_record(
+                &mut self.r2,
+                read_name,
+                2,
+                &pair.read2.seq,
+                &pair.read2.qual,
+            )?;
+        }
         Ok(())
     }
 
@@ -138,6 +165,8 @@ mod tests {
             variant_tags: Vec::new(),
             ref_seq_r1: Vec::new(),
             ref_seq_r2: Vec::new(),
+            inline_prefix_r1: None,
+            inline_prefix_r2: None,
         }
     }
 
