@@ -2556,3 +2556,71 @@ mutations:
         );
     }
 }
+
+/// T150: Inline UMI prefix — every R1 read starts with a valid UMI + spacer.
+///
+/// Runs a small simulation with `umi.inline: true`, `umi.length: 5`, and
+/// `umi.spacer: "AT"`. Reads back the R1 FASTQ and asserts that the first
+/// seven bytes of every sequence are five valid ACGT bases followed by `AT`.
+#[test]
+fn test_inline_umi_fastq_prefix() {
+    let dir = TempDir::new().unwrap();
+    let out_dir = TempDir::new().unwrap();
+
+    let fa = write_minimal_fasta(dir.path());
+    let extra = r#"
+umi:
+  length: 5
+  duplex: false
+  pcr_cycles: 1
+  family_size_mean: 1.0
+  family_size_sd: 0.1
+  inline: true
+  spacer: "AT"
+"#;
+    let cfg = write_config(dir.path(), &fa, out_dir.path(), extra);
+    let opts = default_opts(cfg);
+    simulate::run(opts, None).expect("inline UMI simulation should succeed");
+
+    let r1_path = out_dir.path().join("TEST_R1.fastq.gz");
+    assert!(r1_path.exists(), "R1 FASTQ not found");
+
+    let content = decompress_gz(&r1_path);
+    let lines: Vec<&str> = content.lines().collect();
+    assert!(!lines.is_empty(), "R1 FASTQ should have content");
+
+    // UMI length is 5, spacer is "AT" = 2 bytes. Prefix total = 7.
+    let umi_len = 5;
+    let spacer = b"AT";
+    let prefix_len = umi_len + spacer.len();
+
+    let mut checked = 0usize;
+    for chunk in lines.chunks(4) {
+        if chunk.len() < 4 {
+            break;
+        }
+        let seq = chunk[1].as_bytes();
+        assert!(
+            seq.len() >= prefix_len,
+            "sequence too short to contain prefix: len={}",
+            seq.len()
+        );
+        // First umi_len bytes must be valid ACGT.
+        for &b in &seq[..umi_len] {
+            assert!(
+                matches!(b, b'A' | b'C' | b'G' | b'T'),
+                "UMI byte '{}' at position is not a valid base",
+                b as char
+            );
+        }
+        // Next two bytes must be the spacer "AT".
+        assert_eq!(
+            &seq[umi_len..prefix_len],
+            spacer,
+            "spacer bytes should be AT, got {:?}",
+            &seq[umi_len..prefix_len]
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "no reads were checked");
+}

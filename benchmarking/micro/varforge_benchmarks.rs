@@ -191,6 +191,8 @@ fn make_read_pair(read_len: usize) -> ReadPair {
         variant_tags: Vec::new(),
         ref_seq_r1: Vec::new(),
         ref_seq_r2: Vec::new(),
+        inline_prefix_r1: None,
+        inline_prefix_r2: None,
     }
 }
 
@@ -362,6 +364,8 @@ fn bench_pipeline_mini(c: &mut Criterion) {
                             variant_tags: Vec::new(),
                             ref_seq_r1: Vec::new(),
                             ref_seq_r2: Vec::new(),
+                            inline_prefix_r1: None,
+                            inline_prefix_r2: None,
                         });
                     }
                     black_box(results)

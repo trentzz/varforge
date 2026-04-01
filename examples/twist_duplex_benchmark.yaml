@@ -6,7 +6,8 @@
 #
 # Sequencing model (Twist Comprehensive Exome Panel parameters):
 #   - 2 000× raw coverage → ~500× duplex consensus depth
-#   - 9 bp inline dual UMIs with duplex orientation encoding
+#   - 5 bp inline dual UMIs with 2 bp AT spacer (Twist layout: UMI + AT + template)
+#   - 90 % duplex conversion rate, 0.1 % UMI sequencing error rate
 #   - Fragment sizes centred at 170 bp, SD 30 bp (plasma-compatible)
 #   - PCR amplification: 10 cycles, mean family size 3.5×
 #
@@ -82,12 +83,15 @@ mutations:
   sv_count: 5
 
 umi:
-  length: 9
+  length: 5
   duplex: true
   pcr_cycles: 10
   family_size_mean: 3.5
   family_size_sd: 1.5
   inline: true
+  spacer: "AT"
+  duplex_conversion_rate: 0.90
+  error_rate: 0.001
 
 capture:
   enabled: true

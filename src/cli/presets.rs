@@ -128,6 +128,9 @@ fn preset_panel() -> PresetOverlay {
             family_size_mean: 3.0,
             family_size_sd: 1.5,
             inline: true,
+            spacer: None,
+            duplex_conversion_rate: None,
+            error_rate: None,
         }),
         ..Default::default()
     }
@@ -197,6 +200,9 @@ fn preset_cfdna() -> PresetOverlay {
             family_size_mean: 3.0,
             family_size_sd: 1.5,
             inline: false,
+            spacer: None,
+            duplex_conversion_rate: None,
+            error_rate: None,
         }),
         ..Default::default()
     }
@@ -261,6 +267,9 @@ fn preset_umi() -> PresetOverlay {
             family_size_mean: 4.0,
             family_size_sd: 1.5,
             inline: false,
+            spacer: None,
+            duplex_conversion_rate: None,
+            error_rate: None,
         }),
         ..Default::default()
     }
@@ -268,8 +277,10 @@ fn preset_umi() -> PresetOverlay {
 
 /// `twist` – Twist Biosciences hybrid-capture duplex UMI panel preset.
 ///
-/// 2 000× coverage, 150 bp reads, cfDNA-range fragment sizes, 9 bp inline
-/// dual UMIs with duplex mode.  VAF range tuned for ultra-low ctDNA detection.
+/// 2 000× coverage, 150 bp reads, cfDNA-range fragment sizes. Uses a 5 bp
+/// inline dual UMI with a 2 bp `AT` spacer (Twist layout), 90 % duplex
+/// conversion rate, and 0.1 % UMI sequencing error rate. VAF range tuned for
+/// ultra-low ctDNA detection.
 fn preset_twist() -> PresetOverlay {
     PresetOverlay {
         coverage: Some(2000.0),
@@ -285,12 +296,15 @@ fn preset_twist() -> PresetOverlay {
             di_sd: None,
         }),
         umi: Some(UmiConfig {
-            length: 9,
+            length: 5,
             duplex: true,
             pcr_cycles: 10,
             family_size_mean: 3.5,
             family_size_sd: 1.5,
             inline: true,
+            spacer: Some("AT".to_string()),
+            duplex_conversion_rate: Some(0.90),
+            error_rate: Some(0.001),
         }),
         mutations: Some(MutationConfig {
             vcf: None,

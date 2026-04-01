@@ -82,6 +82,12 @@ pub struct ReadPair {
     pub ref_seq_r1: Vec<u8>,
     /// Reference sequence underlying read2, used to build the MD tag.
     pub ref_seq_r2: Vec<u8>,
+    /// Bytes to prepend to R1 in FASTQ/BAM when `umi.inline` is true.
+    ///
+    /// Contains `[UMI bytes][spacer bytes]`. `None` when inline mode is off.
+    pub inline_prefix_r1: Option<Vec<u8>>,
+    /// Same for R2. In duplex mode carries the partner UMI.
+    pub inline_prefix_r2: Option<Vec<u8>>,
 }
 
 /// A single read with sequence and qualities.
