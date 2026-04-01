@@ -1096,8 +1096,8 @@ fn expand_umi_families(
                     fragment_length: pair.fragment_length,
                     chrom: pair.chrom.clone(),
                     variant_tags: pair.variant_tags.clone(),
-                    ref_seq_r1: pair.ref_seq_r2.iter().copied().rev().collect(),
-                    ref_seq_r2: pair.ref_seq_r1.iter().copied().rev().collect(),
+                    ref_seq_r1: reverse_complement(&pair.ref_seq_r2),
+                    ref_seq_r2: reverse_complement(&pair.ref_seq_r1),
                     inline_prefix_r1: None,
                     inline_prefix_r2: None,
                 };
