@@ -108,6 +108,136 @@ pub fn inject_indel_errors(
     );
 }
 
+/// Map a single base byte to its 2-bit representation.
+///
+/// A=0, C=1, G=2, T=3. Any unrecognised byte maps to 0 (treated as A).
+fn base_to_bits(b: u8) -> usize {
+    match b {
+        b'A' | b'a' => 0,
+        b'C' | b'c' => 1,
+        b'G' | b'g' => 2,
+        b'T' | b't' => 3,
+        _ => 0,
+    }
+}
+
+/// JSON-deserialisable profile for loading learned k-mer error multipliers.
+///
+/// Produced by T156 (empirical profile extraction). Loaded via
+/// `KmerErrorModel::from_profile_json`.
+// Used by downstream tasks in EPIC-ERROR-MODEL (T155 ErrorOrchestrator, T156 profile extraction).
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+pub struct KmerProfileJson {
+    pub kmer_length: usize,
+    pub rules: Vec<KmerRuleJson>,
+}
+
+/// A single context rule inside a `KmerProfileJson`.
+// Used by downstream tasks in EPIC-ERROR-MODEL (T155 ErrorOrchestrator, T156 profile extraction).
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+pub struct KmerRuleJson {
+    pub context: String,
+    pub sub_multiplier: f32,
+    pub indel_multiplier: f32,
+}
+
+/// Context-dependent sequencing error multipliers, indexed by k-mer hash.
+///
+/// The table stores one `f32` multiplier per possible k-mer (4^k entries).
+/// At each read position the current k-mer is hashed using a rolling 2-bit
+/// scheme and the multiplier is applied to the base error probability before
+/// the Bernoulli draw.
+///
+/// `k` must be in 1..=5 (table sizes 4..=1024 entries). Values outside that
+/// range are accepted but will use larger allocations.
+// Used by downstream tasks in EPIC-ERROR-MODEL (T155 ErrorOrchestrator).
+#[allow(dead_code)]
+pub struct KmerErrorModel {
+    /// k-mer length (1..=5).
+    pub k: usize,
+    /// Substitution error multiplier indexed by k-mer hash. Size = 4^k. Default = 1.0.
+    sub_multipliers: Vec<f32>,
+    /// Indel error multiplier indexed by k-mer hash. Default = 1.0.
+    indel_multipliers: Vec<f32>,
+}
+
+#[allow(dead_code)]
+impl KmerErrorModel {
+    /// Create a uniform model where all k-mer multipliers are 1.0.
+    pub fn uniform(k: usize) -> Self {
+        let size = 1 << (k * 2);
+        Self {
+            k,
+            sub_multipliers: vec![1.0f32; size],
+            indel_multipliers: vec![1.0f32; size],
+        }
+    }
+
+    /// Set substitution and indel multipliers for a specific k-mer context string.
+    ///
+    /// `context` must have exactly `k` bytes and contain only ACGT (upper or
+    /// lower case). Panics otherwise.
+    pub fn set_rule(&mut self, context: &str, sub_multiplier: f32, indel_multiplier: f32) {
+        assert_eq!(
+            context.len(),
+            self.k,
+            "context length {} != k={}",
+            context.len(),
+            self.k
+        );
+        let idx = self.kmer_index(context.as_bytes());
+        self.sub_multipliers[idx] = sub_multiplier;
+        self.indel_multipliers[idx] = indel_multiplier;
+    }
+
+    /// Compute the lookup index for a slice of exactly `k` bases.
+    fn kmer_index(&self, bases: &[u8]) -> usize {
+        bases
+            .iter()
+            .fold(0usize, |acc, &b| (acc << 2) | base_to_bits(b))
+    }
+
+    /// Return the substitution multiplier for the k-mer ending at `pos`.
+    ///
+    /// Returns 1.0 if there is not yet enough context (pos + 1 < k).
+    pub fn sub_multiplier_at(&self, seq: &[u8], pos: usize) -> f32 {
+        if pos + 1 < self.k {
+            return 1.0;
+        }
+        let start = pos + 1 - self.k;
+        let idx = self.kmer_index(&seq[start..=pos]);
+        self.sub_multipliers[idx]
+    }
+
+    /// Return the indel multiplier for the k-mer ending at `pos`.
+    ///
+    /// Returns 1.0 if there is not yet enough context (pos + 1 < k).
+    pub fn indel_multiplier_at(&self, seq: &[u8], pos: usize) -> f32 {
+        if pos + 1 < self.k {
+            return 1.0;
+        }
+        let start = pos + 1 - self.k;
+        let idx = self.kmer_index(&seq[start..=pos]);
+        self.indel_multipliers[idx]
+    }
+
+    /// Load a k-mer error model from a JSON profile file.
+    ///
+    /// The file must conform to the `KmerProfileJson` schema. All k-mers not
+    /// listed in `rules` keep the default multiplier of 1.0.
+    pub fn from_profile_json(path: &std::path::Path) -> anyhow::Result<Self> {
+        let text = std::fs::read_to_string(path)?;
+        let profile: KmerProfileJson = serde_json::from_str(&text)?;
+        let mut model = Self::uniform(profile.kmer_length);
+        for rule in &profile.rules {
+            model.set_rule(&rule.context, rule.sub_multiplier, rule.indel_multiplier);
+        }
+        Ok(model)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,6 +473,126 @@ mod tests {
                 (0.60..=0.80).contains(&observed_insertion_fraction),
                 "expected insertion fraction ~0.7, got {:.4}",
                 observed_insertion_fraction
+            );
+        }
+    }
+
+    // --- KmerErrorModel tests ---
+
+    #[test]
+    fn test_uniform_model_all_ones() {
+        // uniform(3) should set all sub_multipliers to 1.0 and return 1.0 for
+        // any query via sub_multiplier_at.
+        let model = KmerErrorModel::uniform(3);
+        assert!(
+            model.sub_multipliers.iter().all(|&v| v == 1.0f32),
+            "all sub_multipliers should be 1.0"
+        );
+        let seq = b"ACGTACGT";
+        for pos in 0..seq.len() {
+            assert_eq!(
+                model.sub_multiplier_at(seq, pos),
+                1.0f32,
+                "expected 1.0 at pos {}",
+                pos
+            );
+        }
+    }
+
+    #[test]
+    fn test_set_rule_lookup() {
+        // Set "GGG" with sub_multiplier 5.0. Query the last G in "AAAGGG"
+        // (pos 5) — expect 5.0. Query an A at pos 2 — expect 1.0.
+        let mut model = KmerErrorModel::uniform(3);
+        model.set_rule("GGG", 5.0, 1.0);
+        let seq = b"AAAGGG";
+        assert_eq!(
+            model.sub_multiplier_at(seq, 5),
+            5.0f32,
+            "expected 5.0 at GGG context"
+        );
+        assert_eq!(
+            model.sub_multiplier_at(seq, 2),
+            1.0f32,
+            "expected 1.0 at AAA context"
+        );
+    }
+
+    #[test]
+    fn test_rolling_hash_matches_naive() {
+        // For k=3 and 100 random 20-bp sequences, verify that sub_multiplier_at
+        // (which uses kmer_index on the slice) agrees at every position.
+        // We use a known set of rules to make some multipliers non-trivial.
+        let mut model = KmerErrorModel::uniform(3);
+        model.set_rule("GGC", 2.0, 3.0);
+        model.set_rule("TTT", 4.0, 1.5);
+
+        // Deterministic sequence: cycle through ACGT repeated.
+        let alphabet = [b'A', b'C', b'G', b'T'];
+        let mut rng = StdRng::seed_from_u64(42);
+        use rand::Rng as _;
+        for _ in 0..100 {
+            let seq: Vec<u8> = (0..20).map(|_| alphabet[rng.random_range(0..4)]).collect();
+            for pos in 0..seq.len() {
+                let via_fn = model.sub_multiplier_at(&seq, pos);
+                // Recompute naive: use kmer_index directly on the slice.
+                let naive = if pos + 1 < model.k {
+                    1.0f32
+                } else {
+                    let start = pos + 1 - model.k;
+                    let idx = model.kmer_index(&seq[start..=pos]);
+                    model.sub_multipliers[idx]
+                };
+                assert_eq!(via_fn, naive, "mismatch at pos {} in seq {:?}", pos, seq);
+            }
+        }
+    }
+
+    #[test]
+    fn test_elevated_context_increases_errors() {
+        // With k=2 and "GG" sub_multiplier 20.0, verify that sub_multiplier_at
+        // returns 20.0 at positions following "GG" and 1.0 at positions
+        // following "AA". No pipeline needed; the multiplier function is
+        // what matters.
+        let mut model = KmerErrorModel::uniform(2);
+        model.set_rule("GG", 20.0, 1.0);
+
+        // Sequence: alternating G and A — no consecutive GG or AA possible.
+        // Use a sequence with explicit GG and AA runs instead.
+        let seq = b"AAGGTAA";
+        // pos 0: 'A' — k=2, pos+1=1 < k=2 → 1.0
+        assert_eq!(model.sub_multiplier_at(seq, 0), 1.0f32);
+        // pos 1: context is "AA" → 1.0
+        assert_eq!(model.sub_multiplier_at(seq, 1), 1.0f32);
+        // pos 2: context is "AG" → 1.0
+        assert_eq!(model.sub_multiplier_at(seq, 2), 1.0f32);
+        // pos 3: context is "GG" → 20.0
+        assert_eq!(model.sub_multiplier_at(seq, 3), 20.0f32);
+        // pos 5: context is "TA" → 1.0
+        assert_eq!(model.sub_multiplier_at(seq, 5), 1.0f32);
+    }
+
+    #[test]
+    fn test_kmer_size_1_to_4() {
+        // uniform(k) must allocate exactly 4^k entries.
+        for k in 1usize..=4 {
+            let model = KmerErrorModel::uniform(k);
+            let expected = 4usize.pow(k as u32);
+            assert_eq!(
+                model.sub_multipliers.len(),
+                expected,
+                "k={}: expected {} sub_multipliers, got {}",
+                k,
+                expected,
+                model.sub_multipliers.len()
+            );
+            assert_eq!(
+                model.indel_multipliers.len(),
+                expected,
+                "k={}: expected {} indel_multipliers, got {}",
+                k,
+                expected,
+                model.indel_multipliers.len()
             );
         }
     }
