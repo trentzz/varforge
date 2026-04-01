@@ -323,6 +323,43 @@ quality:
 
 If `profile_path` is set, the empirical profile overrides `mean_quality` and `tail_decay`.
 
+#### `quality.sequencing_errors`
+
+The optional `sequencing_errors` block enables the full sequencing error model
+(`ErrorOrchestrator`). All fields are optional; unset fields default to zero or
+the flat model.
+
+```yaml
+quality:
+  sequencing_errors:
+    base_error_rate: 0.001          # flat per-base substitution rate (default: 0.0)
+    cycle_error_model: exponential  # "flat", "exponential", or "custom"
+    tail_start_fraction: 0.8        # cycle fraction where exponential tail begins (default: 0.8)
+    tail_rate_multiplier: 5.0       # error rate multiplier at the last cycle (default: 1.0)
+    cycle_error_tsv: null           # path to TSV with (cycle, error_rate) pairs (custom model only)
+    indel_rate: 0.00005             # per-base sequencing indel probability (default: 0.0)
+    indel_insertion_fraction: 0.5   # fraction of indels that are insertions (default: 0.5)
+    max_indel_length: 1             # maximum indel length, geometric distribution (default: 1)
+    kmer_length: 3                  # k-mer context length for context-dependent errors (1–5)
+    context_rules:                  # inline k-mer context multipliers
+      - context: GGG
+        sub_multiplier: 3.0         # substitution rate multiplier for this context
+        indel_multiplier: 2.0       # indel rate multiplier for this context
+    context_profile_path: null      # path to JSON k-mer error profile
+    r2_error_multiplier: 1.3        # R2 error rate = R1 rate × this value (default: 1.0)
+    r2_quality_offset: 2            # subtract this from R2 Phred scores (default: 0)
+    burst_rate: 0.0                 # per-base probability of starting a phasing burst (default: 0.0)
+    burst_length_mean: 5.0          # mean burst length, geometric distribution (default: 5.0)
+```
+
+**Platform presets** for `quality.sequencing_errors` are available via `--preset`:
+
+| Preset | Platform | base_error_rate | indel_rate | Notes |
+|--------|----------|-----------------|------------|-------|
+| `illumina_novaseq` | Illumina NovaSeq 6000/X | 0.001 | 0.00005 | Exponential tail, R2 asymmetry, GGG/GGC context elevation |
+| `pacbio_hifi` | PacBio HiFi (CCS) | 0.0001 | 0.001 | Flat curve, insertion-biased indels |
+| `nanopore_r10` | Oxford Nanopore R10.4 | 0.005 | 0.03 | Flat curve, higher indel rate at homopolymers |
+
 ---
 
 ### `tumour`

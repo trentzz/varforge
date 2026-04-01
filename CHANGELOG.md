@@ -8,6 +8,38 @@ Y-bump for breaking changes.
 
 ---
 
+## [Unreleased] — v0.2.0
+
+### Added
+
+- **Sequencing error model (`ErrorOrchestrator`)**. A unified error-injection
+  pipeline replaces the old flat quality model. It composes all error sources
+  in a single pass: base substitutions, cycle-position decay, k-mer context
+  modifiers, sequencing indels, strand bias, and phasing bursts.
+- **Cycle-position error rates**. Three cycle error curve models: `flat`
+  (uniform rate), `exponential` (tail rise), and `custom` (user-supplied TSV).
+  Configurable via `quality.sequencing_errors.cycle_error_model`.
+- **k-mer context errors**. Context-dependent error multipliers keyed on
+  surrounding sequence context (k = 1–5). Inline rules or an external JSON
+  profile via `quality.sequencing_errors.kmer_length` and `context_rules`.
+- **Sequencing indels**. Sequencing-level insertion and deletion errors
+  independent of somatic mutations, drawn from a geometric length distribution.
+  Configurable via `quality.sequencing_errors.indel_rate`.
+- **Strand bias model**. Per-read error rate asymmetry between R1 and R2 via
+  `quality.sequencing_errors.r2_error_multiplier` and `r2_quality_offset`.
+- **Correlated phasing burst errors**. Runs of correlated errors modelling
+  phasing failures, controlled by `quality.sequencing_errors.burst_rate` and
+  `burst_length_mean`.
+- **ProfileLearner CIGAR-based indel extraction**. `varforge learn-profile`
+  now counts CIGAR `I` and `D` operations per cycle (MAPQ ≥ 30 only) and
+  exports `indel_error_profile` and `cycle_error_rates` fields to the profile
+  JSON. Loading these fields auto-configures the `ErrorOrchestrator`.
+- **Three platform presets**: `illumina_novaseq`, `pacbio_hifi`, and
+  `nanopore_r10`. Each preset sets realistic error rates, indel rates, and
+  cycle models for the target platform.
+
+---
+
 ## [Unreleased] — v0.1.1
 
 ### Added
