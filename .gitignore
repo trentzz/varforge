@@ -25,7 +25,7 @@
 # Old benchmark output (superseded by benchmarking/)
 benchmark_output/
 
-# LaTeX build artifacts — intermediate PDFs (named PDFs go in docs/paper/pdfs/)
+# LaTeX build artifacts: intermediate PDFs (named PDFs go in docs/paper/pdfs/)
 docs/paper/main.pdf
 docs/paper/main_big.pdf
 docs/paper/main_2col.pdf
@@ -41,6 +41,8 @@ docs/paper/*.toc
 docs/paper/*.bcf
 docs/paper/*.run.xml
 docs/paper/main.bbl-SAVE-ERROR
+docs/paper/*.fdb_latexmk
+docs/paper/*.fls
 
 # Benchmark timing files (raw data, not needed in repo)
 benchmarking/results/tables/*.txt

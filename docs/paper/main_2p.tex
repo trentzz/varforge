@@ -37,14 +37,14 @@
 \begin{document}
 
 \title{\varforge: Synthetic Cancer Sequencing Data in a Single Rust Binary\\[0.2ex]
-       \small\texttt{v0.1.1}}
+       \small\texttt{v0.2.0}}
 \author{Trent Zeng}
 \date{}
 \maketitle
 
 \begin{abstract}
 \noindent
-No single tool integrates de-novo read generation, somatic variant spike-in, UMI/duplex simulation, cfDNA fragmentation, and library artefact injection.
+No single tool integrates de-novo read generation, somatic variant spike-in, UMI/duplex simulation, cfDNA fragmentation, library artefact injection, and platform-aware sequencing error models.
 \varforge{} fills this gap in a single Rust binary driven by YAML configuration, achieving ${\sim}7{,}000$ read pairs/s at 30x on a 12-thread workstation.
 No other published tool provides genome-wide UMI simulation or combines cfDNA fragmentation with variant spike-in.
 Variants are assigned by per-read Bernoulli sampling, not deterministic spike-in.
@@ -73,7 +73,7 @@ No tool combines cfDNA fragmentation with somatic variant spike-in.
 \section{Method}
 
 \varforge{} partitions the reference into chunks processed by Rayon workers.
-Each worker samples fragment lengths, positions reads, injects variants by Bernoulli sampling, applies quality scores, and tags UMI families.
+Each worker samples fragment lengths, positions reads, injects variants by Bernoulli sampling, applies quality scores and an optional layered sequencing error model, and tags UMI families.
 A bounded channel (default depth 64) decouples workers from the writer thread.
 Memory is bounded by concurrent batch state, not total dataset size.
 If a BED file of targets is provided, chunks are clipped to target boundaries before dispatch.
@@ -119,7 +119,7 @@ cfDNA fragment distributions and UMI family structure are not yet independently 
 Thread scaling only helps for compute-heavy workloads (UMI simulation); the I/O-bound WGS workload runs fastest at one thread.
 
 A four-scenario downstream benchmark (bwa-mem2, Mutect2, rtg-tools vcfeval) confirms that VarForge data exposes real caller behaviour: the SNV baseline achieves F1\,=\,0.857, while FFPE artefacts overwhelm stock Mutect2 with 113K false positives.
-Priority next steps: (1) end-to-end VAF validation via alignment and pileup; (2) cfDNA fragment distribution validation; (3) extending the variant caller benchmark to additional tools (VarDict, Strelka2, fgbio).
+Priority next steps: (1) end-to-end VAF validation via alignment and pileup; (2) cfDNA fragment distribution validation; (3) extending the variant caller benchmark to additional tools (VarDict, Strelka2, fgbio); (4) capturing the full joint quality correlation structure that the current layered error model does not yet reproduce.
 
 %%─────────────────────────────────────────────────────────────────────────
 \printbibliography[heading=bibintoc, title={References}]
