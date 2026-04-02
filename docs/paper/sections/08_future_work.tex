@@ -20,10 +20,11 @@ Current thread scaling data covers only the I/O-bound 10\,MB, 30x workload where
 Testing thread scaling for UMI simulation (where per-pair compute cost is higher) would characterise when Rayon parallelism provides real benefit.
 
 \textbf{Long-read sequencing.}
-Basic PacBio HiFi and Nanopore R10 quality models are implemented via chemistry presets, and the fragment sampling and variant injection modules are read-length agnostic.
-However, these profiles are parametric approximations, not learned from real data.
-Extending \texttt{learn-profile} to capture long-read error patterns would improve realism for long-read variant caller benchmarking.
+PacBio HiFi and Nanopore R10 presets now include sequencing error model parameters, and \texttt{learn-profile} can extract per-cycle error rates and indel rates from long-read BAMs.
+The remaining gap is long-read-specific error structure: homopolymer run-length errors (Nanopore) and CCS-specific artefacts (PacBio) are not yet modelled explicitly.
+Dedicated long-read error passes would improve realism for long-read variant caller benchmarking.
 
-\textbf{Enhanced error profiles.}
-The current \texttt{learn-profile} subcommand captures per-cycle quality distributions but does not reproduce the full correlation structure modelled by ReSeq\autocite{schmeing2021reseq}.
-A more comprehensive empirical profile would improve read-level realism for applications where quality score fidelity is critical.
+\textbf{Enhanced error profiles (partially addressed).}
+The v0.2.0 \texttt{ErrorOrchestrator} adds cycle-position errors, k-mer context errors, sequencing indels, strand bias, and phasing bursts.
+The \texttt{learn-profile} subcommand now extracts per-cycle error rates and indel rates from BAMs, enabling data-driven parameterisation.
+The remaining gap is the full joint correlation structure modelled by ReSeq\autocite{schmeing2021reseq}: pairwise quality dependencies across read positions are not yet captured.

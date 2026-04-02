@@ -36,15 +36,17 @@ Workers send completed batches through a bounded \texttt{crossbeam-channel} (def
   \node[box, fill=green!10, below left=1.0cm and -0.3cm of part, minimum width=1.9cm] (frag) {Fragment\\Sampling};
   \node[box, fill=green!10, right=0.4cm of frag, minimum width=1.9cm] (spike) {Variant\\Spike-In};
   \node[box, fill=green!10, right=0.4cm of spike, minimum width=1.9cm] (qual) {Quality\\Model};
-  \node[box, fill=green!10, right=0.4cm of qual, minimum width=1.9cm] (art) {UMI \&\\Artefacts};
+  \node[box, fill=green!10, right=0.4cm of qual, minimum width=1.9cm] (err) {Error\\Model};
+  \node[box, fill=green!10, right=0.4cm of err, minimum width=1.9cm] (art) {UMI \&\\Artefacts};
   \begin{scope}[on background layer]
-    \node[worker, fill=green!3, fit=(frag)(spike)(qual)(art),
+    \node[worker, fill=green!3, fit=(frag)(spike)(qual)(err)(art),
           label={[font=\footnotesize\itshape]above:Rayon workers (one per region)}] {};
   \end{scope}
   \draw[arr] (part) -- (frag);
   \draw[arr] (frag) -- (spike);
   \draw[arr] (spike) -- (qual);
-  \draw[arr] (qual) -- (art);
+  \draw[arr] (qual) -- (err);
+  \draw[arr] (err) -- (art);
   \node[box, fill=orange!25, below=1.2cm of spike, minimum width=3.0cm] (chan) {Bounded Channel\\(depth=64)};
   \draw[arr] (art) -- (chan);
   \node[box, fill=red!10, below=0.8cm of chan, minimum width=2.5cm] (writer) {Writer Thread};
@@ -66,6 +68,7 @@ Workers send completed batches through a bounded \texttt{crossbeam-channel} (def
 Fragment lengths follow $\mathcal{N}(\mu, \sigma^2)$ for standard libraries or a cfDNA mixture model (Section~\ref{sec:cfdna}).
 Start positions are drawn uniformly within each region.
 Two quality models are supported: a parametric model with per-cycle decay ($\bar{Q}(c) = Q_0 - \lambda c$), and an empirical model learned from a real BAM via \texttt{learn-profile}.
+The \texttt{learn-profile} subcommand extracts per-cycle quality distributions, per-cycle error rates, and indel rates from an existing BAM, enabling data-driven error profiles for any platform.
 
 \subsection{Stochastic VAF sampling}
 
@@ -128,6 +131,14 @@ Oxidative damage: G$>$T transversions with strand-specific bias.
 PCR errors: per-cycle substitution errors propagated through family genealogies.
 GC bias: fragment-level coverage modulation via a Gaussian curve centred at 50\% GC content, with a configurable severity parameter.
 
+\subsection{Sequencing error model}
+
+An optional layered error model (\texttt{quality.sequencing\_errors}) replaces quality-score-driven substitutions with a five-pass \texttt{ErrorOrchestrator}.
+The passes are: (1) cycle-position errors, where the error rate rises with sequencing cycle; (2) k-mer context errors, applying sequence-context-dependent mismatch rates; (3) sequencing indels, inserting or deleting bases at configurable rates; (4) strand bias, modulating error rates between forward and reverse reads; and (5) phasing bursts, injecting correlated errors that mimic polymerase slippage events.
+The model is configured through 14 fields in the \texttt{quality.sequencing\_errors} YAML block.
+Three built-in platform presets (\texttt{illumina\_novaseq}, \texttt{pacbio\_hifi}, \texttt{nanopore\_r10}) supply default parameters calibrated to each platform's characteristic error profile.
+The feature is fully opt-in: when the configuration block is absent, read generation falls back to v0.1.x quality-score-driven behaviour.
+
 \subsection{Germline variants and paired tumour-normal mode}
 
 Germline SNPs and indels can be added at population-frequency densities alongside somatic variants.
@@ -141,7 +152,7 @@ SV signature generators produce structural variants with size and type distribut
 
 \subsection{Chemistry presets}
 
-Built-in presets (\texttt{twist-umi-duplex}, \texttt{illumina-wgs}, \texttt{illumina-wes}, \texttt{illumina-ctdna}, \texttt{pacbio-hifi}, \texttt{nanopore-r10}) set UMI, fragment, and quality parameters appropriate for each platform.
+Built-in presets (\texttt{twist-umi-duplex}, \texttt{illumina-wgs}, \texttt{illumina-wes}, \texttt{illumina-ctdna}, \texttt{illumina-novaseq}, \texttt{pacbio-hifi}, \texttt{nanopore-r10}) set UMI, fragment, quality, and sequencing error parameters appropriate for each platform.
 Explicit YAML values always take precedence over preset defaults.
 
 \subsection{Implementation}

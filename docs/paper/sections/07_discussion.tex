@@ -19,6 +19,12 @@ A 1\,MB, 30x simulation completes in ${\sim}15$\,s (baseline, no features).
 Panel simulations (1\,MB, 200x, UMI) complete in ${\sim}3$\,min.
 Full WGS requires extrapolation, but the linear scaling and bounded memory make it feasible on a standard workstation.
 
+\textbf{Platform-aware error modelling.}
+The v0.2.0 sequencing error model layers five passes (cycle-position errors, k-mer context errors, sequencing indels, strand bias, phasing bursts) on top of quality-score generation.
+Platform presets for Illumina NovaSeq, PacBio HiFi, and Nanopore R10 supply calibrated defaults.
+The model is opt-in: absent configuration preserves backward compatibility.
+Combined with the expanded \texttt{learn-profile} subcommand, which now extracts indel rates and per-cycle error rates from BAMs, users can derive data-driven error profiles for any sequencing platform.
+
 \textbf{When threading helps.}
 The current benchmark workload (10\,MB, 30x, simple reads) is I/O-bound.
 FASTQ compression saturates the single writer thread; adding workers increases coordination overhead without accelerating the bottleneck.
