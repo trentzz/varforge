@@ -346,6 +346,15 @@ quality:
         sub_multiplier: 3.0         # substitution rate multiplier for this context
         indel_multiplier: 2.0       # indel rate multiplier for this context
     context_profile_path: null      # path to JSON k-mer error profile
+```
+
+> **Known limitation (v0.2.0).** When `cycle_error_model` is set to
+> `exponential` or `custom`, the cycle curve drives all per-base error
+> decisions and `context_rules` / `context_profile_path` have no effect.
+> Context rules are only active when `cycle_error_model: flat`. This
+> restriction will be lifted in a future release.
+
+```yaml
     r2_error_multiplier: 1.3        # R2 error rate = R1 rate × this value (default: 1.0)
     r2_quality_offset: 2            # subtract this from R2 Phred scores (default: 0)
     burst_rate: 0.0                 # per-base probability of starting a phasing burst (default: 0.0)

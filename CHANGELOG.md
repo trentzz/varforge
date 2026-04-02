@@ -8,7 +8,7 @@ Y-bump for breaking changes.
 
 ---
 
-## [Unreleased] — v0.2.0
+## [0.2.0] — 2026-04-02
 
 ### Added
 
@@ -37,6 +37,22 @@ Y-bump for breaking changes.
 - **Three platform presets**: `illumina_novaseq`, `pacbio_hifi`, and
   `nanopore_r10`. Each preset sets realistic error rates, indel rates, and
   cycle models for the target platform.
+
+### Bug fixes
+
+- **`burst_length_mean` validation**. Values less than or equal to zero are
+  now rejected at config parse time with a descriptive error. Previously a
+  zero or negative value caused a geometric sampler panic at runtime.
+- **Context error double-counting**. When both a cycle error curve and context
+  rules were configured, the context multiplier was applied twice: once when
+  computing the cycle rate and again when applying the context rule. The cycle
+  rate is now computed first and passed to the context stage unmodified, so
+  each error source is applied exactly once.
+- **Spurious substitutions from `sequencing_error_config`**. A stale
+  `base_error_rate` field on the inner config struct was being applied as a
+  second independent substitution pass after the orchestrator had already
+  injected errors, producing roughly double the configured substitution rate.
+  The redundant field is now cleared before the orchestrator runs.
 
 ---
 
