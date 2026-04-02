@@ -97,9 +97,14 @@ impl ErrorOrchestrator {
             None
         };
 
-        // The context base rate mirrors the flat (pre-tail) rate, or the
-        // configured base_error_rate if no cycle curve is active.
-        let context_base_rate = seq_err_cfg.base_error_rate.unwrap_or(0.0);
+        // The context base rate is only non-zero when no cycle curve is active.
+        // When a cycle curve is present it already handles the base substitution
+        // rate; setting context_base_rate to 0.0 prevents double-counting.
+        let context_base_rate = if cycle_curve.is_none() {
+            seq_err_cfg.base_error_rate.unwrap_or(0.0)
+        } else {
+            0.0 // cycle curve handles the base rate; do not add a second pass
+        };
 
         // --- Indel model ---
         let indel_model = if has_indel {

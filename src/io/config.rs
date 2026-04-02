@@ -1334,6 +1334,40 @@ pub fn validate(config: &Config) -> Result<()> {
                 rate
             );
         }
+        if let Some(mean) = se.burst_length_mean {
+            anyhow::ensure!(
+                mean >= 1.0,
+                "sequencing_errors.burst_length_mean must be >= 1.0 (got {})",
+                mean
+            );
+        }
+        if let Some(max_len) = se.max_indel_length {
+            anyhow::ensure!(
+                max_len >= 1,
+                "sequencing_errors.max_indel_length must be >= 1 (got {})",
+                max_len
+            );
+        }
+        if let Some(k) = se.kmer_length {
+            for rule in &se.context_rules {
+                anyhow::ensure!(
+                    rule.context.len() == k,
+                    "sequencing_errors.context_rules: context '{}' has length {} but kmer_length is {}",
+                    rule.context,
+                    rule.context.len(),
+                    k
+                );
+            }
+        }
+        for rule in &se.context_rules {
+            anyhow::ensure!(
+                rule.context
+                    .chars()
+                    .all(|c| matches!(c, 'A' | 'C' | 'G' | 'T' | 'a' | 'c' | 'g' | 't')),
+                "sequencing_errors.context_rules: context '{}' contains non-ACGT characters",
+                rule.context
+            );
+        }
         // r2_quality_offset: any i8 is valid (no constraint needed).
     }
 
@@ -1759,6 +1793,134 @@ quality:
         assert!(
             err.to_string().contains("indel_rate"),
             "error should mention 'indel_rate', got: {}",
+            err
+        );
+    }
+
+    /// `burst_length_mean < 1.0` must fail validation; >= 1.0 must pass.
+    #[test]
+    fn test_burst_length_mean_validation() {
+        // mean < 1.0 should be rejected.
+        let yaml_bad = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+quality:
+  sequencing_errors:
+    burst_rate: 0.01
+    burst_length_mean: 0.5
+"#;
+        let f = write_yaml(yaml_bad);
+        let cfg = load(f.path()).unwrap();
+        let err = validate(&cfg).unwrap_err();
+        assert!(
+            err.to_string().contains("burst_length_mean"),
+            "error should mention 'burst_length_mean', got: {}",
+            err
+        );
+
+        // mean >= 1.0 should be accepted.
+        let yaml_ok = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+quality:
+  sequencing_errors:
+    burst_rate: 0.01
+    burst_length_mean: 3.0
+"#;
+        let f = write_yaml(yaml_ok);
+        let cfg = load(f.path()).unwrap();
+        assert!(
+            validate(&cfg).is_ok(),
+            "burst_length_mean >= 1.0 should pass validation"
+        );
+    }
+
+    /// `max_indel_length: 0` must fail validation; >= 1 must pass.
+    #[test]
+    fn test_max_indel_length_validation() {
+        let yaml_bad = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+quality:
+  sequencing_errors:
+    indel_rate: 0.001
+    max_indel_length: 0
+"#;
+        let f = write_yaml(yaml_bad);
+        let cfg = load(f.path()).unwrap();
+        let err = validate(&cfg).unwrap_err();
+        assert!(
+            err.to_string().contains("max_indel_length"),
+            "error should mention 'max_indel_length', got: {}",
+            err
+        );
+
+        let yaml_ok = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+quality:
+  sequencing_errors:
+    indel_rate: 0.001
+    max_indel_length: 1
+"#;
+        let f = write_yaml(yaml_ok);
+        let cfg = load(f.path()).unwrap();
+        assert!(
+            validate(&cfg).is_ok(),
+            "max_indel_length >= 1 should pass validation"
+        );
+    }
+
+    /// context_rules with wrong k-mer length must fail validation.
+    #[test]
+    fn test_context_rules_kmer_length_mismatch_fails() {
+        let yaml = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+quality:
+  sequencing_errors:
+    kmer_length: 3
+    context_rules:
+      - context: "AC"
+        sub_multiplier: 2.0
+        indel_multiplier: 1.0
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        let err = validate(&cfg).unwrap_err();
+        assert!(
+            err.to_string().contains("kmer_length"),
+            "error should mention 'kmer_length', got: {}",
+            err
+        );
+    }
+
+    /// context_rules with non-ACGT characters must fail validation.
+    #[test]
+    fn test_context_rules_non_acgt_fails() {
+        let yaml = r#"
+reference: /dev/null
+output:
+  directory: /tmp/out
+quality:
+  sequencing_errors:
+    kmer_length: 3
+    context_rules:
+      - context: "ACN"
+        sub_multiplier: 2.0
+        indel_multiplier: 1.0
+"#;
+        let f = write_yaml(yaml);
+        let cfg = load(f.path()).unwrap();
+        let err = validate(&cfg).unwrap_err();
+        assert!(
+            err.to_string().contains("non-ACGT"),
+            "error should mention 'non-ACGT', got: {}",
             err
         );
     }

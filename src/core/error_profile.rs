@@ -188,10 +188,12 @@ impl EmpiricalQualityModel {
             return None;
         }
         Some(SequencingErrorConfig {
+            // The empirical quality model handles substitutions via inject_errors;
+            // setting base_error_rate here would add a spurious second substitution pass.
+            base_error_rate: None,
             indel_rate: Some(total_indel_rate),
             indel_insertion_fraction: self.indel_insertion_fraction,
             max_indel_length: Some(3),
-            base_error_rate: Some(total_indel_rate),
             ..Default::default()
         })
     }
@@ -683,6 +685,13 @@ mod tests {
             cfg.max_indel_length,
             Some(3),
             "max_indel_length should default to 3"
+        );
+
+        // The empirical quality model handles substitutions; base_error_rate
+        // must be None to avoid a spurious second substitution pass.
+        assert!(
+            cfg.base_error_rate.is_none(),
+            "base_error_rate must be None when built from an empirical profile"
         );
     }
 }
